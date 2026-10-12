@@ -525,13 +525,14 @@
                     <summary class="icon-btn" aria-label="Account menu">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
                         <span class="icon-label">{{ user.first_name|default:user.username|truncatechars:14 }}</span>
-                        <span class="count" data-live="alerts" {% if not unread_notifications_count and not buyer_unread_messages %}hidden{% endif %}>{{ unread_notifications_count|add:buyer_unread_messages }}</span>
+                        <span class="count" data-live="alerts" {% if not unread_notifications_count and not header_messages %}hidden{% endif %}>{{ unread_notifications_count|add:header_messages }}</span>
                     </summary>
                     <div class="menu-panel">
                         <div class="menu-head" data-no-translate><strong>{{ user.get_full_name|default:user.username }}</strong><span class="muted small">{{ user.email }}</span></div>
                         <a href="{% url 'my_orders' %}">{{ t.my_orders }}</a>
                         <a href="{% url 'notifications_list' %}">Notifications<span data-live-paren="notifications">{% if unread_notifications_count %} ({{ unread_notifications_count }}){% endif %}</span></a>
-                        <a href="{% url 'messages_inbox' %}">{{ t.messages }}<span data-live-paren="messages">{% if buyer_unread_messages %} ({{ buyer_unread_messages }}){% endif %}</span></a>
+                        {% if is_seller %}<a href="{% url 'seller_messages' %}"><strong>Customer messages</strong><span data-live-paren="seller_messages">{% if seller_unread_messages %} ({{ seller_unread_messages }}){% endif %}</span></a>{% endif %}
+                        <a href="{% url 'messages_inbox' %}">{% if is_seller %}My messages to sellers{% else %}{{ t.messages }}{% endif %}<span data-live-paren="messages">{% if buyer_unread_messages %} ({{ buyer_unread_messages }}){% endif %}</span></a>
                         {% if brand.referral_enabled %}<a href="{% url 'referrals' %}">{{ t.invite_friends }}</a>{% endif %}
                         <a href="{% url 'profile' %}">Account &amp; addresses</a>
                         <a href="{% url 'payment_methods' %}">Saved cards</a>
@@ -730,13 +731,19 @@
             setTimeout(() => t.classList.add('show'), delay);
             setTimeout(() => hideToast(t), delay + life);
         }
-        function showToast(text, type) {
+        function showToast(text, type, link) {
             const c = document.getElementById('toast-container');
             const t = document.createElement('div');
             t.className = 'toast ' + (type || 'success');
             t.textContent = text;
+            if (link) {
+                t.style.cursor = 'pointer';
+                t.title = 'Open';
+                t.addEventListener('click', () => { location.href = link; });
+                const go = document.createElement('span'); go.className = 'toast-go'; go.textContent = ' →'; go.setAttribute('aria-hidden', 'true'); t.appendChild(go);
+            }
             c.appendChild(t);
-            armToast(t, 20, 3800);
+            armToast(t, 20, link ? 7000 : 3800);
         }
         document.querySelectorAll('#toast-container .toast').forEach(function (t, i) {
             armToast(t, 80 + i * 90, (t.textContent.length > 90 ? 6500 : 4500));
@@ -1056,7 +1063,7 @@
         function W(k) { var el = document.querySelector('#lm-words [data-w="' + k + '"]'); return el ? el.textContent : k; }
         var baseTitle = document.title.replace(/^\(\d+\)\s*/, '');
         function paint(d) {
-            var total = d.notifications + d.messages, all = total + d.seller_messages;
+            var total = d.notifications + d.messages + d.seller_messages, all = total;
             document.querySelectorAll('[data-live]').forEach(function (el) {
                 var key = el.dataset.live, n = key === 'alerts' ? total : (d[key] || 0);
                 if (String(n) !== el.textContent.trim()) { el.classList.add('pulse'); setTimeout(function () { el.classList.remove('pulse'); }, 400); }
@@ -1081,11 +1088,12 @@
                 if (news.length) {
                     var top = news[news.length - 1];
                     Alert.sound();
-                    if (!document.hidden && window.showToast) showToast(top.text + (news.length > 1 ? ' (+' + (news.length - 1) + ' more)' : ''), 'success');
+                    if (!document.hidden && window.showToast) showToast(top.text + (news.length > 1 ? ' (+' + (news.length - 1) + ' more)' : ''), 'success', top.link || '{% url "notifications_list" %}');
                     if (document.hidden) Alert.desktop(top.text, '', top.link);
                 } else if (moreMsgs && !onChat) {
                     Alert.sound();
-                    if (!document.hidden && window.showToast) showToast(W('new_message'), 'success');
+                    var msgLink = d.seller_messages > counts.seller_messages ? '{% url "seller_messages" %}' : '{% url "messages_inbox" %}';
+                    if (!document.hidden && window.showToast) showToast(W('new_message'), 'success', msgLink);
                     if (document.hidden) Alert.desktop(W('new_message'), '', d.seller_messages > counts.seller_messages ? '{% url "seller_messages" %}' : '{% url "messages_inbox" %}');
                 }
                 if (d.messages !== counts.messages || d.seller_messages !== counts.seller_messages) refreshList();

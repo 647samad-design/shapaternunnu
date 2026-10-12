@@ -110,6 +110,7 @@ class Product(models.Model):
         ("approved", "Approved"),
         ("pending", "Pending review"),
         ("rejected", "Rejected"),
+        ("archived", "Removed by seller"),
     ]
     approval_status = models.CharField(max_length=20, choices=APPROVAL_CHOICES, default="approved", db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -432,6 +433,13 @@ class Order(models.Model):
         return reverse("track_shipment", args=[self.shipment_number]) if self.shipment_number else ""
 
     @property
+    def items_on_the_way(self):
+        """True when some items have shipped but aren't marked delivered."""
+        if self.status in ("cancelled", "delivered", "pending"):
+            return False
+        return self.status == "shipped" or any(i.fulfillment_status == "handed_to_courier" for i in self.items.all())
+
+    @property
     def card_label(self):
         return f"{self.card_brand.title()} •••• {self.card_last4}" if self.card_last4 else ""
 
@@ -611,6 +619,7 @@ class OrderItem(models.Model):
         ("delivered", "Delivered"),
     ]
     fulfillment_status = models.CharField(max_length=20, choices=FULFILLMENT_CHOICES, default="pending")
+    delivered_at = models.DateTimeField(null=True, blank=True)
 
     @property
     def subtotal(self):

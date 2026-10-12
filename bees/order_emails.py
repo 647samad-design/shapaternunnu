@@ -34,6 +34,8 @@ SUBJECTS = {
     "shipped": "Your order #{id} is on its way",
     "delivered": "Your order #{id} has been delivered",
     "cancelled": "Your order #{id} has been cancelled",
+    "item_shipped": "Part of your order #{id} is on its way",
+    "item_delivered": "Part of your order #{id} has been delivered",
 }
 
 
@@ -71,8 +73,9 @@ def default_delivery_date(order=None, country=None):
     return add_business_days(start, days)
 
 
-def send(order, kind):
-    """Renders and sends one order email. Never raises."""
+def send(order, kind, item_ids=None):
+    """Renders and sends one order email. Never raises. ``item_ids`` limits
+    the email to some items (one seller's package)."""
     recipient = order.contact_email
     if not recipient or kind not in SUBJECTS:
         return False
@@ -94,6 +97,7 @@ def send(order, kind):
                     "review_url": absolute(reverse("product_detail", args=[item.product_id])) if item.product_id else "",
                 }
                 for item in order.items.all()
+                if not item_ids or item.pk in item_ids
             ],
         }
         html = render_to_string("bees/emails/order_update.html", context)
@@ -106,6 +110,24 @@ def send(order, kind):
         from .alerts import email_failed
         email_failed(SUBJECTS.get(kind, kind).format(id=order.pk), recipient, exc)
         return False
+
+
+def send_later(order, kind, item_ids=None):
+    """Sends after the database change is saved and the page has been
+    delivered, so nobody waits for the mail server."""
+    order_id = order.pk
+
+    def _queue():
+        from .background import after_response
+        from .models import Order
+
+        def _send():
+            fresh = Order.objects.filter(pk=order_id).first()
+            if fresh:
+                send(fresh, kind, item_ids)
+        after_response(_send)
+
+    transaction.on_commit(_queue)
 
 
 def status_changed(order, old_status, new_status):
@@ -122,4 +144,8 @@ def status_changed(order, old_status, new_status):
         if fresh and fresh.status == new_status:
             send(fresh, new_status)
 
-    transaction.on_commit(_send)
+    def _queue():
+        from .background import after_response
+        after_response(_send)
+
+    transaction.on_commit(_queue)

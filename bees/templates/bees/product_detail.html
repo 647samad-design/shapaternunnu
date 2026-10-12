@@ -146,7 +146,7 @@
         </div>
 
         <div class="buybox">
-            <h1>{{ product.name }}</h1>
+            <h1>{{ product.name }}</h1>{% if product.approval_status == "archived" %}<div class="callout" style="margin:8px 0;">This product is no longer sold. You can still review it if you bought it.</div>{% endif %}
             {% if product.seller_name %}<p class="seller-line">Sold by <a href="{% url 'store_page' product.seller_name %}" data-no-translate>{{ product.seller_name }}</a>{% if product.seller_account.has_badge %} <span class="pro-badge">★ Pro seller</span>{% endif %}{% if product.seller_account.verified_at %} <span class="seller-badge verified">✓ {{ t.verified_seller }}</span>{% endif %}{% if product.seller_account.top_seller %} <span class="seller-badge top">★ {{ t.top_seller }}</span>{% endif %}</p>{% endif %}
             {% if product.rating_count %}
             <div class="rating-line"><span class="stars" aria-hidden="true">{{ product.average_rating|stars }}</span><strong>{{ product.average_rating }}</strong><a href="#reviews">{{ product.rating_count }} review{{ product.rating_count|pluralize }}</a></div>
@@ -305,7 +305,7 @@
                 </div>
                 {% endif %}
                 {% if can_review %}
-                <form method="post" class="stack">
+                <form method="post" class="stack" id="write-review" style="scroll-margin-top:110px;">
                     {% csrf_token %}
                     <fieldset style="border:0;">
                         <legend class="label" style="margin-bottom:6px;">Your rating</legend>

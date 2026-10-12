@@ -256,11 +256,30 @@ def order_detail(request, pk):
             else:
                 _log(request, f"Cancelled order #{order.id} from store admin")
                 messages.success(request, f"Order #{order.id} cancelled. Stock returned" + (" and payment refunded." if order.payment_status == "refunded" else "."))
+        elif action == "item_status":
+            from . import fulfilment
+            item = get_object_or_404(order.items, pk=request.POST.get("item"))
+            try:
+                changed, moved = fulfilment.set_items_status([item], request.POST.get("fulfillment_status", ""), user=request.user, by_staff=True)
+            except fulfilment.FulfilmentError as exc:
+                messages.error(request, str(exc))
+            else:
+                if changed:
+                    messages.success(request, f"'{item.product_name}' updated." + (f" The order is now {moved[0][1]} and the customer has been told." if moved else ""))
         elif action == "update":
             new_status = request.POST.get("status", order.status)
             if new_status not in dict(Order.STATUS_CHOICES) or new_status == "cancelled":
                 new_status = order.status
             was = order.status
+            if was == "delivered" and new_status != "delivered":
+                messages.error(request, "A delivered order can't go back to an earlier step. Use Returns if the customer sends something back.")
+                return redirect("manage_order", pk=pk)
+            if new_status in ("shipped", "delivered") and new_status != was:
+                from .fulfilment import blocked_reason
+                reason = blocked_reason(order)
+                if reason:
+                    messages.error(request, reason)
+                    return redirect("manage_order", pk=pk)
             order.tracking_number = request.POST.get("tracking_number", "").strip()[:60]
             order.courier_name = request.POST.get("courier_name", "").strip()[:60]
             turl = request.POST.get("tracking_url", "").strip()[:300]
@@ -281,7 +300,7 @@ def order_detail(request, pk):
                 if new_status == "shipped":
                     order.items.exclude(fulfillment_status="delivered").update(fulfillment_status="handed_to_courier")
                 if new_status == "delivered":
-                    order.items.update(fulfillment_status="delivered")
+                    order.items.exclude(fulfillment_status="delivered").update(fulfillment_status="delivered", delivered_at=timezone.now())
             emailed = new_status != was and new_status in ("confirmed", "shipped", "delivered") and order.contact_email
             messages.success(request, "Order updated." + (" The customer has been emailed." if emailed else ""))
         _refresh_attention()
@@ -290,6 +309,7 @@ def order_detail(request, pk):
     return _render(request, "order_detail.html", {
         "section": "orders", "order": order, "items": items,
         "status_choices": [c for c in Order.STATUS_CHOICES if c[0] != "cancelled"],
+        "fulfilment_choices": OrderItem.FULFILLMENT_CHOICES,
         "returns": ReturnRequest.objects.filter(order_item__order=order).select_related("order_item"),
         "stripe_test": str(getattr(payments.settings, "STRIPE_SECRET_KEY", "")).startswith("sk_test"),
     })

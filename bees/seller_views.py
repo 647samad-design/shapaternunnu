@@ -301,34 +301,15 @@ def order_detail(request, order_id):
 
 
 def _set_items_status(request, items, new_status):
-    """Moves the given items to ``new_status``. Returns how many changed and
-    the orders that moved forward as a result."""
-    from .views import sync_order_status_from_items
-    rank = {key: i for i, (key, _) in enumerate(OrderItem.FULFILLMENT_CHOICES)}
-    changed, moved, orders_seen = 0, [], {}
-    for item in items:
-        order = item.order
-        if order.status == "cancelled" or order.payment_status in ("pending", "failed", "refunded"):
-            continue
-        if order.payment_method == "cod" and not order.cod_confirmed:
-            continue  # unconfirmed cash order: don't pack or ship yet
-        # Bulk actions only move items forward (a delivered item is never
-        # sent back to "packed" by a mass update).
-        if rank[new_status] > rank[item.fulfillment_status]:
-            item.fulfillment_status = new_status
-            item.save(update_fields=["fulfillment_status"])
-            changed += 1
-            orders_seen[order.pk] = order
-    from .models import OrderEvent
-    for order in orders_seen.values():
-        result = sync_order_status_from_items(order)
-        if result:
-            moved.append((order.pk, result))
-        elif new_status == "packed":
-            OrderEvent.objects.create(order=order, kind="packed", text="Packed and ready for the courier")
-        elif new_status == "handed_to_courier":
-            OrderEvent.objects.create(order=order, kind="shipped", text="Part of the order was handed to the courier")
-    return changed, moved
+    """Moves the given items forward to ``new_status`` (bulk actions never
+    move an item back). Returns how many changed and the orders that moved
+    forward as a result."""
+    from . import fulfilment
+    try:
+        changed, moved = fulfilment.set_items_status(items, new_status, user=request.user, forward_only=True)
+    except fulfilment.FulfilmentError:
+        return 0, []
+    return len(changed), moved
 
 
 @seller_required(approved=True)
@@ -363,14 +344,14 @@ def ship_order(request, order_id):
         )
     changed, moved = _set_items_status(request, items, new_status)
     label = dict(OrderItem.FULFILLMENT_CHOICES)[new_status].lower()
-    note = f" The order is now {moved[0][1]} and the customer has been emailed." if moved else ""
+    note = (f" The order is now {moved[0][1]} and the customer has been told." if moved
+            else " The customer has been told." if changed and new_status in ("handed_to_courier", "delivered") else "")
     if changed:
         messages.success(request, f"Marked {changed} item{'s' if changed != 1 else ''} as {label}.{note}")
     elif courier or tracking:
         messages.success(request, "Tracking details saved.")
     else:
         messages.info(request, "Nothing to change.")
-    AuditLog.objects.create(user=request.user, action=f"Seller {seller.display_name}: order #{order.id} items -> {new_status}")
     return redirect("seller_order", order_id=order.id)
 
 
@@ -414,7 +395,7 @@ PRODUCT_TABS = [
 @seller_required()
 def products(request):
     seller = request.seller
-    base = seller.products.all()
+    base = seller.products.exclude(approval_status="archived")
     filters = {
         "all": base, "live": base.live(), "review": base.filter(approval_status="pending"),
         "rejected": base.filter(approval_status="rejected"), "low": base.filter(stock__gt=0, stock__lte=5),

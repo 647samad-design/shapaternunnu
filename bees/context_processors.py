@@ -103,8 +103,14 @@ def roles(request):
     if user.is_staff:
         from .manage_views import attention_counts
         attention = attention_counts()["total"]
-    from .messaging import unread_for_buyer
-    return {"is_seller": is_seller, "admin_attention": attention, "buyer_unread_messages": unread_for_buyer(user)}
+    from .messaging import seller_for, unread_for_buyer, unread_for_seller
+    seller_unread = 0
+    if is_seller:
+        seller = seller_for(user)
+        seller_unread = unread_for_seller(seller) if seller else 0
+    buyer_unread = unread_for_buyer(user)
+    return {"is_seller": is_seller, "admin_attention": attention, "buyer_unread_messages": buyer_unread,
+            "seller_unread_messages": seller_unread, "header_messages": buyer_unread + seller_unread}
 
 
 def unread_notifications(request):

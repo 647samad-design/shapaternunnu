@@ -3468,6 +3468,151 @@ class BuyerSellerMessageTests(TestCase):
         self.assertFalse(Conversation.objects.exists())
 
 
+class FulfilmentFlowTests(TestCase):
+    """Multi-seller orders: each package is tracked, told and reviewable."""
+    def setUp(self):
+        from django.core import mail
+        self.mail = mail
+        self.owner_a = User.objects.create_user("sella", "a@example.com", "pass12345")
+        self.a = SellerAccount.objects.create(user=self.owner_a, business_name="A Shop", status="approved")
+        self.owner_b = User.objects.create_user("sellb", "b@example.com", "pass12345")
+        self.b = SellerAccount.objects.create(user=self.owner_b, business_name="B Shop", status="approved")
+        self.staff = User.objects.create_superuser("boss", "boss@example.com", "pass12345")
+        self.buyer = User.objects.create_user("cust", "cust@example.com", "pass12345")
+        self.pa = make_product(name="Alpha Mug", seller_account=self.a, seller_name="A Shop")
+        self.pb = make_product(name="Beta Bowl", seller_account=self.b, seller_name="B Shop")
+        self.pstore = make_product(name="Store Tea")
+        self.order = Order.objects.create(user=self.buyer, email=self.buyer.email, full_name="Cus", address="1 St", city="X",
+                                          country="GB", payment_method="card", payment_status="paid", status="confirmed")
+        self.items = {}
+        for p in (self.pa, self.pb, self.pstore):
+            it = OrderItem(order=self.order, product=p, product_name=p.name, price=10, quantity=1)
+            it.apply_commission(p.seller_account)
+            it.save()
+            self.items[p.name] = it
+
+    def _seller_set(self, user, item, status):
+        self.client.force_login(user)
+        return self.client.post(reverse("update_fulfillment_status", args=[item.id]), {"fulfillment_status": status})
+
+    def test_seller_delivery_lets_buyer_review_and_tells_everyone(self):
+        self.mail.outbox.clear()
+        with self.captureOnCommitCallbacks(execute=True):
+            self._seller_set(self.owner_a, self.items["Alpha Mug"], "delivered")
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, "confirmed")  # other packages still on their way
+        item = OrderItem.objects.get(pk=self.items["Alpha Mug"].pk)
+        self.assertIsNotNone(item.delivered_at)
+        self.assertTrue(Notification.objects.filter(user=self.buyer, message__icontains="Alpha Mug").exists())
+        self.assertTrue(Notification.objects.filter(user=self.staff, message__icontains="A Shop marked Alpha Mug").exists())
+        self.assertTrue(any("Part of your order" in m.subject for m in self.mail.outbox))
+        self.assertTrue(self.order.events.filter(text__icontains="Delivered: Alpha Mug").exists())
+        # buyer can review the delivered item, not the others
+        self.client.force_login(self.buyer)
+        self.assertEqual(self.client.get(reverse("product_detail", args=[self.pa.id])).context["review_block"], "")
+        self.assertNotEqual(self.client.get(reverse("product_detail", args=[self.pb.id])).context["review_block"], "")
+        page = self.client.get(reverse("my_orders"))
+        self.assertContains(page, "Rate this item")
+        self.client.post(reverse("product_detail", args=[self.pa.id]), {"rating": "5", "comment": "Lovely mug"})
+        self.assertContains(self.client.get(reverse("my_orders")), "Your review")
+
+    def test_whole_order_delivered_once_all_packages_arrive(self):
+        self._seller_set(self.owner_a, self.items["Alpha Mug"], "delivered")
+        self._seller_set(self.owner_b, self.items["Beta Bowl"], "delivered")
+        self.client.force_login(self.staff)
+        self.client.post(reverse("manage_order", args=[self.order.id]), {"action": "item_status", "item": self.items["Store Tea"].id, "fulfillment_status": "delivered"})
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, "delivered")
+        self.assertTrue(Notification.objects.filter(user=self.buyer, message__icontains="is now Delivered").exists())
+
+    def test_sellers_only_touch_their_own_items_and_cannot_undo_delivery(self):
+        r = self._seller_set(self.owner_a, self.items["Beta Bowl"], "delivered")
+        self.assertEqual(r.status_code, 404)
+        self._seller_set(self.owner_a, self.items["Alpha Mug"], "delivered")
+        self._seller_set(self.owner_a, self.items["Alpha Mug"], "pending")
+        self.assertEqual(OrderItem.objects.get(pk=self.items["Alpha Mug"].pk).fulfillment_status, "delivered")
+        self.client.force_login(self.owner_a)
+        self.assertEqual(self.client.get(reverse("update_fulfillment_status", args=[self.items["Alpha Mug"].id])).status_code, 405)
+
+    def test_unpaid_unconfirmed_and_pending_sellers_are_blocked(self):
+        Order.objects.filter(pk=self.order.pk).update(payment_status="pending")
+        self._seller_set(self.owner_a, self.items["Alpha Mug"], "handed_to_courier")
+        self.assertEqual(OrderItem.objects.get(pk=self.items["Alpha Mug"].pk).fulfillment_status, "pending")
+        Order.objects.filter(pk=self.order.pk).update(payment_status="not_applicable", payment_method="cod", cod_confirmed=False)
+        self._seller_set(self.owner_a, self.items["Alpha Mug"], "handed_to_courier")
+        self.assertEqual(OrderItem.objects.get(pk=self.items["Alpha Mug"].pk).fulfillment_status, "pending")
+        Order.objects.filter(pk=self.order.pk).update(payment_status="paid", payment_method="card")
+        SellerAccount.objects.filter(pk=self.a.pk).update(status="suspended")
+        self._seller_set(self.owner_a, self.items["Alpha Mug"], "handed_to_courier")
+        self.assertEqual(OrderItem.objects.get(pk=self.items["Alpha Mug"].pk).fulfillment_status, "pending")
+
+    def test_customer_confirms_received(self):
+        self._seller_set(self.owner_a, self.items["Alpha Mug"], "handed_to_courier")
+        self.client.force_login(self.buyer)
+        self.assertContains(self.client.get(reverse("my_orders")), "received it")
+        self.client.post(reverse("confirm_received", args=[self.order.id]))
+        self.assertEqual(OrderItem.objects.get(pk=self.items["Alpha Mug"].pk).fulfillment_status, "delivered")
+        self.assertTrue(Notification.objects.filter(user=self.owner_a, message__icontains="confirmed they received").exists())
+        self.assertTrue(Notification.objects.filter(user=self.staff, message__icontains="customer confirmed").exists())
+        other = User.objects.create_user("nosy", "n@example.com", "pass12345")
+        self.client.force_login(other)
+        self.assertEqual(self.client.post(reverse("confirm_received", args=[self.order.id])).status_code, 404)
+
+    def test_admin_cannot_move_delivered_order_back(self):
+        self.client.force_login(self.staff)
+        url = reverse("manage_order", args=[self.order.id])
+        self.client.post(url, {"action": "update", "status": "delivered"})
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, "delivered")
+        self.assertTrue(all(i.delivered_at for i in self.order.items.all()))
+        self.client.post(url, {"action": "update", "status": "pending"})
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, "delivered")
+
+    def test_removing_a_sold_product_keeps_history(self):
+        self.client.force_login(self.owner_a)
+        self.client.post(reverse("seller_delete_product", args=[self.pa.id]))
+        self.pa.refresh_from_db()
+        self.assertEqual(self.pa.approval_status, "archived")
+        self.assertFalse(Product.objects.live().filter(pk=self.pa.pk).exists())
+        self.client.force_login(self.buyer)
+        self.assertContains(self.client.get(reverse("product_detail", args=[self.pa.id])), "no longer sold")
+        stranger = User.objects.create_user("str", "str@example.com", "pass12345")
+        self.client.force_login(stranger)
+        self.assertEqual(self.client.get(reverse("product_detail", args=[self.pa.id])).status_code, 404)
+        unsold = make_product(name="Never sold", seller_account=self.a)
+        self.client.force_login(self.owner_a)
+        self.client.post(reverse("seller_delete_product", args=[unsold.id]))
+        self.assertFalse(Product.objects.filter(pk=unsold.pk).exists())
+
+    def test_seller_team_gets_customer_messages(self):
+        from bees.models import OrganizationMember
+        helper = User.objects.create_user("helper", "h@example.com", "pass12345")
+        OrganizationMember.objects.create(organization=self.a, user=helper, role="staff")
+        conv = Conversation.objects.create(buyer=self.buyer, seller=self.a)
+        self.client.force_login(self.buyer)
+        self.client.post(reverse("message_send", args=[conv.id]), {"body": "Hi!"}, HTTP_X_REQUESTED_WITH="fetch")
+        for u in (self.owner_a, helper):
+            self.assertTrue(Notification.objects.filter(user=u, link=reverse("seller_conversation", args=[conv.id])).exists())
+        self.client.force_login(helper)
+        page = self.client.get(reverse("home"))
+        self.assertContains(page, "Customer messages")
+        self.assertContains(page, reverse("seller_messages"))
+        self.assertContains(self.client.get(reverse("messages_inbox")), "Messages from your customers")
+        self.assertContains(self.client.get(reverse("seller_conversation", args=[conv.id])), "Hi!")
+        self.assertEqual(self.client.get(reverse("live")).json()["seller_messages"], 0)  # read just now
+
+    def test_team_staff_cannot_reach_money_pages(self):
+        from bees.models import OrganizationMember
+        helper = User.objects.create_user("helper2", "h2@example.com", "pass12345")
+        OrganizationMember.objects.create(organization=self.a, user=helper, role="staff")
+        self.client.force_login(helper)
+        for name in ("seller_earnings", "seller_team", "seller_plan", "seller_store_settings"):
+            r = self.client.get(reverse(name))
+            self.assertNotEqual(r.status_code, 200, name)
+        self.assertEqual(self.client.get(reverse("seller_orders")).status_code, 200)
+
+
 class LiveUpdatesTests(TestCase):
     def setUp(self):
         from django.core.cache import caches

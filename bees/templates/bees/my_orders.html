@@ -22,6 +22,7 @@
     .cancel-box > summary::-webkit-details-marker { display: none; }
     .cancel-form { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; width: min(300px, 86vw); display: grid; gap: 8px; padding: 14px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); box-shadow: 0 16px 40px rgba(20,26,31,.16); }
     .cancel-form label { font-weight: 700; }
+    .oi-step { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
     html[dir="rtl"] .cancel-form { right: auto; left: 0; }
     .oi { display: grid; grid-template-columns: 64px minmax(0,1fr) auto; gap: 14px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
     .oi img { width: 64px; height: 64px; border-radius: var(--radius-sm); object-fit: cover; background: var(--surface-2); }
@@ -36,7 +37,7 @@
     <div class="page-head"><div><h1>{{ t.my_orders }}</h1><p>Track deliveries, download invoices and request returns.</p></div></div>
     {% endif %}
     {% for order in orders %}
-    <article class="panel order">
+    <article class="panel order" id="order-{{ order.id }}" style="scroll-margin-top:110px;">
         <div class="order-top">
             <div><h2>Order #{{ order.id }}</h2><span class="muted small">Placed {{ order.created_at|date:"M j, Y" }}</span></div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -71,6 +72,17 @@
             <div>
                 <div style="font-weight:700;">{{ item.product_name }}</div>
                 <span class="muted small">Qty {{ item.quantity }} · {{ item.price|money }} each</span>
+                {% if order.status != "cancelled" and order.status != "pending" %}
+                <div class="oi-step">
+                    {% if item.fulfillment_status == "delivered" or order.status == "delivered" %}<span class="pill ok small">✓ Delivered{% if item.delivered_at %} {{ item.delivered_at|date:"M j" }}{% endif %}</span>
+                    {% elif item.fulfillment_status == "handed_to_courier" %}<span class="pill info small">On its way</span>
+                    {% elif item.fulfillment_status == "packed" %}<span class="pill small">Packed</span>{% endif %}
+                    {% if not guest and item.product_id %}{% if item.fulfillment_status == "delivered" or order.status == "delivered" %}
+                        {% if item.product_id in reviewed %}<a class="link small" href="{% url 'product_detail' item.product_id %}#reviews">Your review ✓</a>
+                        {% else %}<a class="btn btn-primary btn-sm" href="{% url 'product_detail' item.product_id %}#write-review">★ Rate this item</a>{% endif %}
+                    {% endif %}{% endif %}
+                </div>
+                {% endif %}
                 {% if order.status == "delivered" %}
                 <div style="margin-top:6px;">
                 {% with latest_return=item.return_requests.first %}
@@ -90,6 +102,7 @@
             <div class="actions">
                 {% if order.payment_status == "pending" and order.status != "cancelled" %}<a class="btn btn-primary btn-sm" href="{% url 'resume_payment' order.id %}">Complete payment</a>{% endif %}
                 {% if stripe_enabled and order.payment_method == "cod" and order.payment_status == "not_applicable" and order.is_cancellable and order.total_cents %}<form method="post" action="{% url 'pay_online' order.id %}">{% csrf_token %}<button type="submit" class="btn btn-primary btn-sm">Pay online now</button></form>{% endif %}
+                {% if not guest and order.items_on_the_way %}<form method="post" action="{% url 'confirm_received' order.id %}">{% csrf_token %}<button type="submit" class="btn btn-primary btn-sm">✓ I've received it</button></form>{% endif %}
                 <a class="btn btn-secondary btn-sm" href="{% url 'invoice_pdf' order.id %}{% if guest %}?t={{ order.access_token }}{% endif %}">Invoice</a>
                 {% if not guest %}<form method="post" action="{% url 'buy_again' order.id %}">{% csrf_token %}<button type="submit" class="btn btn-secondary btn-sm">Buy again</button></form>{% endif %}
                 {% if not guest %}{% regroup order.items.all by seller_account as sellers %}{% for g in sellers %}{% if g.grouper %}<a class="btn btn-secondary btn-sm" href="{% url 'message_store' g.grouper.id %}">💬 {% if sellers|length > 1 %}{{ g.grouper.display_name }}{% else %}{{ t.message_seller }}{% endif %}</a>{% endif %}{% endfor %}{% endif %}

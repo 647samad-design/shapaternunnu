@@ -161,6 +161,7 @@ urlpatterns = [
     path('seller/plan/', sv.plan, name='seller_plan'),
     path('seller/plan/<int:pk>/choose/', sv.buy_plan, name='seller_buy_plan'),
     path('seller/plan/done/', sv.plan_done, name='seller_plan_done'),
+    path('my-orders/<int:pk>/received/', views.confirm_received, name='confirm_received'),
     path('seller/order-item/<int:item_id>/status/', views.update_fulfillment_status, name='update_fulfillment_status'),
     path('seller/product/add/', views.seller_add_product, name='seller_add_product'),
     path('seller/question/<int:pk>/answer/', views.seller_answer_question, name='seller_answer_question'),

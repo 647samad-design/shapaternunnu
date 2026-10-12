@@ -77,6 +77,7 @@
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <button class="btn btn-secondary btn-sm" type="submit" name="status" value="packed">Mark all packed</button>
                     <button class="btn btn-primary btn-sm" type="submit" name="status" value="handed_to_courier">Mark all handed to courier</button>
+                    <button class="btn btn-ghost btn-sm" type="submit" name="status" value="delivered" onclick="return confirm('Mark all your items in this order as delivered? The customer will be told and can review them.')">Mark all delivered</button>
                 </div>
             </form>
         </section>

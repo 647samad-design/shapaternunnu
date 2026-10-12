@@ -276,7 +276,10 @@ def product_detail(request, pk):
     product = get_object_or_404(Product, pk=pk)
 
     if not product.is_live and not _can_view_unapproved(request.user, product):
-        raise Http404("This product is not available.")
+        bought = (product.approval_status == "archived" and request.user.is_authenticated
+                  and OrderItem.objects.filter(order__user=request.user, product=product).exists())
+        if not bought:  # past buyers can still open it to review it
+            raise Http404("This product is not available.")
 
     if request.method == "POST":
         return _submit_review(request, product)
@@ -346,7 +349,9 @@ def _review_block_reason(user, product):
     seller, _ = get_seller_account_for_user(user)
     if seller and product.seller_account_id == seller.id:
         return "You can't review your own product."
-    if not OrderItem.objects.filter(order__user=user, product=product, order__status="delivered").exists():
+    received = OrderItem.objects.filter(order__user=user, product=product).filter(
+        Q(order__status="delivered") | Q(fulfillment_status="delivered")).exclude(order__status="cancelled")
+    if not received.exists():
         return "Only customers who bought this product can review it. You'll be able to once your order is delivered."
     return ""
 
@@ -470,7 +475,10 @@ def all_products(request):
 def product_quick_view(request, pk):
     product = get_object_or_404(Product, pk=pk)
     if not product.is_live and not _can_view_unapproved(request.user, product):
-        raise Http404("This product is not available.")
+        bought = (product.approval_status == "archived" and request.user.is_authenticated
+                  and OrderItem.objects.filter(order__user=request.user, product=product).exists())
+        if not bought:  # past buyers can still open it to review it
+            raise Http404("This product is not available.")
     return render(request, "bees/partials/quick_view.html", {"product": product})
 
 
@@ -1475,7 +1483,30 @@ def my_orders(request):
     orders = Order.objects.filter(user=request.user).prefetch_related(
         "items", "items__product", "items__return_requests", "items__seller_account"
     ).order_by("-created_at")
-    return render(request, "bees/my_orders.html", {"orders": orders, "cancel_reasons": CANCEL_REASONS})
+    reviewed = set(Review.objects.filter(user=request.user).values_list("product_id", flat=True))
+    return render(request, "bees/my_orders.html", {"orders": orders, "cancel_reasons": CANCEL_REASONS, "reviewed": reviewed})
+
+
+@login_required
+@require_POST
+def confirm_received(request, pk):
+    """The customer confirms their parcel arrived (items already on their
+    way). Marks them delivered so they can review them right away."""
+    from . import fulfilment
+    order = get_object_or_404(Order, pk=pk, user=request.user)
+    items = list(order.items.filter(fulfillment_status="handed_to_courier"))
+    if not items and order.status == "shipped":
+        items = list(order.items.exclude(fulfillment_status="delivered"))
+    if not items:
+        messages.info(request, "There's nothing on its way in this order.")
+        return redirect("my_orders")
+    try:
+        fulfilment.set_items_status(items, "delivered", user=request.user, by_customer=True)
+    except fulfilment.FulfilmentError as exc:
+        messages.error(request, str(exc))
+        return redirect("my_orders")
+    messages.success(request, "Thanks for confirming! You can now rate your items.")
+    return redirect(f"{reverse('my_orders')}#order-{order.id}")
 
 
 @require_POST
@@ -1940,24 +1971,32 @@ def become_seller(request):
 
 
 @login_required
+@require_POST
 def update_fulfillment_status(request, item_id):
+    """Seller Center: change one item's step (packed, shipped, delivered)."""
+    from . import fulfilment
     seller, role = get_seller_account_for_user(request.user)
-    if not seller:
+    if not seller or seller.status != "approved":
+        messages.error(request, "Only approved sellers can update orders.")
         return redirect_back(request, "seller_orders")
-    item = get_object_or_404(OrderItem.objects.filter(Q(seller_account=seller) | Q(product__seller_account=seller)), pk=item_id)
+    item = get_object_or_404(OrderItem.objects.select_related("order"), pk=item_id, seller_account=seller)
     new_status = request.POST.get("fulfillment_status")
-    if request.method == "POST" and new_status in dict(OrderItem.FULFILLMENT_CHOICES):
-        if item.order.status == "cancelled":
-            messages.error(request, f"Order #{item.order_id} was cancelled - don't ship '{item.product_name}'.")
-            return redirect_back(request, "seller_orders")
-        if item.order.payment_status in ("pending", "failed"):
-            messages.error(request, f"Order #{item.order_id} hasn't been paid yet - wait before shipping.")
-            return redirect_back(request, "seller_orders")
-        item.fulfillment_status = new_status
-        item.save(update_fields=["fulfillment_status"])
-        moved = sync_order_status_from_items(item.order)
-        note = f" Order #{item.order_id} is now {moved} and the customer has been emailed." if moved else ""
-        messages.success(request, f"Marked '{item.product_name}' as {item.get_fulfillment_status_display()}.{note}")
+    if new_status not in dict(OrderItem.FULFILLMENT_CHOICES):
+        messages.error(request, "Please choose a valid status.")
+        return redirect_back(request, "seller_orders")
+    try:
+        changed, moved = fulfilment.set_items_status([item], new_status, user=request.user)
+    except fulfilment.FulfilmentError as exc:
+        messages.error(request, str(exc))
+        return redirect_back(request, "seller_orders")
+    if not changed:
+        messages.info(request, "Nothing to change.")
+    elif moved:
+        messages.success(request, f"Marked '{item.product_name}' as {dict(OrderItem.FULFILLMENT_CHOICES)[new_status].lower()}. "
+                                  f"Order #{item.order_id} is now {moved[0][1]} and the customer has been told.")
+    else:
+        told = " The customer has been told." if new_status in ("handed_to_courier", "delivered") else ""
+        messages.success(request, f"Marked '{item.product_name}' as {dict(OrderItem.FULFILLMENT_CHOICES)[new_status].lower()}.{told}")
     return redirect_back(request, "seller_orders")
 
 
@@ -2223,7 +2262,14 @@ def seller_edit_product(request, pk):
 @require_POST
 def seller_delete_product(request, pk):
     seller, role = _approved_seller_or_404(request.user)
-    Product.objects.filter(pk=pk, seller_account=seller).delete()
+    product = get_object_or_404(Product, pk=pk, seller_account=seller)
+    if OrderItem.objects.filter(product=product).exists():
+        # Sold before: keep it for order history, reviews and returns, but
+        # take it off the shop for good.
+        Product.objects.filter(pk=product.pk).update(approval_status="archived", stock=0, is_flash_sale=False)
+    else:
+        product.delete()
+    AuditLog.objects.create(user=request.user, action=f"Seller {seller.display_name} removed product #{pk} ({product.name})"[:255])
     messages.success(request, "Product removed from your store.")
     return redirect_back(request, "seller_products")
 

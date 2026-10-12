@@ -4,6 +4,7 @@
 {% block content %}
 <div class="wrap page">
     <div class="page-head"><div><h1>{{ t.messages }}</h1><p>Your conversations with sellers.</p></div></div>
+    {% if is_seller %}<div class="callout" style="margin:0 0 14px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;"><span>These are your chats with other sellers as a shopper. <strong>Messages from your customers</strong> are in Seller Center.</span><a class="btn btn-primary btn-sm" href="{% url 'seller_messages' %}">Customer messages<span data-live-paren="seller_messages">{% if seller_unread_messages %} ({{ seller_unread_messages }}){% endif %}</span></a></div>{% endif %}
     {% include "bees/partials/alert_settings.html" %}
     <div class="msg-layout {% if conv %}has-conv{% endif %}">
         {% include "bees/partials/chat_list.html" with side="buyer" url_name="conversation" %}
