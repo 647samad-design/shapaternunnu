@@ -228,3 +228,31 @@ def report_view(request, pk):
 
 def since(dt):
     return timesince(dt).split(",")[0] if dt else ""
+
+
+def reply_time(seller):
+    """Typical time the seller takes to answer a shopper, as text
+    ("within an hour", "within a day"...), or "" without enough data.
+    Cached for an hour."""
+    key = f"seller-reply-time:{seller.pk}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    since = timezone.now() - timedelta(days=90)
+    gaps = []
+    for conv in Conversation.objects.filter(seller=seller, last_message_at__gte=since)[:50]:
+        waiting = None
+        for m in conv.messages.filter(created_at__gte=since).only("from_seller", "created_at"):
+            if not m.from_seller and waiting is None:
+                waiting = m.created_at
+            elif m.from_seller and waiting is not None:
+                gaps.append((m.created_at - waiting).total_seconds())
+                waiting = None
+    text = ""
+    if len(gaps) >= 2:
+        gaps.sort()
+        median = gaps[len(gaps) // 2]
+        text = ("within an hour" if median <= 3600 else "within a few hours" if median <= 6 * 3600
+                else "within a day" if median <= 86400 else "within a few days")
+    cache.set(key, text, 3600)
+    return text

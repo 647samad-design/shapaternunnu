@@ -36,4 +36,15 @@ class Command(BaseCommand):
                 continue  # still payable; Stripe will expire it
             payments.release_unpaid_order(order.id, reason="failed")
             released += 1
-        self.stdout.write(self.style.SUCCESS(f"Released {released} unpaid order(s); confirmed {paid} paid order(s)."))
+        # Cash on delivery orders the customer never confirmed by email.
+        from bees.views import COD_CONFIRM_HOURS
+        cod_cutoff = timezone.now() - timedelta(hours=COD_CONFIRM_HOURS)
+        unconfirmed = 0
+        for order in Order.objects.filter(payment_method="cod", cod_confirmed=False, status="pending", created_at__lt=cod_cutoff):
+            order.cancel_reason = "not confirmed in time"
+            order.status = "cancelled"
+            order.save(update_fields=["status", "cancel_reason"])
+            payments.restock(order)
+            unconfirmed += 1
+        self.stdout.write(self.style.SUCCESS(
+            f"Released {released} unpaid order(s); confirmed {paid} paid order(s); cancelled {unconfirmed} unconfirmed cash order(s)."))

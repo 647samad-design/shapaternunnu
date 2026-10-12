@@ -108,6 +108,7 @@
             {% if store_credit > 0 %}<div class="sum-row" id="credit-row" style="color:var(--ok);font-weight:700;"><span>Store credit</span><span id="credit-amount">−{{ credit_applicable|money }}</span></div>{% endif %}
             <div class="sum-total"><span>{{ t.total }}</span><span><span id="sum-total">{% if store_credit > 0 %}{{ total_after_credit|money }}{% else %}{{ pricing.total|money }}{% endif %}</span> <span class="muted small" style="font-weight:400;">{{ store_currency }}</span></span></div>
             {% if shopper_currency %}<p class="muted small" style="margin-top:8px;">{{ t.approx_note }} {{ store_currency_code }}.</p>{% endif %}
+            {% if user.is_authenticated and checkout_sellers %}<p class="small" style="margin-top:12px;">Questions before you pay? {% for sa in checkout_sellers %}<a class="link" href="{% url 'message_store' sa.id %}" rel="nofollow">💬 {% if checkout_sellers|length > 1 %}{{ sa.display_name }}{% else %}Message the seller{% endif %}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>{% endif %}
         </aside>
     </div>
 </div>

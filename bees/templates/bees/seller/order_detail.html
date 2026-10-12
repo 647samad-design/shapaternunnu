@@ -71,7 +71,7 @@
                 {% if only_seller %}
                 <div class="form-grid">
                     <div class="field"><label for="courier">Courier</label><input id="courier" type="text" name="courier_name" maxlength="60" value="{{ order.courier_name }}" placeholder="e.g. DHL, FedEx, UPS" list="courier-list" autocomplete="off">{% courier_names as couriers %}<datalist id="courier-list">{% for c in couriers %}<option value="{{ c }}">{% endfor %}</datalist></div>
-                    <div class="field"><label for="tracking">Tracking number</label><input id="tracking" type="text" name="tracking_number" maxlength="60" value="{{ order.tracking_number }}" placeholder="Shown to the customer"></div>
+                    <div class="field"><label for="tracking">Tracking number</label><input id="tracking" type="text" name="tracking_number" maxlength="60" value="{{ order.tracking_number }}" placeholder="Optional - leave empty to use {{ order.shipment_number }}"></div>
                 </div>
                 {% else %}<p class="muted small">This order has several sellers, so the store adds the tracking number. Just update your items.</p>{% endif %}
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -95,12 +95,20 @@
         <section class="panel">
             <h2>Delivery</h2>
             <dl class="kv">
+                <dt>Shipment no.</dt><dd><strong>{{ order.shipment_number }}</strong> <span class="muted small">(write it on the parcel)</span></dd>
+                {% if order.payment_method == "cod" %}<dt>Cash</dt><dd>{% if not order.cod_confirmed %}<span class="pill warn">Customer hasn't confirmed yet - don't ship</span>{% elif order.cod_collected_at %}<span class="pill ok">Collected</span>{% else %}Courier collects {{ order.total|money }}{% endif %}</dd>{% endif %}
                 <dt>Expected by</dt><dd>{{ order.estimated_delivery|date:"M j, Y"|default:"—" }}</dd>
                 <dt>Courier</dt><dd>{{ order.courier_name|default:"—" }}</dd>
                 <dt>Tracking</dt><dd>{{ order.tracking_number|default:"—" }}{% if order.tracking_link %} · <a class="link" href="{{ order.tracking_link }}" target="_blank" rel="noopener">Track</a>{% endif %}</dd>
                 {% if order.delivered_at %}<dt>Delivered</dt><dd>{{ order.delivered_at|date:"M j, Y" }}</dd>{% endif %}
             </dl>
         </section>
+        <section class="panel">
+            <h2>Timeline</h2>
+            <ol class="ev-list">{% for e in order.events.all reversed %}<li><strong>{{ e.text }}</strong><span class="muted small">{{ e.created_at|date:"M j, H:i" }}</span></li>{% empty %}<li class="muted">No events yet.</li>{% endfor %}</ol>
+            <a class="link small" href="{{ order.public_tracking_path }}" target="_blank" rel="noopener">Customer's tracking page</a>
+        </section>
+        <style>.ev-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; } .ev-list li { display: grid; padding-left: 14px; border-left: 3px solid var(--line); }</style>
     </div>
 </div>
 {% endblock %}

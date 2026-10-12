@@ -32,9 +32,17 @@ class TestCase(DjangoTestCase):
         # two-step tests switch this back on.
         from .models import SiteSettings as _SS
         _SS.objects.update_or_create(pk=1, defaults={"require_staff_2fa": False})
+        # Older checkout tests treat every buyer as having a confirmed email;
+        # the cash-on-delivery confirmation tests switch this back on.
+        self._cod_patch = None
+        if not getattr(self, "real_cod_confirmation", False):
+            self._cod_patch = _mock.patch("bees.views._email_verified", return_value=True)
+            self._cod_patch.start()
 
     def _post_teardown(self):
         self._stripe_customer.stop()
+        if self._cod_patch:
+            self._cod_patch.stop()
         super()._post_teardown()
 from django.urls import reverse
 
@@ -2066,8 +2074,23 @@ class StockAlertTests(TestCase):
 
 @override_settings(STRIPE_SECRET_KEY="sk_test_dummy", STRIPE_WEBHOOK_SECRET="whsec_dummy")
 class GuestCheckoutTests(TestCase):
+    """Guest checkout is off by default; these cover stores that switch it on."""
     def setUp(self):
+        SiteSettings.objects.update_or_create(pk=1, defaults={"allow_guest_checkout": True})
+        cache.clear()
         self.product = make_product(name="Guest Serum", price=Decimal("15.00"), stock=5)
+
+    def test_guest_must_sign_in_when_switched_off(self):
+        SiteSettings.objects.filter(pk=1).update(allow_guest_checkout=False)
+        cache.clear()
+        self.client.post(reverse("add_to_cart", args=[self.product.id]))
+        r = self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        self.assertTrue(r.url.startswith(reverse("login")))
+        self.assertFalse(Order.objects.exists())
+        self.assertContains(self.client.get(reverse("cart")), "Sign in to check out")
+        user = User.objects.create_user("later", "later@example.com", "pass12345")
+        self.client.post(reverse("login"), {"username": "later", "password": "pass12345"})
+        self.assertContains(self.client.get(reverse("cart")), "Guest Serum")  # cart kept through sign-in
 
     def _guest_cod(self, client=None):
         c = client or self.client
@@ -3465,6 +3488,7 @@ class DealsAndOffersTests(TestCase):
         self.assertEqual((p.flash_sale_ends.year, p.bulk_min_qty, p.bulk_percent), (2030, 3, 10))
 
     def test_quantity_offer_in_cart_and_order(self):
+        self.client.force_login(User.objects.create_user("bulkbuyer", "bb@example.com", "pass12345"))
         p = make_product(name="Socks", price=Decimal("10.00"), stock=20, bulk_min_qty=3, bulk_percent=10)
         self.client.post(reverse("add_to_cart", args=[p.id]), {"quantity": 2})
         r = self.client.get(reverse("cart"))

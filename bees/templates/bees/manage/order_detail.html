@@ -88,9 +88,19 @@
             <dl class="kv">
                 <dt>Method</dt><dd>{{ order.get_payment_method_display }}</dd>
                 <dt>Status</dt><dd>{{ order.get_payment_status_display }}</dd>
+                {% if order.card_label %}<dt>Card</dt><dd>{{ order.card_label }}</dd>{% endif %}
+                {% if order.refunded_at %}<dt>Refunded</dt><dd>{{ order.refunded_at|date:"M j, Y H:i" }}{% if order.refund_id %} <span class="muted small">({{ order.refund_id }})</span>{% endif %}</dd>{% endif %}
+                {% if order.payment_method == "cod" %}<dt>Cash</dt><dd>{% if not order.cod_confirmed %}<span class="pill warn">Waiting for customer to confirm</span>{% elif order.cod_collected_at %}<span class="pill ok">Collected {{ order.cod_collected_at|date:"M j" }}</span>{% else %}Collect {{ order.total|money }} on delivery{% endif %}</dd>{% endif %}
+                {% if order.cancel_reason %}<dt>Cancel reason</dt><dd>{{ order.cancel_reason }}</dd>{% endif %}
                 <dt>Currency</dt><dd>{{ order.currency|upper }}</dd>
             </dl>
         </section>
+        <section class="panel">
+            <h2>Timeline</h2>
+            <ol class="ev-list">{% for e in order.events.all reversed %}<li><strong>{{ e.text }}</strong><span class="muted small">{{ e.created_at|date:"M j, H:i" }}</span></li>{% empty %}<li class="muted">No events yet.</li>{% endfor %}</ol>
+            <a class="link small" href="{{ order.public_tracking_path }}" target="_blank" rel="noopener">Customer's tracking page</a>
+        </section>
+        <style>.ev-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; } .ev-list li { display: grid; padding-left: 14px; border-left: 3px solid var(--line); }</style>
         {% if order.status != "cancelled" and order.status != "delivered" %}
         <section class="panel">
             <h2>Cancel order</h2>

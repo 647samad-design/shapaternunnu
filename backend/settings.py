@@ -310,6 +310,9 @@ AUTO_BACKUP = env_bool('AUTO_BACKUP', 'test' not in sys.argv)
 # the admin (off while running tests).
 SETUP_WIZARD_REDIRECT = env_bool('SETUP_WIZARD_REDIRECT', 'test' not in sys.argv)
 
+# Read the card brand/last 4 digits from Stripe after payment (off in tests).
+STRIPE_CARD_DETAILS = env_bool('STRIPE_CARD_DETAILS', 'test' not in sys.argv)
+
 # Optional AI listing writer. Without a key a built-in writer is used.
 AI_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '').strip()
 AI_MODEL = os.environ.get('AI_MODEL', 'claude-haiku-5-5').strip()

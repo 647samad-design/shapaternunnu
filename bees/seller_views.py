@@ -310,6 +310,8 @@ def _set_items_status(request, items, new_status):
         order = item.order
         if order.status == "cancelled" or order.payment_status in ("pending", "failed", "refunded"):
             continue
+        if order.payment_method == "cod" and not order.cod_confirmed:
+            continue  # unconfirmed cash order: don't pack or ship yet
         # Bulk actions only move items forward (a delivered item is never
         # sent back to "packed" by a mass update).
         if rank[new_status] > rank[item.fulfillment_status]:
@@ -317,10 +319,15 @@ def _set_items_status(request, items, new_status):
             item.save(update_fields=["fulfillment_status"])
             changed += 1
             orders_seen[order.pk] = order
+    from .models import OrderEvent
     for order in orders_seen.values():
         result = sync_order_status_from_items(order)
         if result:
             moved.append((order.pk, result))
+        elif new_status == "packed":
+            OrderEvent.objects.create(order=order, kind="packed", text="Packed and ready for the courier")
+        elif new_status == "handed_to_courier":
+            OrderEvent.objects.create(order=order, kind="shipped", text="Part of the order was handed to the courier")
     return changed, moved
 
 
@@ -343,6 +350,9 @@ def ship_order(request, order_id):
         return redirect("seller_order", order_id=order.id)
     if order.payment_status in ("pending", "failed", "refunded"):
         messages.error(request, f"Order #{order.id} hasn't been paid - wait before shipping.")
+        return redirect("seller_order", order_id=order.id)
+    if order.payment_method == "cod" and not order.cod_confirmed:
+        messages.error(request, f"Order #{order.id} is a cash order the customer hasn't confirmed yet - wait for the confirmation.")
         return redirect("seller_order", order_id=order.id)
     only_seller = not order.items.exclude(seller_account=seller).exists()
     courier = request.POST.get("courier_name", "").strip()[:60]

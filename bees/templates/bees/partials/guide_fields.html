@@ -1,0 +1,52 @@
+{# Buying guide editor (what it's for / pros / cons) for the product forms. Needs: p (form values). #}
+<div class="guide-fields" data-guide data-url="{% url 'ai_buying_guide_draft' %}">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;">
+        <span class="label">Buying guide <span class="muted">(optional, shown on the product page)</span></span>
+        <button type="button" class="btn btn-secondary btn-sm" data-guide-go><span aria-hidden="true">✨</span> Fill with AI</button>
+    </div>
+    <input type="hidden" name="guide_source" value="{{ p.guide_source|default:'seller' }}" data-guide-source>
+    <div class="guide-grid">
+        <div class="field"><label for="g_uses">What it's for</label><textarea id="g_uses" name="guide_uses" rows="4" placeholder="One point per line">{{ p.guide_uses|default:'' }}</textarea></div>
+        <div class="field"><label for="g_pros">Pros</label><textarea id="g_pros" name="guide_pros" rows="4" placeholder="One point per line">{{ p.guide_pros|default:'' }}</textarea></div>
+        <div class="field"><label for="g_cons">Cons / good to know</label><textarea id="g_cons" name="guide_cons" rows="4" placeholder="One point per line">{{ p.guide_cons|default:'' }}</textarea></div>
+    </div>
+    <span class="hint" data-guide-msg>Honest pros and cons build trust and cut returns. The AI draft is a starting point: check every line before saving.</span>
+</div>
+<style>
+    .guide-fields { display: grid; gap: 8px; padding: 14px; border-radius: var(--radius-sm); border: 1.5px dashed var(--line); background: var(--surface-2); }
+    .guide-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 10px; }
+    .guide-grid textarea { min-height: 110px; }
+    .guide-fields .hint.bad { color: var(--sale); font-weight: 700; }
+    .guide-fields .hint.ok { color: var(--ok); }
+</style>
+<script>
+(function () {
+    var box = document.querySelector('[data-guide]');
+    if (!box) return;
+    var form = box.closest('form'), btn = box.querySelector('[data-guide-go]'), msg = box.querySelector('[data-guide-msg]');
+    function say(t, c) { msg.textContent = t; msg.className = 'hint ' + (c || ''); }
+    btn.addEventListener('click', function () {
+        var name = form.querySelector('[name=name]');
+        if (!name || name.value.trim().length < 3) { say('Type the product name first.', 'bad'); return; }
+        var filled = ['uses', 'pros', 'cons'].some(function (k) { return form.querySelector('[name=guide_' + k + ']').value.trim(); });
+        if (filled && !confirm('Replace the current buying guide?')) return;
+        var d = new FormData();
+        d.append('csrfmiddlewaretoken', form.querySelector('[name=csrfmiddlewaretoken]').value);
+        ['name', 'category', 'price', 'description'].forEach(function (k) { var el = form.querySelector('[name=' + k + ']'); if (el) d.append(k, el.value); });
+        btn.disabled = true; say('Thinking…');
+        fetch(box.dataset.url, { method: 'POST', body: d, credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' } })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (res) {
+                if (!res.ok) { say(res.j.error || 'Something went wrong.', 'bad'); return; }
+                ['uses', 'pros', 'cons'].forEach(function (k) { form.querySelector('[name=guide_' + k + ']').value = (res.j.guide[k] || []).join('\n'); });
+                box.querySelector('[data-guide-source]').value = res.j.source === 'ai' ? 'ai' : 'seller';
+                say(res.j.source === 'ai' ? 'Drafted by AI. Check every point before saving.' : 'Starter draft for this category. Edit it to match your product.', 'ok');
+            })
+            .catch(function () { say('Could not reach the assistant. Try again.', 'bad'); })
+            .then(function () { btn.disabled = false; });
+    });
+    ['uses', 'pros', 'cons'].forEach(function (k) {
+        form.querySelector('[name=guide_' + k + ']').addEventListener('input', function () { box.querySelector('[data-guide-source]').value = 'seller'; });
+    });
+})();
+</script>
