@@ -28,12 +28,12 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from . import order_emails, payments
+from . import ai as ai_tools, order_emails, payments, tracking
 from .models import (
     Product, Review, Order, OrderItem, Wishlist, Coupon,
     ProductImage, Profile, Address, Question, NewsletterSubscriber,
     Notification, SearchLog, SellerAccount, SellerReview, ReturnRequest, SiteSettings, AuditLog,
-    OrganizationMember, ChatThread, ChatMessage, ProductVariant,
+    OrganizationMember, ChatThread, ChatMessage, ProductVariant, OrderEvent,
 )
 from .cart import persist as _persist_cart
 from .images import BANNER_MAX, LOGO_MAX, optimize
@@ -196,7 +196,14 @@ def _send_html_email(subject, template, context, recipient):
         email_failed(subject, recipient, exc)
 
 
+def _email_verified(user):
+    return Profile.objects.filter(user=user, email_verified=True).exists()
+
+
 def _send_order_confirmation(request, order):
+    if order.payment_method == "cod" and not order.cod_confirmed:
+        _send_cod_confirmation(request, order)
+        return
     invoice_url = request.build_absolute_uri(reverse("invoice_pdf", args=[order.id]))
     if order.is_guest:
         invoice_url += f"?t={order.access_token}"
@@ -311,6 +318,9 @@ def product_detail(request, pk):
         "has_shipping_zones": has_shipping_zones,
         "ship_table": {**ship_table, "default_days": _brand().delivery_days},
         "ship_country": ship_country,
+        "seller_reply": _seller_reply(product),
+        "ai_enabled": bool(settings.AI_API_KEY),
+        "review_summary": ai_tools.review_summary(product),
         "related_products": related_products,
         "questions": questions,
         "recently_viewed": recently_viewed,
@@ -1146,6 +1156,9 @@ def checkout_view(request):
     if not items:
         messages.error(request, "Your cart is empty.")
         return redirect("cart")
+    if not request.user.is_authenticated and not _brand().allow_guest_checkout:
+        messages.info(request, "Please sign in or create a free account to place your order. Your cart is saved.")
+        return redirect(f"{reverse('login')}?{urlencode({'next': reverse('checkout')})}")
 
     coupon, coupon_error = _session_coupon(request, subtotal)
     default_address = Address.objects.filter(user=request.user, is_default=True).first() if request.user.is_authenticated else None
@@ -1232,7 +1245,13 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
         "credit": str(credit), "currency": settings.STORE_CURRENCY.upper(),
         "shipping": shipping_rules.table(), "card": "card" in methods, "items": sum(i["qty"] for i in items),
     }
+    sellers = []
+    for row in items:
+        sa = row["product"].seller_account
+        if sa and sa not in sellers:
+            sellers.append(sa)
     return {
+        "checkout_sellers": sellers,
         "checkout_data": checkout_data,
         "store_credit": credit,
         "credit_applicable": credit_applicable,
@@ -1317,6 +1336,10 @@ def _place_order(request, items, data, payment_method, use_credit=False):
             shipping_amount=pricing["shipping"],
             tax_amount=pricing["tax"],
             estimated_delivery=order_emails.default_delivery_date(country=data["country"]),
+            courier_name=tracking.suggest_courier(data["country"]),
+            # Cash orders from accounts with an unconfirmed email need one
+            # click on an emailed link before sellers pack them (stops fake orders).
+            cod_confirmed=is_card or not signed_in or _email_verified(request.user),
         )
         seller_cache = {}
         for product, variant, price, qty in lines:
@@ -1432,15 +1455,15 @@ def order_track(request, order_id, token):
         return redirect(f"{reverse('login')}?{urlencode({'next': reverse('my_orders')})}")
     _remember_guest_order(request, order)
     order = Order.objects.prefetch_related("items", "items__product", "items__return_requests").get(pk=order.pk)
-    return render(request, "bees/my_orders.html", {"orders": [order], "guest": True})
+    return render(request, "bees/my_orders.html", {"orders": [order], "guest": True, "cancel_reasons": CANCEL_REASONS})
 
 
 @login_required
 def my_orders(request):
     orders = Order.objects.filter(user=request.user).prefetch_related(
-        "items", "items__product", "items__return_requests"
+        "items", "items__product", "items__return_requests", "items__seller_account"
     ).order_by("-created_at")
-    return render(request, "bees/my_orders.html", {"orders": orders})
+    return render(request, "bees/my_orders.html", {"orders": orders, "cancel_reasons": CANCEL_REASONS})
 
 
 @require_POST
@@ -1450,6 +1473,8 @@ def cancel_order(request, pk):
         if not order.is_cancellable:
             messages.error(request, "This order can no longer be cancelled.")
             return _orders_page(request, order)
+        reason = request.POST.get("reason", "").strip()
+        order.cancel_reason = reason if reason in CANCEL_REASONS else ""
         if order.payment_status == "paid":
             if not payments.refund_order(order):
                 from .alerts import REFUND_FAILED, notify_staff
@@ -1460,13 +1485,20 @@ def cancel_order(request, pk):
             order.payment_status = "refunded"
         payments.void_pending_payment(order)
         order.status = "cancelled"
-        order.save(update_fields=["status", "payment_status", "payment_method", "cod_fallback"])
+        order.save(update_fields=["status", "payment_status", "payment_method", "cod_fallback", "cancel_reason"])
         payments.restock(order)
     if order.payment_status == "refunded":
-        messages.success(request, f"Order #{order.id} has been cancelled and a full refund issued to your card.")
+        card = order.card_label or "your card"
+        messages.success(request, f"Order #{order.id} has been cancelled and {money(order.total)} refunded to {card}. Banks usually show it within 5-10 business days.")
     else:
         messages.success(request, f"Order #{order.id} has been cancelled.")
     return _orders_page(request, order)
+
+
+CANCEL_REASONS = [
+    "Ordered by mistake", "Found a better price", "Delivery takes too long", "Want to change the order",
+    "Changed my mind", "Other",
+]
 
 
 @login_required
@@ -1989,7 +2021,16 @@ def _product_fields_from_post(request):
         "discount_percent": discount, "stock": stock, "image_url": image_url,
         "description": request.POST.get("description", "").strip()[:10000],
         "bulk_min_qty": bulk_qty or None, "bulk_percent": bulk_pct,
+        **_guide_fields_from_post(request),
     }
+
+
+def _guide_fields_from_post(request):
+    fields = {f"guide_{k}": "\n".join(line.strip() for line in request.POST.get(f"guide_{k}", "").splitlines() if line.strip())[:2000]
+              for k in ("uses", "pros", "cons")}
+    source = request.POST.get("guide_source", "")
+    fields["guide_source"] = (source if source in ("ai", "seller") else "seller") if any(fields.values()) else ""
+    return fields
 
 
 MAX_GALLERY = 8
@@ -2126,7 +2167,7 @@ def seller_add_product(request):
 
 # Changing any of these sends the product back for moderation; price and
 # stock updates go live immediately.
-REVIEWED_FIELDS = ("name", "category", "image_url", "description")
+REVIEWED_FIELDS = ("name", "category", "image_url", "description", "guide_uses", "guide_pros", "guide_cons")
 
 
 @login_required
@@ -2430,3 +2471,160 @@ def remember_ship_country(request):
     if code in dict(COUNTRIES) or code == "":
         request.session["ship_country"] = code
     return JsonResponse({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Cash on delivery confirmation and public shipment tracking
+# ---------------------------------------------------------------------------
+
+COD_CONFIRM_HOURS = 48
+
+
+def _send_cod_confirmation(request, order):
+    url = request.build_absolute_uri(reverse("confirm_cod", args=[order.id, order.access_token]))
+    _send_html_email(
+        f"Please confirm your {_store_name()} order #{order.id}",
+        "bees/emails/cod_confirm.html",
+        {"order": order, "url": url, "hours": COD_CONFIRM_HOURS},
+        order.contact_email,
+    )
+
+
+def confirm_cod(request, order_id, token):
+    """One click from the email confirms a cash-on-delivery order; sellers
+    are told to ship it straight away."""
+    order = get_object_or_404(Order, pk=order_id)
+    if not secrets.compare_digest(token, order.access_token):
+        raise Http404
+    if order.status == "cancelled":
+        messages.error(request, f"Order #{order.id} was cancelled because it wasn't confirmed in time. Please order again.")
+        return redirect("home")
+    if not order.cod_confirmed:
+        Order.objects.filter(pk=order.pk).update(cod_confirmed=True)
+        order.cod_confirmed = True
+        OrderEvent.objects.create(order=order, kind="note", text="Cash on delivery order confirmed by the customer")
+        if order.user_id:
+            Profile.objects.filter(user_id=order.user_id).update(email_verified=True)
+        _send_order_confirmation(request, order)
+    messages.success(request, f"Thank you! Order #{order.id} is confirmed. Please keep {money(order.total)} ready in cash for the courier.")
+    return redirect("my_orders" if request.user.is_authenticated else "home")
+
+
+@require_POST
+def resend_cod_confirmation(request, order_id):
+    order = _order_access(request, order_id, owner_only=True)
+    if order.payment_method == "cod" and not order.cod_confirmed and order.status != "cancelled":
+        _send_cod_confirmation(request, order)
+        messages.success(request, f"We've sent the confirmation link again to {order.contact_email}.")
+    return _orders_page(request, order)
+
+
+@ratelimit("track", rate_limit=30, window_seconds=300, redirect_to="track_lookup",
+           message="Too many tracking lookups. Please wait a few minutes.")
+def track_lookup(request):
+    number = request.GET.get("n", "").strip().upper()
+    if number:
+        if Order.objects.filter(shipment_number=number).exists() or Order.objects.filter(tracking_number__iexact=number).exists():
+            order = Order.objects.filter(Q(shipment_number=number) | Q(tracking_number__iexact=number)).first()
+            return redirect("track_shipment", order.shipment_number)
+        messages.error(request, "We couldn't find a shipment with that number. Check it and try again.")
+    return render(request, "bees/track.html", {"order": None, "number": number})
+
+
+def track_shipment(request, number):
+    """Public tracking page: status, timeline and courier - no personal
+    details beyond the destination city."""
+    order = get_object_or_404(Order.objects.prefetch_related("events"), shipment_number=number.upper())
+    steps = []
+    order_steps = [("placed", "Placed"), ("confirmed", "Confirmed"), ("shipped", "With courier"), ("delivered", "Delivered")]
+    reached = {"pending": 0, "confirmed": 1, "shipped": 2, "delivered": 3}.get(order.status, 0)
+    for i, (key, label) in enumerate(order_steps):
+        steps.append({"key": key, "label": label, "done": order.status != "cancelled" and i <= reached})
+    courier_link = "" if order.uses_store_tracking else tracking.tracking_link(order.courier_name, order.tracking_number, order.tracking_url)
+    return render(request, "bees/track.html", {
+        "order": order, "steps": steps, "events": [e for e in order.events.all() if e.public],
+        "courier_link": courier_link, "number": order.shipment_number,
+    })
+
+
+def _seller_reply(product):
+    if not product.seller_account_id:
+        return ""
+    from .messaging import reply_time
+    try:
+        return reply_time(product.seller_account)
+    except Exception:
+        return ""
+
+
+def _ai_rate_ok(request, name, limit, window):
+    key = f"ai-{name}:{request.user.pk if request.user.is_authenticated else request.META.get('REMOTE_ADDR', '')}"
+    used = cache.get(key, 0)
+    if used >= limit:
+        return False
+    cache.set(key, used + 1, window)
+    return True
+
+
+@login_required
+@require_POST
+def ai_buying_guide_draft(request):
+    """Drafts a buying guide for the add/edit product forms."""
+    from . import ai
+    seller, _role = get_seller_account_for_user(request.user)
+    if not (request.user.is_staff or (seller and seller.status == "approved")):
+        return JsonResponse({"error": "Only approved sellers and store staff can use this."}, status=403)
+    if not _ai_rate_ok(request, "guide-draft", 40, 3600):
+        return JsonResponse({"error": "Please wait a little before trying again."}, status=429)
+    name = request.POST.get("name", "").strip()[:255]
+    if len(name) < 3:
+        return JsonResponse({"error": "Type the product name first."}, status=400)
+    category = request.POST.get("category", "")
+    product = Product(name=name, category=category if category in dict(Product.CATEGORY_CHOICES) else "grocery",
+                      price=_safe_decimal(request.POST.get("price")), description=request.POST.get("description", "")[:4000])
+    guide, source = ai.buying_guide(product)
+    return JsonResponse({"guide": guide, "source": source})
+
+
+def _safe_decimal(value):
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return Decimal("0")
+
+
+@require_POST
+def ai_product_guide(request, pk):
+    """Shopper asks for an AI buying guide on a product that has none yet.
+    Saved on the product, so it's created once and then shown to everyone."""
+    from . import ai
+    product = get_object_or_404(Product.objects.live(), pk=pk)
+    if product.guide:
+        return JsonResponse({"guide": product.guide, "source": product.guide_source})
+    if not settings.AI_API_KEY:
+        return JsonResponse({"error": "Not available."}, status=404)
+    if not _ai_rate_ok(request, "guide", 20, 3600):
+        return JsonResponse({"error": "Please try again in a little while."}, status=429)
+    guide, source = ai.buying_guide(product)
+    if source != "ai":
+        return JsonResponse({"error": "The assistant is busy. Please try again shortly."}, status=503)
+    Product.objects.filter(pk=pk, guide_pros="").update(
+        guide_uses="\n".join(guide["uses"]), guide_pros="\n".join(guide["pros"]),
+        guide_cons="\n".join(guide["cons"]), guide_source="ai")
+    return JsonResponse({"guide": guide, "source": "ai"})
+
+
+@require_POST
+def ai_product_question(request, pk):
+    """Instant AI answer to a shopper's question about a product."""
+    from . import ai
+    product = get_object_or_404(Product.objects.live(), pk=pk)
+    question = request.POST.get("question", "").strip()
+    if len(question) < 4:
+        return JsonResponse({"error": "Type your question first."}, status=400)
+    if not _ai_rate_ok(request, "ask", 15, 600):
+        return JsonResponse({"error": "You've asked a lot of questions. Please wait a few minutes."}, status=429)
+    answer = ai.answer_question(product, question)
+    if not answer:
+        return JsonResponse({"error": "The assistant can't answer right now. Ask the seller instead."}, status=503)
+    return JsonResponse({"answer": answer})

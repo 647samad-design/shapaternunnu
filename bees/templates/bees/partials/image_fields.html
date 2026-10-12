@@ -2,7 +2,7 @@
 <div class="imgf">
     <div class="imgf-main">
         <div class="imgf-preview" data-preview>
-            <img src="{% if p.image_url %}{{ p.image_url }}{% elif product.image_url %}{{ product.image_url }}{% endif %}" alt="" data-preview-img {% if not p.image_url and not product.image_url %}hidden{% endif %}>
+            <img {% if p.image_url %}src="{{ p.image_url }}"{% elif product.image_url %}src="{{ product.image_url }}"{% endif %} alt="" data-preview-img {% if not p.image_url and not product.image_url %}hidden{% endif %}>
             <span class="imgf-empty" data-preview-empty {% if p.image_url or product.image_url %}hidden{% endif %}>No image yet</span>
         </div>
         <div class="imgf-inputs">

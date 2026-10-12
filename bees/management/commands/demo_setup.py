@@ -123,10 +123,14 @@ class Command(BaseCommand):
         now = timezone.now()
         plan = [(18, "delivered"), (14, "delivered"), (11, "delivered"), (8, "shipped"), (5, "shipped"),
                 (3, "confirmed"), (1, "confirmed"), (0, "confirmed")]
+        from bees.models import OrderEvent
+        from bees.tracking import suggest_courier
         for days_ago, status in plan:
+            country = rng.choice(["GB", "DE", "CA", "AE", "US", "PK"])
             order = Order.objects.create(
                 user=shopper, email=shopper.email, full_name="Sam Shopper", address="12 Demo Street",
-                city=rng.choice(["London", "Berlin", "Toronto", "Dubai", "New York"]), country=rng.choice(["GB", "DE", "CA", "AE", "US"]),
+                city={"GB": "London", "DE": "Berlin", "CA": "Toronto", "AE": "Dubai", "US": "New York", "PK": "Lahore"}[country],
+                country=country, courier_name=suggest_courier(country),
                 phone="+10000000000", payment_method="card", payment_status="paid", status=status,
                 sellers_notified=True,
             )
@@ -138,4 +142,16 @@ class Command(BaseCommand):
                 item.save()
             created = now - timedelta(days=days_ago, hours=rng.randint(0, 10))
             Order.objects.filter(pk=order.pk).update(
-                created_at=created, delivered_at=created + timedelta(days=4) if status == "delivered" else None)
+                created_at=created, delivered_at=created + timedelta(days=4) if status == "delivered" else None,
+                card_brand="visa", card_last4="4242")
+            steps = [("placed", "Order placed", 0), ("paid", "Payment received by card", 0.01)]
+            if status in ("confirmed", "shipped", "delivered"):
+                steps.append(("confirmed", "Order confirmed by the seller", 0.2))
+            if status in ("shipped", "delivered"):
+                steps += [("packed", "Packed and ready for the courier", 0.8), ("shipped", f"Handed to {order.courier_name}", 1.1)]
+            if status == "delivered":
+                steps.append(("delivered", "Delivered", 4))
+            OrderEvent.objects.filter(order=order).delete()
+            for kind, text, after in steps:
+                ev = OrderEvent.objects.create(order=order, kind=kind, text=text)
+                OrderEvent.objects.filter(pk=ev.pk).update(created_at=created + timedelta(days=after))

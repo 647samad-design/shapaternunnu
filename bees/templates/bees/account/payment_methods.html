@@ -8,7 +8,7 @@
 {% endblock %}
 {% block content %}
 <div class="wrap page" style="max-width:920px;">
-    <div class="page-head"><div><h1>Your account</h1><p>Signed in as {{ request.user.username }}</p></div></div>
+    <div class="page-head"><div><h1>Your account</h1><p>Signed in as <span data-no-translate>{{ request.user.username }}</span></p></div></div>
     {% include "bees/partials/account_tabs.html" %}
     <section class="panel">
         <h2>Saved cards</h2>

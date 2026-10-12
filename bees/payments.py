@@ -494,21 +494,47 @@ def parse_webhook(payload: bytes, signature: str):
 
 
 def refund_order(order):
-    """Refunds a paid card order in full. Returns True on success."""
+    """Refunds a paid card order in full, to the card it was paid with.
+    Records the refund on the order and its timeline. Returns True on success."""
+    from django.utils import timezone
+    from .models import Order, OrderEvent
     if order.total_cents == 0:
         return True  # paid entirely with store credit / coupon - nothing to send back to a card
     if not order.stripe_payment_intent:
         return False
     stripe = _stripe()
     try:
-        stripe.Refund.create(
+        refund = stripe.Refund.create(
             payment_intent=order.stripe_payment_intent,
             idempotency_key=f"refund-order-{order.id}",
         )
     except Exception:
         logger.exception("Stripe refund failed for order %s", order.id)
         return False
+    order.refund_id = str(getattr(refund, "id", "") or "")[:80]
+    order.refunded_at = timezone.now()
+    Order.objects.filter(pk=order.pk).update(refund_id=order.refund_id, refunded_at=order.refunded_at)
+    to = f" to {order.card_label}" if order.card_label else " to the original card"
+    OrderEvent.objects.create(order=order, kind="refunded", text=f"Refund of {order.total} {order.currency.upper()} sent{to}")
     return True
+
+
+def remember_card(order):
+    """Saves the card brand and last 4 digits used for an order (for the
+    receipt and "refunded to Visa •••• 4242"). Best effort, never raises."""
+    from .models import Order
+    if not order.stripe_payment_intent or order.card_last4 or not getattr(settings, "STRIPE_CARD_DETAILS", True):
+        return
+    try:
+        intent = _plain(_stripe().PaymentIntent.retrieve(order.stripe_payment_intent, expand=["latest_charge"]))
+        charge = intent.get("latest_charge") or {}
+        card = ((charge.get("payment_method_details") or {}).get("card") or {}) if isinstance(charge, dict) else {}
+        brand, last4 = (card.get("brand") or "")[:20], (card.get("last4") or "")[:4]
+        if last4:
+            Order.objects.filter(pk=order.pk).update(card_brand=brand, card_last4=last4)
+            order.card_brand, order.card_last4 = brand, last4
+    except Exception:
+        logger.info("Could not read card details for order %s", order.id, exc_info=True)
 
 
 def refund_amount(order, amount, key):
@@ -592,6 +618,9 @@ def mark_order_paid(order_id, session):
         order._skip_status_email = True
         order.save(update_fields=["payment_status", "payment_method", "cod_fallback", "stripe_payment_intent", "status", "estimated_delivery"])
         order._skip_status_email = False
+        from .models import OrderEvent
+        OrderEvent.objects.create(order=order, kind="paid", text="Payment received by card")
+    remember_card(order)
     return order, True
 
 

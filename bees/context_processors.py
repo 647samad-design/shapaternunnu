@@ -36,6 +36,7 @@ def site_language(request):
         lang = request.session.get("site_lang") or _browser_language(request)
     if lang not in TRANSLATIONS:
         lang = "en"
+    request.shop_lang = lang  # used by i18n.PageTranslationMiddleware
     store = brand_obj.site_name
     strings = {key: value.replace("{store}", store) for key, value in TRANSLATIONS[lang].items()}
     if lang != "en":

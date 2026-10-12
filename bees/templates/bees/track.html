@@ -1,0 +1,61 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Track a shipment — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block extra_css %}
+    .track-wrap { max-width: 760px; }
+    .track-form { display: flex; gap: 8px; flex-wrap: wrap; }
+    .track-form input { flex: 1 1 240px; min-width: 0; text-transform: uppercase; letter-spacing: .04em; }
+    .track-steps { list-style: none; margin: 18px 0 6px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; counter-reset: s; }
+    .track-steps li { position: relative; text-align: center; font-weight: 700; font-size: .9rem; color: var(--muted); padding-top: 34px; }
+    .track-steps li::before { content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 26px; height: 26px; border-radius: 999px; border: 3px solid var(--line); background: var(--surface); }
+    .track-steps li::after { content: ""; position: absolute; top: 12px; left: calc(50% + 16px); width: calc(100% - 26px); height: 3px; background: var(--line); }
+    .track-steps li:last-child::after { display: none; }
+    .track-steps li.done { color: var(--ink); }
+    .track-steps li.done::before { background: var(--ok); border-color: var(--ok); }
+    .track-steps li.done::after { background: var(--ok); }
+    html[dir="rtl"] .track-steps li::after { left: auto; right: calc(50% + 16px); }
+    .timeline { list-style: none; margin: 0; padding: 0; }
+    .timeline li { position: relative; padding: 0 0 18px 26px; }
+    .timeline li::before { content: ""; position: absolute; left: 5px; top: 6px; width: 10px; height: 10px; border-radius: 999px; background: var(--brand); }
+    .timeline li::after { content: ""; position: absolute; left: 9px; top: 18px; bottom: 0; width: 2px; background: var(--line); }
+    .timeline li:last-child::after { display: none; }
+    .timeline time { display: block; color: var(--muted); font-size: .85rem; }
+    .track-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 12px; margin-top: 8px; }
+    .track-facts div { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface-2); }
+    .track-facts span { display: block; color: var(--muted); font-size: .85rem; }
+{% endblock %}
+{% block content %}
+<div class="wrap page track-wrap">
+    <div class="page-head"><div><h1>{{ t.track_package }}</h1><p>Enter the shipment number from your order email.</p></div></div>
+    <section class="panel">
+        <form method="get" action="{% url 'track_lookup' %}" class="track-form">
+            <label class="sr-only" for="trk">Shipment number</label>
+            <input class="input" id="trk" name="n" value="{{ number }}" placeholder="e.g. LM-2610-7K3QX9" autocomplete="off" required>
+            <button class="btn btn-primary" type="submit">Track</button>
+        </form>
+    </section>
+    {% if order %}
+    <section class="panel" style="margin-top:20px;">
+        <div style="display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:space-between;align-items:baseline;">
+            <h2 style="margin:0;">Shipment {{ order.shipment_number }}</h2>
+            {% if order.status == "cancelled" %}<span class="badge badge-sale">Cancelled</span>{% elif order.status == "delivered" %}<span class="badge badge-ok">Delivered</span>{% else %}<span class="badge">{{ order.get_status_display }}</span>{% endif %}
+        </div>
+        {% if order.status != "cancelled" %}
+        <ol class="track-steps">{% for s in steps %}<li class="{% if s.done %}done{% endif %}">{{ s.label }}</li>{% endfor %}</ol>
+        {% endif %}
+        <div class="track-facts">
+            <div><span>Going to</span><strong data-no-translate>{{ order.city }}{% if order.country %}, {{ order.country|country_name }}{% endif %}</strong></div>
+            {% if order.courier_name %}<div><span>Courier</span><strong>{{ order.courier_name }}</strong></div>{% endif %}
+            {% if order.estimated_delivery and order.status != "cancelled" %}<div><span>{% if order.status == "delivered" %}Delivered{% else %}Expected by{% endif %}</span><strong>{% if order.status == "delivered" and order.delivered_at %}{{ order.delivered_at|date:"M j, Y" }}{% else %}{{ order.estimated_delivery|date:"M j, Y" }}{% endif %}</strong></div>{% endif %}
+            {% if order.payment_method == "cod" and order.status != "cancelled" %}<div><span>Payment</span><strong>{% if order.cod_collected_at %}Paid in cash{% else %}Cash on delivery{% endif %}</strong></div>{% endif %}
+        </div>
+        {% if courier_link %}<p style="margin-top:14px;"><a class="btn btn-secondary btn-sm" href="{{ courier_link }}" target="_blank" rel="noopener">Open {{ order.courier_name|default:"courier" }} tracking ({{ order.tracking_number }})</a></p>{% endif %}
+        <h3 style="margin:22px 0 12px;font-size:1.05rem;">History</h3>
+        <ol class="timeline">
+            {% for e in events reversed %}<li><strong>{{ e.text }}</strong><time>{{ e.created_at|date:"M j, Y · H:i" }}</time></li>{% endfor %}
+        </ol>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}

@@ -78,3 +78,22 @@ class ReferralCaptureMiddleware:
         if ref and 4 <= len(ref) <= 12 and ref.isalnum() and not request.user.is_authenticated:
             request.session["ref"] = ref.upper()
         return self.get_response(request)
+
+
+class ErrorAlertMiddleware:
+    """Records crashes (HTTP 500) so Admin > System check can show them -
+    page, error type and time - without digging through server logs."""
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        return self.get_response(request)
+
+    def process_exception(self, request, exception):
+        from django.http import Http404
+        from django.core.exceptions import PermissionDenied
+        if isinstance(exception, (Http404, PermissionDenied)):
+            return None
+        from .alerts import SERVER_ERROR, log
+        log(f"{SERVER_ERROR}: {request.method} {request.path[:80]} - {type(exception).__name__}: {str(exception)[:120]}")
+        return None

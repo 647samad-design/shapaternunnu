@@ -93,6 +93,12 @@ class Product(models.Model):
     # Quantity offer, e.g. "Buy 3 or more, save 10%".
     bulk_min_qty = models.PositiveSmallIntegerField(null=True, blank=True)
     bulk_percent = models.PositiveSmallIntegerField(default=0)
+    # Buying guide shown on the product page: what it's for, pros and cons
+    # (one point per line). Written by the seller, or drafted by AI.
+    guide_uses = models.TextField(blank=True)
+    guide_pros = models.TextField(blank=True)
+    guide_cons = models.TextField(blank=True)
+    guide_source = models.CharField(max_length=10, blank=True)  # "seller" or "ai"
     stock = models.PositiveIntegerField(default=50)
     seller_name = models.CharField(max_length=100, default="Official Store", db_index=True)
     seller_account = models.ForeignKey("SellerAccount", related_name="products", on_delete=models.SET_NULL, null=True, blank=True)
@@ -135,6 +141,16 @@ class Product(models.Model):
     def flash_countdown(self):
         """True when a deal with an end date is running (show a timer)."""
         return self.flash_active and self.flash_sale_ends is not None
+
+    @staticmethod
+    def _lines(text):
+        return [line.strip(" •-*\t") for line in (text or "").splitlines() if line.strip(" •-*\t")]
+
+    @property
+    def guide(self):
+        """{"uses": [...], "pros": [...], "cons": [...]} or None."""
+        data = {"uses": self._lines(self.guide_uses), "pros": self._lines(self.guide_pros), "cons": self._lines(self.guide_cons)}
+        return data if any(data.values()) else None
 
     @property
     def has_bulk_offer(self):
@@ -319,6 +335,20 @@ class Order(models.Model):
     sellers_notified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
+    # Shipment: every order gets its own shipment number, which doubles as
+    # the tracking number until a courier's own number is added.
+    shipment_number = models.CharField(max_length=24, unique=True, null=True, blank=True)
+    # Card used (for "refunded to Visa •••• 4242") - from Stripe, never the full number.
+    card_brand = models.CharField(max_length=20, blank=True)
+    card_last4 = models.CharField(max_length=4, blank=True)
+    refund_id = models.CharField(max_length=80, blank=True)
+    refunded_at = models.DateTimeField(null=True, blank=True)
+    cancel_reason = models.CharField(max_length=160, blank=True)
+    # Cash on delivery: confirmed by the customer (unverified emails get a
+    # confirmation link) and marked collected when the courier delivers.
+    cod_confirmed = models.BooleanField(default=True)
+    cod_collected_at = models.DateTimeField(null=True, blank=True)
+
     CANCELLABLE_STATUSES = ("pending", "confirmed")
 
     class Meta:
@@ -380,7 +410,26 @@ class Order(models.Model):
     @property
     def tracking_link(self):
         from .tracking import tracking_link
+        if self.uses_store_tracking:
+            from .order_emails import absolute
+            return absolute(self.public_tracking_path)
         return tracking_link(self.courier_name, self.tracking_number, self.tracking_url)
+
+    @property
+    def uses_store_tracking(self):
+        """No courier number yet (or the courier number is our shipment number):
+        the customer follows the parcel on our own tracking page."""
+        return bool(self.shipment_number) and (not self.tracking_number or self.tracking_number == self.shipment_number) \
+            and not self.tracking_url and self.status in ("confirmed", "shipped", "delivered")
+
+    @property
+    def public_tracking_path(self):
+        from django.urls import reverse
+        return reverse("track_shipment", args=[self.shipment_number]) if self.shipment_number else ""
+
+    @property
+    def card_label(self):
+        return f"{self.card_brand.title()} •••• {self.card_last4}" if self.card_last4 else ""
 
     @property
     def contact_email(self):
@@ -400,6 +449,16 @@ class Order(models.Model):
 
     def save(self, *args, **kwargs):
         is_new = self.pk is None
+        if not self.shipment_number:
+            from .tracking import new_shipment_number
+            self.shipment_number = new_shipment_number()
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = list(kwargs["update_fields"]) + ["shipment_number"]
+        if self.status == "delivered" and self.payment_method == "cod" and self.payment_status == "not_applicable" and not self.cod_collected_at:
+            from django.utils import timezone as _tz
+            self.cod_collected_at = _tz.now()
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = list(kwargs["update_fields"]) + ["cod_collected_at"]
         if not self.access_token:
             import secrets
             self.access_token = secrets.token_urlsafe(16)[:32]
@@ -414,6 +473,10 @@ class Order(models.Model):
             if kwargs.get("update_fields") is not None:
                 kwargs["update_fields"] = list(kwargs["update_fields"]) + ["delivered_at"]
         super().save(*args, **kwargs)
+        if is_new:
+            OrderEvent.objects.create(order=self, kind="placed", text="Order placed")
+        elif old_status and old_status != self.status:
+            OrderEvent.log_status(self, old_status)
         if not is_new and old_status and old_status != self.status:
             from . import order_emails, seller_center
             order_emails.status_changed(self, old_status, self.status)
@@ -467,6 +530,45 @@ def _reward_referrer_for(user):
         user=referrer.user, link="/account/referrals/",
         message=f"{user.username} made their first purchase with your referral link! Here's {percent}% off your next order: {code}",
     )
+
+
+class OrderEvent(models.Model):
+    """Timeline of an order, shown to the customer on the tracking page."""
+    KIND_CHOICES = [
+        ("placed", "Order placed"), ("paid", "Payment received"), ("confirmed", "Confirmed"),
+        ("packed", "Packed"), ("shipped", "Shipped"), ("delivered", "Delivered"), ("cancelled", "Cancelled"),
+        ("refunded", "Refunded"), ("cod", "Cash collected"), ("note", "Update"),
+    ]
+    order = models.ForeignKey("Order", related_name="events", on_delete=models.CASCADE)
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES, default="note")
+    text = models.CharField(max_length=200)
+    public = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"#{self.order_id} {self.kind}: {self.text}"
+
+    STATUS_TEXT = {
+        "confirmed": "Order confirmed by the seller",
+        "shipped": "Handed to the courier",
+        "delivered": "Delivered",
+        "cancelled": "Order cancelled",
+        "pending": "Order back to pending",
+    }
+
+    @classmethod
+    def log_status(cls, order, old_status):
+        text = cls.STATUS_TEXT.get(order.status, f"Status: {order.get_status_display()}")
+        if order.status == "shipped" and order.courier_name:
+            text = f"Handed to {order.courier_name}"
+        if order.status == "cancelled" and order.cancel_reason:
+            text = f"Order cancelled ({order.cancel_reason})"
+        cls.objects.create(order=order, kind=order.status if order.status in dict(cls.KIND_CHOICES) else "note", text=text[:200])
+        if order.status == "delivered" and order.cod_collected_at and order.payment_method == "cod":
+            cls.objects.create(order=order, kind="cod", text="Cash payment collected on delivery")
 
 
 class OrderItemQuerySet(models.QuerySet):
@@ -1141,6 +1243,8 @@ class ShippingZone(models.Model):
     name = models.CharField(max_length=60, help_text="e.g. United States, Europe, Rest of world")
     countries = models.TextField(help_text="Two-letter country codes separated by commas (US, CA), or * for every other country.")
     fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    courier = models.CharField("Preferred courier", max_length=60, blank=True,
+                               help_text="Courier used for this zone. Empty = the best-known courier for each country is suggested.")
     per_item_fee = models.DecimalField("Each extra item", max_digits=10, decimal_places=2, default=0,
                                        help_text="Added for every item after the first. 0 = same fee for any number of items.")
     free_over = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True,
@@ -1223,8 +1327,11 @@ class SiteSettings(models.Model):
                                            help_text="Customers share a link; friends get a welcome discount and the customer is rewarded after the friend's first delivered order.")
     referral_friend_percent = models.PositiveSmallIntegerField("Friend's welcome discount (%)", default=10)
     referral_reward_percent = models.PositiveSmallIntegerField("Reward for the customer who shared (%)", default=10)
+    allow_guest_checkout = models.BooleanField(
+        "Allow checkout without an account", default=False,
+        help_text="Off (recommended): shoppers sign in or create an account before ordering, so every order has a verified customer, order history and support chat.")
     allow_cash_on_delivery = models.BooleanField(default=True, help_text="Show 'Cash on delivery' at checkout. Card payments appear automatically once Stripe keys are set.")
-    show_language_menu = models.BooleanField(default=False, help_text="Show the English / Urdu / Roman Urdu language switcher.")
+    show_language_menu = models.BooleanField(default=True, help_text="Let shoppers choose the shop language (English, Arabic, Spanish, French, Urdu, Roman Urdu) in the header and footer.")
     banner_text = models.CharField(
         max_length=200, blank=True,
         help_text="Shown as a site-wide announcement bar at the top of every page, e.g. 'Summer sale: 20% off everything'. Leave blank to hide it.",
@@ -1297,6 +1404,33 @@ class Currency(models.Model):
         super().save(*args, **kwargs)
         from django.core.cache import cache
         cache.delete("currencies:v1")
+
+
+class UIText(models.Model):
+    """One piece of shop text and its translations (Admin > Translations).
+    New text is added automatically the first time a page shows it in
+    another language."""
+    source = models.CharField(max_length=400, unique=True)
+    ur = models.TextField("Urdu", blank=True)
+    roman = models.TextField("Roman Urdu", blank=True)
+    ar = models.TextField("Arabic", blank=True)
+    es = models.TextField("Spanish", blank=True)
+    fr = models.TextField("French", blank=True)
+    by_ai = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["source"]
+        verbose_name = "Shop text"
+
+    def __str__(self):
+        return self.source[:60]
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        from .i18n import clear_cache
+        clear_cache()
 
 
 class Conversation(models.Model):

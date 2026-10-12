@@ -226,6 +226,8 @@ def notify_new_order(order):
     from .models import Notification, Order
     if order.status == "cancelled" or order.payment_status in ("pending", "failed", "refunded"):
         return
+    if order.payment_method == "cod" and not order.cod_confirmed:
+        return  # waiting for the customer to confirm by email
     with transaction.atomic():
         updated = Order.objects.filter(pk=order.pk, sellers_notified=False).update(sellers_notified=True)
     if not updated:

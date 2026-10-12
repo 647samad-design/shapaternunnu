@@ -14,7 +14,14 @@
     .track li.done { color: var(--ink); }
     .track li.done .dot { background: var(--brand); border-color: var(--brand); }
     .track li.done::before { background: var(--brand); }
-    .tracking { display: flex; flex-wrap: wrap; gap: 8px 24px; padding: 12px 16px; border-radius: var(--radius-sm); background: var(--surface-2); margin-bottom: 14px; }
+    .tracking { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 12px 16px; border-radius: var(--radius-sm); background: var(--surface-2); margin-bottom: 14px; }
+    .order-note { margin: 10px 0 0; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: .95rem; }
+    .order-note.ok { color: var(--ok); font-weight: 700; }
+    .cancel-box { position: relative; }
+    .cancel-box > summary { list-style: none; }
+    .cancel-box > summary::-webkit-details-marker { display: none; }
+    .cancel-form { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; width: min(300px, 86vw); display: grid; gap: 8px; padding: 14px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); box-shadow: 0 16px 40px rgba(20,26,31,.16); }
+    .cancel-form label { font-weight: 700; }
     .oi { display: grid; grid-template-columns: 64px minmax(0,1fr) auto; gap: 14px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
     .oi img { width: 64px; height: 64px; border-radius: var(--radius-sm); object-fit: cover; background: var(--surface-2); }
     .order-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); margin-top: 4px; }
@@ -39,9 +46,21 @@
             </div>
         </div>
         {% include "bees/partials/order_status.html" %}
-        {% if order.status != "cancelled" and order.tracking_number or order.status != "cancelled" and order.estimated_delivery %}
+        {% if order.payment_method == "cod" and not order.cod_confirmed and order.status == "pending" %}
+        <div class="callout warn" style="margin:12px 0 0;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;">
+            <span><strong>Please confirm this cash order.</strong> We emailed a confirmation link to {{ order.contact_email }}. Unconfirmed cash orders are cancelled after 48 hours.</span>
+            <form method="post" action="{% url 'resend_cod_confirmation' order.id %}" style="margin:0;">{% csrf_token %}<button class="btn btn-secondary btn-sm" type="submit">Send the link again</button></form>
+        </div>
+        {% elif order.payment_method == "cod" and order.status != "cancelled" and order.payment_status == "not_applicable" %}
+        <p class="order-note">{% if order.cod_collected_at %}✓ Paid in cash on delivery ({{ order.cod_collected_at|date:"M j" }}).{% else %}💵 Pay <strong>{{ order.total|money }}</strong> in cash when the courier delivers.{% endif %}</p>
+        {% endif %}
+        {% if order.payment_status == "refunded" %}<p class="order-note ok">↩ {{ order.total|money }} refunded{% if order.card_label %} to {{ order.card_label }}{% endif %}{% if order.refunded_at %} on {{ order.refunded_at|date:"M j, Y" }}{% endif %}. Banks usually show it within 5–10 business days.</p>
+        {% elif order.payment_status == "paid" and order.card_label %}<p class="order-note">Paid with {{ order.card_label }}</p>{% endif %}
+        {% if order.status == "cancelled" and order.cancel_reason %}<p class="order-note">Cancelled: {{ order.cancel_reason }}</p>{% endif %}
+        {% if order.status != "cancelled" %}
         <div class="tracking">
-            {% if order.tracking_number %}<span>Tracking number <strong>{{ order.tracking_number }}</strong>{% if order.courier_name %} with {{ order.courier_name }}{% endif %}</span>{% if order.tracking_link %}<a class="btn btn-secondary btn-sm" href="{{ order.tracking_link }}" target="_blank" rel="noopener">{{ t.track_package }}</a>{% endif %}{% endif %}
+            <span>Shipment <strong>{{ order.shipment_number }}</strong>{% if order.courier_name %} · {{ order.courier_name }}{% endif %}{% if order.tracking_number and order.tracking_number != order.shipment_number %} · courier no. <strong>{{ order.tracking_number }}</strong>{% endif %}</span>
+            <a class="btn btn-secondary btn-sm" href="{% if order.tracking_link %}{{ order.tracking_link }}{% else %}{{ order.public_tracking_path }}{% endif %}" {% if order.tracking_link and not order.uses_store_tracking %}target="_blank" rel="noopener"{% endif %}>{{ t.track_package }}</a>
             {% if order.estimated_delivery %}<span>{% if order.status == "delivered" %}Delivered{% else %}Arrives by <strong>{{ order.estimated_delivery|date:"M j, Y" }}</strong>{% endif %}</span>{% endif %}
         </div>
         {% endif %}
@@ -72,8 +91,17 @@
                 {% if stripe_enabled and order.payment_method == "cod" and order.payment_status == "not_applicable" and order.is_cancellable and order.total_cents %}<form method="post" action="{% url 'pay_online' order.id %}">{% csrf_token %}<button type="submit" class="btn btn-primary btn-sm">Pay online now</button></form>{% endif %}
                 <a class="btn btn-secondary btn-sm" href="{% url 'invoice_pdf' order.id %}{% if guest %}?t={{ order.access_token }}{% endif %}">Invoice</a>
                 {% if not guest %}<form method="post" action="{% url 'buy_again' order.id %}">{% csrf_token %}<button type="submit" class="btn btn-secondary btn-sm">Buy again</button></form>{% endif %}
+                {% if not guest %}{% regroup order.items.all by seller_account as sellers %}{% for g in sellers %}{% if g.grouper %}<a class="btn btn-secondary btn-sm" href="{% url 'message_store' g.grouper.id %}">💬 {% if sellers|length > 1 %}{{ g.grouper.display_name }}{% else %}{{ t.message_seller }}{% endif %}</a>{% endif %}{% endfor %}{% endif %}
                 {% if order.is_cancellable %}
-                <form method="post" action="{% url 'cancel_order' order.id %}" onsubmit="return confirm('Cancel order #{{ order.id }}?{% if order.payment_status == "paid" %} You will be refunded in full.{% endif %}')">{% csrf_token %}<button type="submit" class="btn btn-danger btn-sm">{{ t.cancel_order }}</button></form>
+                <details class="cancel-box">
+                    <summary class="btn btn-danger btn-sm">{{ t.cancel_order }}</summary>
+                    <form method="post" action="{% url 'cancel_order' order.id %}" class="cancel-form">{% csrf_token %}
+                        <label for="cr{{ order.id }}">Why are you cancelling?</label>
+                        <select id="cr{{ order.id }}" name="reason">{% for r in cancel_reasons %}<option>{{ r }}</option>{% endfor %}</select>
+                        <p class="small muted" style="margin:0;">{% if order.payment_status == "paid" %}You'll get a full refund of {{ order.total|money }}{% if order.card_label %} to {{ order.card_label }}{% else %} to your card{% endif %} straight away.{% else %}Nothing has been charged.{% endif %}</p>
+                        <button type="submit" class="btn btn-danger btn-sm">Yes, cancel order #{{ order.id }}</button>
+                    </form>
+                </details>
                 {% endif %}
             </div>
         </div>

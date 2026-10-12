@@ -13,7 +13,7 @@
 {% endblock %}
 {% block content %}
 <div class="wrap page" style="max-width:920px;">
-    <div class="page-head"><div><h1>Your account</h1><p>Signed in as {{ request.user.username }}</p></div></div>
+    <div class="page-head"><div><h1>Your account</h1><p>Signed in as <span data-no-translate>{{ request.user.username }}</span></p></div></div>
     {% include "bees/partials/account_tabs.html" %}
     <section class="panel">
         <h2>Set up two-step sign-in</h2>
@@ -27,7 +27,7 @@
             <div class="qr" aria-label="QR code for your authenticator app">{{ qr|safe }}</div>
             <div>
                 <p class="small muted">Can't scan? Enter this key in the app instead (time-based):</p>
-                <p class="secret">{{ secret_spaced }}</p>
+                <p class="secret" data-no-translate>{{ secret_spaced }}</p>
                 <form method="post" style="margin-top:16px;display:grid;gap:10px;max-width:280px;">
                     {% csrf_token %}
                     <div class="field"><label for="id_code">6-digit code</label><input type="text" id="id_code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required style="font-size:1.3rem;letter-spacing:.3em;"></div>

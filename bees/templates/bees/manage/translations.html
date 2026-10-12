@@ -1,0 +1,48 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Translations{% endblock %}
+{% block page_css %}
+    .tr-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 12px 0; border-top: 1px solid var(--line); }
+    .tr-row:first-child { border-top: 0; }
+    .tr-row .src { font-size: .95rem; overflow-wrap: anywhere; }
+    .tr-row textarea { min-height: 44px; }
+    .tr-row form { display: contents; }
+    @media (max-width: 720px) { .tr-row { grid-template-columns: minmax(0, 1fr); } }
+{% endblock %}
+{% block admin %}
+<div class="adm-head">
+    <div><a class="link small" href="{% url 'manage_settings' %}">← Store settings</a><h1 style="margin-top:6px;">Translations</h1>
+        <p>The shop is translated automatically: {{ builtin_count }} texts come built in. Anything new (your own pages, product names, messages you add) appears here to translate.</p></div>
+    <div class="actions">
+        <form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="lang" value="{{ lang }}"><input type="hidden" name="show" value="{{ show }}">
+            <button class="btn btn-primary btn-sm" name="action" value="ai" {% if not ai_ready %}disabled title="Add ANTHROPIC_API_KEY to .env to use AI"{% endif %}>✨ Translate missing with AI</button></form>
+    </div>
+</div>
+<div class="tabs">{% for code, name in langs %}<a href="?lang={{ code }}&show={{ show }}" class="{% if code == lang %}on{% endif %}">{{ name }}</a>{% endfor %}</div>
+<form method="get" class="toolbar">
+    <input type="hidden" name="lang" value="{{ lang }}">
+    <select name="show" onchange="this.form.submit()"><option value="missing" {% if show == "missing" %}selected{% endif %}>Not translated yet ({{ missing_count }})</option><option value="all" {% if show == "all" %}selected{% endif %}>All your texts ({{ custom_count }})</option></select>
+    <label for="tq" class="sr-only">Search</label><input class="input grow" id="tq" type="search" name="q" value="{{ q }}" placeholder="Search text">
+    <button class="btn btn-secondary" type="submit">Search</button>
+</form>
+{% if not ai_ready %}<div class="callout" style="margin:0;">Tip: add <code>ANTHROPIC_API_KEY</code> to the server's .env file to translate everything in one click. You can always type or fix translations by hand.</div>{% endif %}
+<section class="panel">
+    {% for r in page_obj %}
+    <div class="tr-row">
+        <div class="src"><span class="muted small">English</span><br>{{ r.source }}{% if r.by_ai %} <span class="pill info small">AI</span>{% endif %}</div>
+        <form method="post">{% csrf_token %}<input type="hidden" name="lang" value="{{ lang }}"><input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="id" value="{{ r.id }}">
+            <textarea name="text" rows="2" {% if lang == "ar" or lang == "ur" %}dir="rtl"{% endif %} placeholder="Translation">{{ r.current }}</textarea>
+            <div style="display:flex;gap:6px;"><button class="btn btn-secondary btn-sm" name="action" value="save">Save</button><button class="btn btn-ghost btn-sm" name="action" value="delete" title="Remove this text" style="color:var(--sale);">×</button></div>
+        </form>
+    </div>
+    {% empty %}<p class="muted" style="text-align:center;padding:28px 0;">{% if show == "missing" %}Nothing left to translate. 🎉{% else %}No texts yet. They appear here when shoppers view pages in another language.{% endif %}</p>{% endfor %}
+</section>
+{% include "bees/manage/_pagination.html" %}
+<section class="panel">
+    <h2>Add a translation</h2>
+    <form method="post" class="form-grid">{% csrf_token %}<input type="hidden" name="lang" value="{{ lang }}"><input type="hidden" name="action" value="add">
+        <div class="field"><label for="ts">English text (exactly as on the page)</label><input id="ts" name="source" maxlength="400" required></div>
+        <div class="field"><label for="tt">Translation</label><input id="tt" name="text" {% if lang == "ar" or lang == "ur" %}dir="rtl"{% endif %} required></div>
+        <div><button class="btn btn-primary btn-sm" type="submit">Add</button></div>
+    </form>
+</section>
+{% endblock %}

@@ -11,6 +11,8 @@ STRIPE_EVENT = "Stripe"
 PAYMENT_FAILED = "Payment page failed"
 PAYMENT_OK = "Payments working"
 WEBHOOK_REJECTED = "Webhook rejected"
+SERVER_ERROR = "Server error"
+DAILY_TASKS = "Daily tasks ran"
 
 
 def log_once(prefix, message, minutes=10):

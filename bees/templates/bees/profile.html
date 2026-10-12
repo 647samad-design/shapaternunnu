@@ -21,7 +21,7 @@
 {% endblock %}
 {% block content %}
 <div class="wrap page">
-    <div class="page-head"><div><h1>Your account</h1><p>Signed in as {{ request.user.username }}</p></div></div>
+    <div class="page-head"><div><h1>Your account</h1><p>Signed in as <span data-no-translate>{{ request.user.username }}</span></p></div></div>
     {% include "bees/partials/account_tabs.html" with tab="profile" %}
     <div class="stats">
         <a class="stat" href="{% url 'my_orders' %}" style="text-decoration:none;"><strong>{{ orders_count }}</strong><span>Orders</span></a>

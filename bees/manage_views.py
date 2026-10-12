@@ -183,6 +183,7 @@ def dashboard(request):
     return _render(request, "dashboard.html", {
         "section": "dashboard",
         "setup_pending": setup_pending,
+        "health": quick_health(),
         "days": days,
         "series": series,
         "period_revenue": period_revenue,
@@ -905,10 +906,21 @@ def system_check(request):
 
     # Security
     add("Security", "Debug mode", not dj.DEBUG, "Off." if not dj.DEBUG else "ON - turn DEBUG off in .env on the live site.")
+    weak_key = dj.SECRET_KEY.startswith("django-insecure") or len(dj.SECRET_KEY) < 40
+    add("Security", "Secret key", not weak_key, "Strong." if not weak_key else "Weak or default SECRET_KEY - set a long random one in .env.")
+    add("Security", "HTTPS", dj.DEBUG or getattr(dj, "SECURE_SSL_REDIRECT", False),
+        "Visitors are always sent to https://." if getattr(dj, "SECURE_SSL_REDIRECT", False) else "Not forced - set SECURE_SSL_REDIRECT=True in .env.",
+        level=None if (dj.DEBUG or getattr(dj, "SECURE_SSL_REDIRECT", False)) else "warn")
+    add("Security", "Allowed hosts", "*" not in dj.ALLOWED_HOSTS, ", ".join(dj.ALLOWED_HOSTS)[:200] if "*" not in dj.ALLOWED_HOSTS else "'*' allows any domain - list your domain(s) in ALLOWED_HOSTS.")
+    if getattr(dj, "DEMO_MODE", False):
+        add("Security", "Demo mode", False, "DEMO_MODE is on: anyone can sign in as the demo admin. Only use it on a separate demo copy.", level="warn")
     staff = User.objects.filter(is_staff=True, is_active=True)
     without = [u.username for u in staff if not getattr(getattr(u, "profile", None), "totp_enabled", False)]
     add("Security", "Staff two-step sign-in", not without, "All staff use it." if not without else f"Not set up: {', '.join(without[:5])}.",
         level=None if not without else "warn")
+
+    for c in operations_checks(dj):
+        checks.append(c)
 
     groups = {}
     for c in checks:
@@ -932,7 +944,7 @@ EU = "AT, BE, BG, HR, CY, CZ, DK, EE, FI, FR, DE, GR, HU, IE, IT, LV, LT, LU, MT
 class ShippingZoneForm(forms.ModelForm):
     class Meta:
         model = ShippingZone
-        fields = ["name", "countries", "fee", "per_item_fee", "free_over", "delivery_days", "active"]
+        fields = ["name", "countries", "courier", "fee", "per_item_fee", "free_over", "delivery_days", "active"]
         widgets = {"countries": forms.Textarea(attrs={"rows": 3, "placeholder": "US, CA  — or * for all other countries"})}
 
     def __init__(self, *args, **kwargs):
@@ -1184,7 +1196,7 @@ class SiteSettingsForm(forms.ModelForm):
         ("Announcement bar", "A message across the top of every page, e.g. a sale.", ["banner_active", "banner_text", "banner_link"]),
         ("Selling", "Commission taken from each sale. Applies to sellers who join from now on; change an existing seller's rate on their page.",
          ["commission_individual", "commission_organization"]),
-        ("Shipping, tax & payment", "Applied at checkout.", ["shipping_flat_fee", "free_shipping_threshold", "tax_percent", "delivery_days", "return_days", "allow_cash_on_delivery"]),
+        ("Shipping, tax & payment", "Applied at checkout.", ["shipping_flat_fee", "free_shipping_threshold", "tax_percent", "delivery_days", "return_days", "allow_cash_on_delivery", "allow_guest_checkout"]),
         ("Contact & social", "Shown in the footer, emails and help page.",
          ["support_email", "support_phone", "company_address", "facebook_url", "instagram_url", "twitter_url", "youtube_url"]),
         ("Referral program", "Customers invite friends with their own link. Discount codes are created automatically.",
@@ -1505,3 +1517,185 @@ def referrals(request):
         "welcome_used": welcome.filter(code__in=used).count(),
     }
     return _render(request, "referrals.html", {"section": "customers", "top": top, "stats": stats, "brand": SiteSettings.load()})
+
+
+# ---------------------------------------------------------------------------
+# Translations of the shop's own text
+# ---------------------------------------------------------------------------
+
+TRANSLATION_LANGS = [("ur", "Urdu"), ("roman", "Roman Urdu"), ("ar", "Arabic"), ("es", "Spanish"), ("fr", "French")]
+
+
+@staff_required
+def translations(request):
+    from django.conf import settings as dj
+    from . import ai, i18n
+    from .i18n_pack import PACK
+    from .models import UIText
+    lang = request.GET.get("lang") or request.POST.get("lang") or "ar"
+    if lang not in dict(TRANSLATION_LANGS):
+        lang = "ar"
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "save":
+            row = get_object_or_404(UIText, pk=request.POST.get("id"))
+            setattr(row, lang, request.POST.get("text", "").strip()[:2000])
+            row.by_ai = False
+            row.save()
+            messages.success(request, "Translation saved.")
+        elif action == "add":
+            source = i18n.normalize(request.POST.get("source", ""))[:400]
+            if source:
+                row, _ = UIText.objects.get_or_create(source=source)
+                setattr(row, lang, request.POST.get("text", "").strip()[:2000])
+                row.save()
+                messages.success(request, "Translation added.")
+        elif action == "ai":
+            todo = [r for r in UIText.objects.filter(**{lang: ""}) if r.source not in PACK][:60]
+            if not todo:
+                messages.info(request, "Everything is already translated.")
+            else:
+                done = 0
+                for start in range(0, len(todo), 30):
+                    batch = todo[start:start + 30]
+                    result = ai.translate_texts([r.source for r in batch], lang)
+                    if result is None:
+                        messages.error(request, "AI translation isn't available. Add ANTHROPIC_API_KEY to .env, or type translations by hand.")
+                        break
+                    for row, text in zip(batch, result):
+                        if text:
+                            setattr(row, lang, text)
+                            row.by_ai = True
+                            row.save()
+                            done += 1
+                if done:
+                    _log(request, f"AI-translated {done} shop texts into {lang}")
+                    messages.success(request, f"{done} text{'s' if done != 1 else ''} translated. Check a few, then press again for more.")
+        elif action == "delete":
+            UIText.objects.filter(pk=request.POST.get("id")).delete()
+            i18n.clear_cache()
+        return redirect(f"{reverse('manage_translations')}?lang={lang}&show={request.POST.get('show', 'missing')}")
+
+    show = request.GET.get("show", "missing")
+    q = request.GET.get("q", "").strip()
+    rows = UIText.objects.all()
+    if q:
+        rows = rows.filter(Q(source__icontains=q) | Q(**{f"{lang}__icontains": q}))
+    rows = [r for r in rows if r.source not in PACK]
+    missing = [r for r in rows if not getattr(r, lang)]
+    listing = missing if show == "missing" else rows
+    for r in listing:
+        r.current = getattr(r, lang)
+    return _render(request, "translations.html", {
+        "section": "settings", "langs": TRANSLATION_LANGS, "lang": lang, "show": show, "q": q,
+        "page_obj": _page(request, listing, 30), "missing_count": len(missing), "builtin_count": len(PACK),
+        "custom_count": len(rows), "ai_ready": bool(dj.AI_API_KEY),
+    })
+
+
+
+def operations_checks(dj=None):
+    """Day-to-day health of the store: scheduled jobs, crashes, late orders,
+    things waiting for staff, disk space, currencies and translations.
+    Returns check dicts like system_check's."""
+    import shutil
+    from django.conf import settings as _settings
+    from .alerts import DAILY_TASKS, SERVER_ERROR
+    from .models import Conversation, Currency, OrderItem, UIText
+    dj = dj or _settings
+    now = timezone.now()
+    out = []
+
+    def add(group, name, ok, detail, level=None):
+        out.append({"group": group, "name": name, "level": level or ("ok" if ok else "bad"), "detail": detail})
+
+    # Scheduled jobs & crashes
+    ran = AuditLog.objects.filter(action__startswith=DAILY_TASKS).order_by("-created_at").first()
+    if ran:
+        age = now - ran.created_at
+        ok = age <= timedelta(hours=36) and ran.action.endswith(": ok")
+        add("Daily jobs & errors", "Daily tasks", ok,
+            f"Last run {timezone.localtime(ran.created_at):%b %d, %H:%M}" + ("." if ok else f" - {ran.action.split(': ', 1)[-1]}" if age <= timedelta(hours=36) else " - more than a day ago. Is the PythonAnywhere task still set?"),
+            level=None if ok else ("bad" if age > timedelta(hours=36) else "warn"))
+    else:
+        add("Daily jobs & errors", "Daily tasks", False,
+            "Never ran. On PythonAnywhere > Tasks add a daily task: cd ~/Lumen-Market && venv/bin/python manage.py daily_tasks "
+            "(releases unpaid orders, cancels unconfirmed cash orders, sends reminders, updates badges and currency rates, backs up).",
+            level="warn")
+    errors = AuditLog.objects.filter(action__startswith=SERVER_ERROR, created_at__gte=now - timedelta(days=1))
+    latest = errors.order_by("-created_at").first()
+    add("Daily jobs & errors", "Page crashes (24 hours)", latest is None,
+        "None." if latest is None else f"{errors.count()}. Latest {timezone.localtime(latest.created_at):%H:%M}: {latest.action[len(SERVER_ERROR) + 2:][:200]}")
+
+    # Orders that need someone
+    late = Order.objects.filter(status="confirmed", created_at__lt=now - timedelta(days=3)).exclude(payment_status__in=["pending", "failed"]).count()
+    add("Orders", "Not shipped after 3 days", late == 0, "None." if not late else f"{late} order(s) - remind the sellers (Orders > filter 'Confirmed').",
+        level=None if not late else "warn")
+    overdue = Order.objects.filter(status="shipped", estimated_delivery__lt=timezone.localdate() - timedelta(days=5)).count()
+    add("Orders", "Shipped but overdue", overdue == 0, "None." if not overdue else f"{overdue} parcel(s) 5+ days past the expected date - check with the courier.",
+        level=None if not overdue else "warn")
+    unconfirmed = Order.objects.filter(payment_method="cod", cod_confirmed=False, status="pending").count()
+    add("Orders", "Cash orders waiting for the customer", True,
+        "None." if not unconfirmed else f"{unconfirmed} - customers must click the link in their email; unconfirmed orders cancel after 48 hours.", level="ok")
+    stuck_items = OrderItem.objects.filter(order__status="delivered").exclude(fulfillment_status="delivered").count()
+    if stuck_items:
+        add("Orders", "Items out of sync", False, f"{stuck_items} item(s) in delivered orders aren't marked delivered.", level="warn")
+
+    # Waiting for staff
+    waits = [
+        ("Seller applications", SellerAccount.objects.filter(status="pending", created_at__lt=now - timedelta(days=2)).count(), "pending 2+ days"),
+        ("Products to review", Product.objects.filter(approval_status="pending", created_at__lt=now - timedelta(days=2)).count(), "pending 2+ days"),
+        ("Return requests", ReturnRequest.objects.filter(status="requested", created_at__lt=now - timedelta(days=3)).count(), "open 3+ days"),
+        ("Payout requests", Payout.objects.filter(status="requested", created_at__lt=now - timedelta(days=3)).count(), "waiting 3+ days"),
+        ("Reported conversations", Conversation.objects.filter(reported=True).count(), "to review"),
+        ("Unanswered product questions", Question.objects.filter(answer="", created_at__lt=now - timedelta(days=2)).count(), "2+ days old"),
+    ]
+    for name, count, label in waits:
+        add("Waiting for you", name, count == 0, "None." if not count else f"{count} {label}.", level=None if not count else "warn")
+
+    # Catalogue
+    out_of_stock = Product.objects.live().filter(stock__lte=0).count()
+    add("Catalogue", "Out of stock", True, f"{out_of_stock} live product(s) can't be bought right now." if out_of_stock else "Everything live is in stock.",
+        level="ok" if not out_of_stock else "warn")
+
+    # Server
+    try:
+        usage = shutil.disk_usage(str(_settings.BASE_DIR))
+        free_mb = usage.free // (1024 * 1024)
+        add("Server", "Free disk space", free_mb > 300, f"{free_mb:,} MB free." + ("" if free_mb > 300 else " Delete old backups or move images to Supabase Storage."),
+            level=None if free_mb > 300 else ("bad" if free_mb < 100 else "warn"))
+    except Exception:
+        pass
+    import django
+    import sys
+    add("Server", "Software", True, f"Python {sys.version.split()[0]}, Django {django.get_version()}.", level="ok")
+
+    # Languages, currencies, AI
+    active = Currency.objects.filter(active=True)
+    stale = [c.code for c in active if not c.updated_at or c.updated_at < now - timedelta(days=3)]
+    if active.exists():
+        add("Languages & currencies", "Currency rates", not stale,
+            "Up to date." if not stale else f"Not updated for 3+ days: {', '.join(stale)}. Press 'Update rates now' in Currencies or type them in.",
+            level=None if not stale else "warn")
+    missing = UIText.objects.filter(Q(ar="") | Q(es="") | Q(fr="") | Q(ur="")).count()
+    add("Languages & currencies", "Untranslated shop text", True,
+        "Everything shoppers have seen is translated." if not missing else f"{missing} piece(s) of text (mostly product names) still in English. Admin > Translations.",
+        level="ok" if not missing else "warn")
+    add("Languages & currencies", "AI assistant", True,
+        "On: listing writer, buying guides, shopper Q&A and one-click translation use Claude." if getattr(dj, "AI_API_KEY", "")
+        else "Off: add ANTHROPIC_API_KEY to .env for AI buying guides, shopper Q&A and one-click translation (built-in writer still works).", level="ok")
+    return out
+
+
+def quick_health():
+    """Number of problems for the admin dashboard banner (cached 10 min)."""
+    data = cache.get("manage:health")
+    if data is None:
+        from django.conf import settings as dj
+        checks = operations_checks(dj)
+        problems = [c for c in checks if c["level"] == "bad"]
+        if dj.EMAIL_BACKEND.endswith("console.EmailBackend"):
+            problems.append({"name": "Email isn't set up"})
+        data = {"bad": len(problems), "warn": sum(1 for c in checks if c["level"] == "warn"), "names": [p["name"] for p in problems][:3]}
+        cache.set("manage:health", data, 600)
+    return data

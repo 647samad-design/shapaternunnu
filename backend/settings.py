@@ -114,8 +114,10 @@ MIDDLEWARE = [
     'bees.middleware.DemoGuardMiddleware',
     'bees.currency.DisplayCurrencyMiddleware',
     'bees.middleware.ReferralCaptureMiddleware',
+    'bees.i18n.PageTranslationMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'bees.middleware.NoCacheMiddleware',
+    'bees.middleware.ErrorAlertMiddleware',
 ]
 
 ROOT_URLCONF = 'backend.urls'
@@ -309,6 +311,9 @@ AUTO_BACKUP = env_bool('AUTO_BACKUP', 'test' not in sys.argv)
 # A brand-new store opens the setup wizard the first time the owner visits
 # the admin (off while running tests).
 SETUP_WIZARD_REDIRECT = env_bool('SETUP_WIZARD_REDIRECT', 'test' not in sys.argv)
+
+# Read the card brand/last 4 digits from Stripe after payment (off in tests).
+STRIPE_CARD_DETAILS = env_bool('STRIPE_CARD_DETAILS', 'test' not in sys.argv)
 
 # Optional AI listing writer. Without a key a built-in writer is used.
 AI_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '').strip()
