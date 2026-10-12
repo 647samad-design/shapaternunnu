@@ -6,6 +6,8 @@ from django.conf import settings
 from django.contrib.sitemaps.views import sitemap
 from django.views.generic import TemplateView
 from bees import views
+from bees import live
+from bees import pwa
 from bees import messaging as msgs
 from bees import account_views
 from bees import manage_views as mv
@@ -22,6 +24,10 @@ sitemaps = {
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('sitemap.xml', sitemap, {'sitemaps': sitemaps}, name='sitemap'),
+    path('manifest.webmanifest', pwa.manifest, name='pwa_manifest'),
+    path('app-icon-<int:size>.png', pwa.icon, name='pwa_icon'),
+    path('sw.js', pwa.service_worker, name='service_worker'),
+    path('offline/', pwa.offline, name='offline'),
     path('robots.txt', TemplateView.as_view(template_name="robots.txt", content_type="text/plain"), name='robots'),
     path('', views.home, name='home'),
     path('search/', views.search_products, name='search_products'),
@@ -72,6 +78,10 @@ urlpatterns = [
     path('messages/<int:pk>/', msgs.conversation, name='conversation'),
     path('messages/<int:pk>/send/', msgs.send_view, name='message_send'),
     path('messages/<int:pk>/poll/', msgs.poll_view, name='message_poll'),
+    path('messages/<int:pk>/typing/', msgs.typing_view, name='message_typing'),
+    path('messages/photo/<int:pk>/', msgs.message_image, name='message_image'),
+    path('seller/messages/replies/', msgs.quick_replies_view, name='seller_quick_replies'),
+    path('live/', live.live_view, name='live'),
     path('messages/<int:pk>/report/', msgs.report_view, name='message_report'),
     path('product/<int:pk>/message/', msgs.message_about_product, name='message_seller'),
     path('store-message/<int:seller_id>/', msgs.message_store, name='message_store'),

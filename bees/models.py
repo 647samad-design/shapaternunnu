@@ -36,6 +36,10 @@ def seller_logo_path(instance, filename):
     return _public_upload_path("seller_docs/logos")(instance, filename)
 
 
+def message_image_path(instance, filename):
+    return _public_upload_path("chat")(instance, filename)
+
+
 def seller_banner_path(instance, filename):
     return _public_upload_path("seller_docs/banners")(instance, filename)
 
@@ -864,6 +868,9 @@ class SellerAccount(models.Model):
 
     business_certificate = models.FileField(upload_to=seller_cert_path, storage=_private_storage, blank=True, null=True)
     id_document = models.FileField(upload_to=seller_id_path, storage=_private_storage, blank=True, null=True)
+    quick_replies = models.TextField(
+        blank=True, default="Thanks for your message! I'll get back to you shortly.\nYes, it's in stock and ready to ship.\nIt usually arrives in 3-7 working days.\nYes, we ship to your country.",
+        help_text="Saved replies for Messages, one per line.")
     store_logo = models.ImageField(upload_to=seller_logo_path, blank=True, null=True)
     store_banner = models.ImageField(upload_to=seller_banner_path, blank=True, null=True)
 
@@ -1461,13 +1468,15 @@ class Message(models.Model):
     from_seller = models.BooleanField(default=False)
     body = models.TextField(max_length=2000)
     product = models.ForeignKey(Product, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    # Photos in chat are private: only the two sides (and staff) can open them.
+    image = models.ImageField(upload_to=message_image_path, storage=_private_storage, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
         ordering = ["created_at", "id"]
 
     def __str__(self):
-        return self.body[:40]
+        return self.body[:40] or "Photo"
 
 
 class AuditLog(models.Model):

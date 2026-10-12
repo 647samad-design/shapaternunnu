@@ -502,3 +502,30 @@ ENTRIES.update({
     "{0} reviews": ("{0} جائزے", "{0} reviews", "{0} تقييمات", "{0} reseñas", "{0} avis"),
     "{0} questions": ("{0} سوالات", "{0} sawalat", "{0} أسئلة", "{0} preguntas", "{0} questions"),
 })
+
+ENTRIES.update({
+    # --- Live chat and alerts ----------------------------------------------
+    "Play a sound for new messages and alerts": ("نئے پیغامات اور اطلاعات پر آواز چلائیں", "Naye messages aur alerts par awaz chalayein", "تشغيل صوت للرسائل والتنبيهات الجديدة", "Reproducir un sonido con mensajes y avisos nuevos", "Jouer un son pour les nouveaux messages et alertes"),
+    "Test sound": ("آواز آزمائیں", "Awaz test karein", "تجربة الصوت", "Probar sonido", "Tester le son"),
+    "Show alerts on my screen": ("اطلاعات میری اسکرین پر دکھائیں", "Alerts meri screen par dikhayein", "إظهار التنبيهات على شاشتي", "Mostrar avisos en mi pantalla", "Afficher les alertes sur mon écran"),
+    "Screen alerts are on.": ("اسکرین اطلاعات آن ہیں۔", "Screen alerts on hain.", "تنبيهات الشاشة مفعّلة.", "Los avisos en pantalla están activados.", "Les alertes à l'écran sont activées."),
+    "Screen alerts are blocked in your browser settings.": ("اسکرین اطلاعات آپ کے براؤزر کی سیٹنگز میں بند ہیں۔", "Screen alerts aap ke browser settings mein band hain.", "تنبيهات الشاشة محظورة في إعدادات المتصفح.", "Los avisos en pantalla están bloqueados en la configuración del navegador.", "Les alertes à l'écran sont bloquées dans les réglages du navigateur."),
+    "Alerts are on": ("اطلاعات آن ہیں", "Alerts on hain", "التنبيهات مفعّلة", "Avisos activados", "Alertes activées"),
+    "You will see new messages and orders here.": ("نئے پیغامات اور آرڈرز یہاں نظر آئیں گے۔", "Naye messages aur orders yahan nazar aayenge.", "ستظهر الرسائل والطلبات الجديدة هنا.", "Aquí verás los mensajes y pedidos nuevos.", "Vous verrez ici les nouveaux messages et commandes."),
+    "Online": ("آن لائن", "Online", "متصل الآن", "En línea", "En ligne"),
+    "Last seen": ("آخری بار دیکھا گیا", "Last seen", "آخر ظهور", "Última vez", "Vu à"),
+    "Seen": ("دیکھ لیا", "Dekh liya", "تمت المشاهدة", "Visto", "Vu"),
+    "Sent": ("بھیج دیا", "Bhej diya", "تم الإرسال", "Enviado", "Envoyé"),
+    "Sending…": ("بھیجا جا رہا ہے…", "Bheja ja raha hai…", "جارٍ الإرسال…", "Enviando…", "Envoi…"),
+    "Not sent - tap to retry": ("نہیں بھیجا گیا - دوبارہ کوشش کے لیے ٹیپ کریں", "Nahi gaya - dobara bhejne ke liye tap karein", "لم يُرسل - انقر لإعادة المحاولة", "No enviado - toca para reintentar", "Non envoyé - touchez pour réessayer"),
+    "About:": ("بارے میں:", "Baray mein:", "بخصوص:", "Sobre:", "À propos de :"),
+    "New message": ("نیا پیغام", "Naya message", "رسالة جديدة", "Mensaje nuevo", "Nouveau message"),
+    "You have a new message": ("آپ کا نیا پیغام آیا ہے", "Aap ka naya message aaya hai", "لديك رسالة جديدة", "Tienes un mensaje nuevo", "Vous avez un nouveau message"),
+    "typing…": ("لکھ رہے ہیں…", "likh rahe hain…", "يكتب…", "escribiendo…", "écrit…"),
+    "You:": ("آپ:", "Aap:", "أنت:", "Tú:", "Vous :"),
+    "Photo ready to send": ("تصویر بھیجنے کے لیے تیار ہے", "Photo bhejne ke liye tayyar hai", "الصورة جاهزة للإرسال", "Foto lista para enviar", "Photo prête à envoyer"),
+    "Send a photo": ("تصویر بھیجیں", "Photo bhejein", "إرسال صورة", "Enviar una foto", "Envoyer une photo"),
+    "Photo": ("تصویر", "Photo", "صورة", "Foto", "Photo"),
+    "📷 Photo": ("📷 تصویر", "📷 Photo", "📷 صورة", "📷 Foto", "📷 Photo"),
+    "Remove photo": ("تصویر ہٹائیں", "Photo hatayein", "إزالة الصورة", "Quitar foto", "Retirer la photo"),
+})

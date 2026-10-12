@@ -11,3 +11,4 @@ private_media/
 .DS_Store
 backups/
 db.sqlite3.before-restore
+.live-cache/

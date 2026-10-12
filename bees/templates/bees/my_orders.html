@@ -8,7 +8,7 @@
     .order-top h2 { font-size: 1.2rem; }
     .track { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); margin: 6px 0 18px; counter-reset: s; }
     .track li { position: relative; text-align: center; font-size: 0.9rem; color: var(--muted); font-weight: 700; padding-top: 22px; }
-    .track li::before { content: ""; position: absolute; top: 7px; left: -50%; width: 100%; height: 3px; background: var(--line); }
+    .track li::before { content: ""; position: absolute; top: 7px; inset-inline-start: -50%; width: 100%; height: 3px; background: var(--line); }
     .track li:first-child::before { display: none; }
     .track .dot { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 17px; height: 17px; border-radius: 999px; background: var(--surface); border: 3px solid var(--line); z-index: 1; }
     .track li.done { color: var(--ink); }
@@ -22,6 +22,7 @@
     .cancel-box > summary::-webkit-details-marker { display: none; }
     .cancel-form { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; width: min(300px, 86vw); display: grid; gap: 8px; padding: 14px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); box-shadow: 0 16px 40px rgba(20,26,31,.16); }
     .cancel-form label { font-weight: 700; }
+    html[dir="rtl"] .cancel-form { right: auto; left: 0; }
     .oi { display: grid; grid-template-columns: 64px minmax(0,1fr) auto; gap: 14px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
     .oi img { width: 64px; height: 64px; border-radius: var(--radius-sm); object-fit: cover; background: var(--surface-2); }
     .order-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); margin-top: 4px; }
@@ -98,7 +99,7 @@
                     <form method="post" action="{% url 'cancel_order' order.id %}" class="cancel-form">{% csrf_token %}
                         <label for="cr{{ order.id }}">Why are you cancelling?</label>
                         <select id="cr{{ order.id }}" name="reason">{% for r in cancel_reasons %}<option>{{ r }}</option>{% endfor %}</select>
-                        <p class="small muted" style="margin:0;">{% if order.payment_status == "paid" %}You'll get a full refund of {{ order.total|money }}{% if order.card_label %} to {{ order.card_label }}{% else %} to your card{% endif %} straight away.{% else %}Nothing has been charged.{% endif %}</p>
+                        <p class="small muted" style="margin:0;">{% if order.payment_status == "paid" %}You'll get a full refund of {{ order.total|money }} to your card straight away.{% if order.card_label %} <span data-no-translate>💳 {{ order.card_label }}</span>{% endif %}{% else %}Nothing has been charged.{% endif %}</p>
                         <button type="submit" class="btn btn-danger btn-sm">Yes, cancel order #{{ order.id }}</button>
                     </form>
                 </details>

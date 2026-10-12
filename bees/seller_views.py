@@ -796,7 +796,8 @@ def plan_done(request):
 @seller_required()
 def messages_inbox(request):
     from .models import Conversation
-    convs = Conversation.objects.filter(seller=request.seller).select_related("buyer").exclude(last_message_at=None)
+    from .messaging import with_preview
+    convs = with_preview(Conversation.objects.filter(seller=request.seller).select_related("buyer").exclude(last_message_at=None))
     return _render(request, "messages.html", {"section": "messages", "conversations": convs, "conv": None})
 
 
@@ -808,7 +809,7 @@ def conversation(request, pk):
     messaging.mark_read(conv, "seller")
     orders = (OrderItem.objects.filter(seller_account=request.seller, order__user=conv.buyer)
               .values("order_id").distinct().count())
-    convs = Conversation.objects.filter(seller=request.seller).select_related("buyer").exclude(last_message_at=None)
+    convs = messaging.with_preview(Conversation.objects.filter(seller=request.seller).select_related("buyer").exclude(last_message_at=None))
     return _render(request, "messages.html", {
         "section": "messages", "conversations": convs, "conv": conv,
         "thread": messaging.serialize(conv.messages.select_related("product"), "seller"),

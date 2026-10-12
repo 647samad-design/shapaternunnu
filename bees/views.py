@@ -188,6 +188,18 @@ def _send_html_email(subject, template, context, recipient):
         html_body = render_to_string(template, context)
         email = EmailMultiAlternatives(subject, strip_tags(html_body), None, [recipient])
         email.attach_alternative(html_body, "text/html")
+    except Exception as exc:
+        from .alerts import email_failed
+        email_failed(subject, recipient, exc)
+        return
+    # The mail server can take seconds to answer: send after the page is
+    # delivered so shoppers and sellers never wait for it.
+    from .background import after_response
+    after_response(_deliver_email, email, subject, recipient)
+
+
+def _deliver_email(email, subject, recipient):
+    try:
         email.send(fail_silently=False)
     except Exception as exc:
         # Never break the page for a mail problem, but make it visible to

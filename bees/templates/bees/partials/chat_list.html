@@ -1,9 +1,10 @@
 {# Conversation list. Needs: conversations, conv (current or None), side, url_name. #}
-<nav class="conv-list" aria-label="Conversations">
+<nav class="conv-list" aria-label="Conversations" data-conv-list>
     {% for c in conversations %}
-    <a href="{% url url_name c.id %}" class="conv {% if conv and conv.id == c.id %}on{% endif %}">
+    <a href="{% url url_name c.id %}" class="conv {% if conv and conv.id == c.id %}on{% endif %}{% if side == "buyer" and c.buyer_unread or side == "seller" and c.seller_unread %} unread{% endif %}">
         <span class="conv-avatar" aria-hidden="true">{% if side == "buyer" %}{{ c.seller.display_name|first|upper }}{% else %}{{ c.buyer.first_name|default:c.buyer.username|first|upper }}{% endif %}</span>
         <span class="conv-main"><strong data-no-translate>{% if side == "buyer" %}{{ c.seller.display_name }}{% else %}{{ c.buyer.get_full_name|default:c.buyer.username }}{% endif %}</strong>
+            {% if c.preview %}<span class="conv-preview" data-no-translate>{% if side == "buyer" and not c.preview_from_seller or side == "seller" and c.preview_from_seller %}<span class="muted">You: </span>{% endif %}{{ c.preview|truncatechars:60 }}</span>{% elif c.last_message_at %}<span class="conv-preview">📷 Photo</span>{% endif %}
             <span class="muted small">{% if c.last_message_at %}{{ c.last_message_at|timesince }} ago{% else %}New{% endif %}{% if c.reported %} · reported{% endif %}</span></span>
         {% if side == "buyer" and c.buyer_unread %}<span class="n">{{ c.buyer_unread }}</span>{% elif side == "seller" and c.seller_unread %}<span class="n">{{ c.seller_unread }}</span>{% endif %}
     </a>
@@ -20,6 +21,8 @@
     .conv-avatar { width: 38px; height: 38px; border-radius: 999px; display: grid; place-items: center; flex-shrink: 0; background: var(--brand); color: var(--on-brand); font-weight: 800; }
     .conv-main { min-width: 0; flex: 1; display: grid; }
     .conv-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conv-preview { font-size: .88rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conv.unread .conv-preview { color: var(--ink); font-weight: 700; }
     .conv .n { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: .8rem; font-weight: 800; text-align: center; }
     .msg-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; align-items: start; }
     @media (max-width: 860px) {

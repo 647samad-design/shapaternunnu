@@ -1,0 +1,11 @@
+{% extends "bees/base.html" %}
+{% block title %}You're offline — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:560px;text-align:center;padding:64px 16px;">
+    <div style="font-size:3rem;" aria-hidden="true">📶</div>
+    <h1>You're offline</h1>
+    <p class="muted">Check your internet connection and try again. Your cart and orders are safe.</p>
+    <p><button class="btn btn-primary" type="button" onclick="location.reload()">Try again</button></p>
+</div>
+{% endblock %}

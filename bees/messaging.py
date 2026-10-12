@@ -12,7 +12,7 @@ from django.contrib import messages as flash
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import F, Q, Sum
+from django.db.models import F, OuterRef, Q, Subquery, Sum
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -56,6 +56,13 @@ def unread_for_seller(seller):
     return Conversation.objects.filter(seller=seller).aggregate(n=Sum("seller_unread"))["n"] or 0
 
 
+def with_preview(qs):
+    """Adds the latest message text to each conversation for the list."""
+    latest = Message.objects.filter(conversation=OuterRef("pk")).order_by("-id")
+    return qs.annotate(preview=Subquery(latest.values("body")[:1]),
+                       preview_from_seller=Subquery(latest.values("from_seller")[:1]))
+
+
 def mark_read(conv, side):
     field = f"{side}_unread"
     if getattr(conv, field):
@@ -63,10 +70,43 @@ def mark_read(conv, side):
         setattr(conv, field, 0)
 
 
-def send(conv, user, side, body, product=None, request=None):
-    """Saves a message and lets the other side know."""
+def clean_photo(uploaded):
+    """Checks a chat photo and re-saves it without hidden data (GPS etc.),
+    at most 1600 px wide. Raises ValueError with a friendly message."""
+    from django.core.exceptions import ValidationError
+    from django.core.files.base import ContentFile
+    from PIL import Image, ImageOps
+    from .security import validate_image_upload
+    try:
+        validate_image_upload(uploaded)
+    except ValidationError as exc:
+        raise ValueError(exc.messages[0])
+    if uploaded.size > 8 * 1024 * 1024:
+        raise ValueError("Photos must be 8 MB or smaller.")
+    import io
+    uploaded.seek(0)
+    with Image.open(uploaded) as img:
+        if getattr(img, "is_animated", False):
+            uploaded.seek(0)
+            return ContentFile(uploaded.read(), name="photo.gif")
+        img = ImageOps.exif_transpose(img)
+        if img.mode not in ("RGB", "L"):
+            background = Image.new("RGB", img.size, (255, 255, 255))
+            img = img.convert("RGBA")
+            background.paste(img, mask=img.split()[-1])
+            img = background
+        img.thumbnail((1600, 1600))
+        out = io.BytesIO()
+        img.convert("RGB").save(out, "JPEG", quality=85, optimize=True)
+    return ContentFile(out.getvalue(), name="photo.jpg")
+
+
+def send(conv, user, side, body, product=None, request=None, photo=None):
+    """Saves a message (text and/or a photo) and lets the other side know."""
     body = (body or "").strip()[:MAX_LENGTH]
-    if not body:
+    if photo is not None:
+        photo = clean_photo(photo)
+    if not body and photo is None:
         raise ValueError("Write a message first.")
     key = f"msg-rate:{user.pk}"
     used = cache.get(key, 0)
@@ -77,10 +117,16 @@ def send(conv, user, side, body, product=None, request=None):
     other = "buyer" if from_seller else "seller"
     now = timezone.now()
     with transaction.atomic():
-        msg = Message.objects.create(conversation=conv, sender=user, from_seller=from_seller, body=body, product=product)
+        msg = Message(conversation=conv, sender=user, from_seller=from_seller, body=body, product=product)
+        if photo is not None:
+            msg.image.save(photo.name, photo, save=False)
+        msg.save()
         Conversation.objects.filter(pk=conv.pk).update(
             last_message_at=now, **{f"{other}_unread": F(f"{other}_unread") + 1})
     conv.refresh_from_db()
+    from . import live
+    live.clear_typing(conv.pk, side)
+    live.touch(user)
     _notify(conv, other, msg, request)
     return msg
 
@@ -95,6 +141,9 @@ def _notify(conv, other, msg, request):
         recipient = conv.buyer
         link = reverse("conversation", args=[conv.id])
         sender_name = conv.seller.display_name
+    from . import live
+    if live.is_viewing(recipient.pk, conv.pk):
+        return  # they have the chat open and will see it straight away
     # One notification per batch of unread messages, not one per message.
     if getattr(conv, f"{other}_unread") == 1:
         Notification.objects.create(user=recipient, link=link, message=f"New message from {sender_name}"[:255])
@@ -104,7 +153,7 @@ def _notify(conv, other, msg, request):
         url = request.build_absolute_uri(link) if request else link
         try:
             _send_html_email(f"New message from {sender_name} on {_store_name()}", "bees/emails/new_message.html",
-                             {"sender_name": sender_name, "body": msg.body, "url": url, "product": msg.product}, recipient.email)
+                             {"sender_name": sender_name, "body": msg.body or "📷 Photo", "url": url, "product": msg.product}, recipient.email)
         except Exception:
             pass
         Conversation.objects.filter(pk=conv.pk).update(**{emailed_field: timezone.now()})
@@ -118,6 +167,7 @@ def serialize(msgs, side):
             "id": m.id, "body": m.body, "mine": mine,
             "time": timezone.localtime(m.created_at).strftime("%b %d, %H:%M"),
             "product": {"name": m.product.name, "url": reverse("product_detail", args=[m.product_id])} if m.product_id and m.product else None,
+            "image": reverse("message_image", args=[m.id]) if m.image else None,
         })
     return out
 
@@ -151,7 +201,7 @@ def message_store(request, seller_id):
 
 @login_required
 def inbox(request):
-    convs = Conversation.objects.filter(buyer=request.user).select_related("seller", "product").exclude(last_message_at=None)
+    convs = with_preview(Conversation.objects.filter(buyer=request.user).select_related("seller", "product").exclude(last_message_at=None))
     return render(request, "bees/messages/inbox.html", {"conversations": convs, "conv": None})
 
 
@@ -162,8 +212,8 @@ def conversation(request, pk):
     about = None
     if request.GET.get("about", "").isdigit():
         about = Product.objects.filter(pk=request.GET["about"], seller_account=conv.seller).first()
-    convs = Conversation.objects.filter(buyer=request.user).select_related("seller").filter(
-        Q(pk=conv.pk) | ~Q(last_message_at=None))
+    convs = with_preview(Conversation.objects.filter(buyer=request.user).select_related("seller").filter(
+        Q(pk=conv.pk) | ~Q(last_message_at=None)))
     return render(request, "bees/messages/inbox.html", {
         "conversations": convs, "conv": conv, "about": about,
         "thread": serialize(conv.messages.select_related("product"), "buyer"),
@@ -186,12 +236,13 @@ def send_view(request, pk):
     if about.isdigit():
         product = Product.objects.filter(pk=about, seller_account=conv.seller).first()
     try:
-        msg = send(conv, request.user, side, request.POST.get("body", ""), product, request)
+        msg = send(conv, request.user, side, request.POST.get("body", ""), product, request, request.FILES.get("photo"))
     except ValueError as exc:
         if request.headers.get("x-requested-with"):
             return JsonResponse({"error": str(exc)}, status=400)
         flash.error(request, str(exc))
-        return redirect(request.POST.get("next") or "messages_inbox")
+        from .security import safe_next_url
+        return redirect(safe_next_url(request, request.POST.get("next"), reverse("messages_inbox")))
     if request.headers.get("x-requested-with"):
         return JsonResponse({"message": serialize([msg], side)[0]})
     return redirect("seller_conversation" if side == "seller" else "conversation", pk=conv.pk)
@@ -205,10 +256,66 @@ def poll_view(request, pk):
         raise Http404
     after = request.GET.get("after", "0")
     after = int(after) if after.isdigit() else 0
+    from . import live
+    live.touch(request.user)
+    if request.GET.get("visible") != "0":
+        live.set_viewing(request.user.pk, conv.pk)
     new = list(conv.messages.filter(id__gt=after).select_related("product")[:50])
-    if new:
+    if new and request.GET.get("visible") != "0":
         mark_read(conv, side)
-    return JsonResponse({"messages": serialize(new, side)})
+    other = "buyer" if side == "seller" else "seller"
+    conv.refresh_from_db(fields=["buyer_unread", "seller_unread"])
+    status, ago = live.presence(conv.buyer_id if other == "buyer" else conv.seller.user_id)
+    response = JsonResponse({
+        "messages": serialize(new, side),
+        "typing": live.is_typing(conv.pk, other),
+        "seen": getattr(conv, f"{other}_unread") == 0,
+        "presence": status, "ago": ago,
+    })
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@login_required
+def message_image(request, pk):
+    """A chat photo, for the two people in the conversation (and staff)."""
+    msg = get_object_or_404(Message.objects.select_related("conversation"), pk=pk)
+    if not msg.image or not (request.user.is_staff or side_for(request.user, msg.conversation)):
+        raise Http404
+    from django.conf import settings
+    if getattr(settings, "USE_SUPABASE_STORAGE", False):
+        return redirect(msg.image.url)  # short-lived signed link
+    from django.http import FileResponse
+    response = FileResponse(msg.image.open("rb"), content_type="image/gif" if msg.image.name.endswith(".gif") else "image/jpeg")
+    response["Cache-Control"] = "private, max-age=86400"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@login_required
+@require_POST
+def quick_replies_view(request):
+    """Seller saves their reply shortcuts (one per line)."""
+    seller = seller_for(request.user)
+    if not seller:
+        raise Http404
+    lines = [line.strip()[:300] for line in request.POST.get("quick_replies", "").splitlines() if line.strip()][:12]
+    SellerAccount.objects.filter(pk=seller.pk).update(quick_replies="\n".join(lines))
+    flash.success(request, "Saved replies updated.")
+    from .security import safe_next_url
+    return redirect(safe_next_url(request, request.POST.get("next"), reverse("seller_messages")))
+
+
+@login_required
+@require_POST
+def typing_view(request, pk):
+    conv = get_object_or_404(Conversation, pk=pk)
+    side = side_for(request.user, conv)
+    if not side:
+        raise Http404
+    from . import live
+    live.set_typing(conv.pk, side)
+    return JsonResponse({"ok": True})
 
 
 @login_required

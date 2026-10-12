@@ -4,6 +4,7 @@
 {% block content %}
 <div class="wrap page">
     <div class="page-head"><div><h1>{{ t.messages }}</h1><p>Your conversations with sellers.</p></div></div>
+    {% include "bees/partials/alert_settings.html" %}
     <div class="msg-layout {% if conv %}has-conv{% endif %}">
         {% include "bees/partials/chat_list.html" with side="buyer" url_name="conversation" %}
         {% if conv %}

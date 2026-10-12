@@ -1,0 +1,33 @@
+{# Sound and desktop alert switches (saved in this browser). #}
+<div class="alert-set" data-alert-set>
+    <label class="alert-opt"><input type="checkbox" data-sound-toggle> <span aria-hidden="true">🔔</span> <span>Play a sound for new messages and alerts</span></label>
+    <button type="button" class="btn btn-ghost btn-sm" data-sound-test>Test sound</button>
+    <button type="button" class="btn btn-secondary btn-sm" data-desktop-on hidden>Show alerts on my screen</button>
+    <span class="muted small" data-desktop-note hidden></span>
+    <span hidden><span data-w="on">Screen alerts are on.</span><span data-w="blocked">Screen alerts are blocked in your browser settings.</span><span data-w="ready">Alerts are on</span><span data-w="ready_body">You will see new messages and orders here.</span></span>
+</div>
+<style>
+    .alert-set { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); margin-bottom: 14px; }
+    .alert-opt { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+    .alert-set [hidden] { display: none !important; }
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var box = document.querySelector('[data-alert-set]');
+    if (!box || !window.LumenAlert) { if (box) box.hidden = true; return; }
+    function W(k) { var el = box.querySelector('[data-w="' + k + '"]'); return el ? el.textContent : k; }
+    var t = box.querySelector('[data-sound-toggle]'), d = box.querySelector('[data-desktop-on]'), note = box.querySelector('[data-desktop-note]');
+    t.checked = LumenAlert.soundOn();
+    function fresh() { try { localStorage.removeItem('lm-chime'); } catch (e) {} }
+    t.addEventListener('change', function () { LumenAlert.setSound(t.checked); if (t.checked) { fresh(); LumenAlert.sound(); } });
+    box.querySelector('[data-sound-test]').addEventListener('click', function () { fresh(); var was = LumenAlert.soundOn(); LumenAlert.setSound(true); LumenAlert.sound(); LumenAlert.setSound(was); });
+    function paint() {
+        if (!('Notification' in window)) return;
+        if (Notification.permission === 'granted') { note.hidden = false; note.textContent = W('on'); d.hidden = true; }
+        else if (Notification.permission === 'denied') { note.hidden = false; note.textContent = W('blocked'); d.hidden = true; }
+        else d.hidden = false;
+    }
+    d.addEventListener('click', function () { Notification.requestPermission().then(function () { paint(); LumenAlert.desktop(W('ready'), W('ready_body')); }); });
+    paint();
+});
+</script>
