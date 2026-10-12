@@ -1139,6 +1139,55 @@ def returns(request):
 
 
 # ---------------------------------------------------------------------------
+# Tax rates
+# ---------------------------------------------------------------------------
+
+@staff_required
+def tax_rates(request):
+    from .countries import COUNTRIES
+    from .models import TaxRate
+    from .taxes import PRESETS
+    names = dict(COUNTRIES)
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "presets":
+            added = 0
+            for code, name, rate in PRESETS:
+                _obj, created = TaxRate.objects.get_or_create(country=code, defaults={"name": name, "rate": Decimal(rate)})
+                added += int(created)
+            _log(request, f"Added {added} preset tax rates")
+            messages.success(request, f"Added {added} common rates. Please check them with your accountant - rates change.")
+        elif action == "save":
+            code = request.POST.get("country", "").strip().upper()
+            try:
+                rate = Decimal(request.POST.get("rate", "").strip())
+            except Exception:
+                rate = None
+            if code not in names:
+                messages.error(request, "Choose a country.")
+            elif rate is None or rate < 0 or rate > 50:
+                messages.error(request, "Use a rate between 0 and 50%.")
+            else:
+                TaxRate.objects.update_or_create(country=code, defaults={
+                    "name": (request.POST.get("name", "").strip() or "VAT")[:20], "rate": rate,
+                    "includes_shipping": bool(request.POST.get("includes_shipping")), "active": True})
+                _log(request, f"Tax rate {code} = {rate}%")
+                messages.success(request, f"{names[code]}: {rate}% saved.")
+        elif action in ("toggle", "delete"):
+            obj = get_object_or_404(TaxRate, pk=request.POST.get("id"))
+            if action == "delete":
+                obj.delete()
+            else:
+                obj.active = not obj.active
+                obj.save(update_fields=["active"])
+            _log(request, f"Tax rate {obj.country}: {action}")
+        return redirect("manage_taxes")
+    rates = [(t, names.get(t.country, t.country)) for t in TaxRate.objects.all()]
+    return _render(request, "taxes.html", {"section": "settings", "rates": rates, "countries": COUNTRIES,
+                                           "site": SiteSettings.load()})
+
+
+# ---------------------------------------------------------------------------
 # Keys & passwords (.env editor)
 # ---------------------------------------------------------------------------
 
@@ -1190,10 +1239,11 @@ def keys(request):
     for title, hint, rows in envfile.GROUPS:
         groups.append((title, hint, [{"key": key, "label": label, "secret": secret, "set": bool(current.get(key)),
                                       "shown": envfile.mask(current.get(key, ""), secret)} for key, label, secret, _p in rows]))
+    paypal_webhook = request.build_absolute_uri(_reverse("paypal_webhook"))
     token = current.get("SHIPPING_WEBHOOK_TOKEN", "")
     webhook = request.build_absolute_uri(_reverse("courier_webhook", args=[token])) if token else ""
     return _render(request, "keys.html", {
-        "section": "keys", "groups": groups, "webhook_url": webhook, "env_exists": os.path.exists(envfile.path()),
+        "section": "keys", "groups": groups, "webhook_url": webhook, "paypal_webhook": paypal_webhook, "env_exists": os.path.exists(envfile.path()),
         "locked": [(k, bool(current.get(k))) for k in envfile.LOCKED],
     })
 
@@ -1313,8 +1363,12 @@ class SiteSettingsForm(forms.ModelForm):
         ("Announcement bar", "A message across the top of every page, e.g. a sale.", ["banner_active", "banner_text", "banner_link"]),
         ("Selling", "Commission taken from each sale. Applies to sellers who join from now on; change an existing seller's rate on their page.",
          ["commission_individual", "commission_organization"]),
-        ("Shipping, tax & payment", "Applied at checkout.", ["shipping_flat_fee", "free_shipping_threshold", "tax_percent", "delivery_days", "return_days", "allow_cash_on_delivery", "allow_guest_checkout"]),
-        ("Shipping labels", "Book couriers and print labels from the order page. Pick a service, then add its API key under Keys & passwords. The address below is used for the store's own products; sellers set theirs in Seller Center.",
+        ("Shipping & payment", "Applied at checkout.", ["shipping_flat_fee", "free_shipping_threshold", "delivery_days", "return_days", "allow_cash_on_delivery", "allow_guest_checkout"]),
+        ("Privacy, analytics & search", "Analytics and ad pixels only load after a visitor accepts cookies. Verify your site in Google Search Console with its meta-tag code.",
+         ["cookie_banner", "ga4_id", "meta_pixel_id", "google_site_verification"]),
+        ("Taxes & duties", "Set rates per country under Tax rates. The default below is used for every other country.",
+         ["prices_include_tax", "tax_percent", "store_tax_id", "duties_policy"]),
+                ("Shipping labels", "Book couriers and print labels from the order page. Pick a service, then add its API key under Keys & passwords. The address below is used for the store's own products; sellers set theirs in Seller Center.",
          ["shipping_provider", "ship_from_name", "ship_from_street", "ship_from_city", "ship_from_state", "ship_from_postal_code", "ship_from_country", "ship_from_phone", "default_weight_grams"]),
                 ("Order rules", "Automatic steps that keep orders moving and protect your money. Runs with the daily tasks.",
          ["auto_cancel_days", "auto_deliver_days", "claim_reply_days"]),
@@ -1336,7 +1390,26 @@ class SiteSettingsForm(forms.ModelForm):
                 self.fields[name].required = False  # left out = keep the current value
 
     OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent",
-                "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams")
+                "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams", "duties_policy")
+
+    def _clean_id(self, name, pattern, example):
+        import re as _re
+        value = (self.cleaned_data.get(name) or "").strip()
+        if value and not _re.fullmatch(pattern, value):
+            raise ValidationError(f"That doesn't look right - it should look like {example}.")
+        return value
+
+    def clean_ga4_id(self):
+        return self._clean_id("ga4_id", r"G-[A-Z0-9]{4,15}", "G-ABC123XYZ")
+
+    def clean_meta_pixel_id(self):
+        return self._clean_id("meta_pixel_id", r"\d{6,20}", "1234567890")
+
+    def clean_google_site_verification(self):
+        return self._clean_id("google_site_verification", r"[A-Za-z0-9_-]{10,100}", "the code inside content=\"...\"")
+
+    def clean_duties_policy(self):
+        return self.cleaned_data.get("duties_policy") or self.instance.duties_policy or "customer"
 
     def clean_default_weight_grams(self):
         return self._keep("default_weight_grams") or 500
@@ -1858,6 +1931,9 @@ def operations_checks(dj=None):
             f"Still showing in English: {detail}. Usually product or brand names - open Admin > Translations and "
             "type a translation, press 'Translate missing with AI', or press 'Keep the rest in English' for names that shouldn't change.",
             level="warn")
+    from .paypal import status_line as paypal_status
+    p_state, p_text = paypal_status()
+    add("Payments", "PayPal", p_state != "missing", p_text, level="ok" if p_state != "missing" else "warn")
     from .couriers import status_line
     c_state, c_text = status_line()
     add("Shipping", "Courier service", c_state != "missing", c_text, level="ok" if c_state != "missing" else "warn")

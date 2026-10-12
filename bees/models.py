@@ -121,6 +121,9 @@ class Product(models.Model):
     width_cm = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
     height_cm = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
     approval_status = models.CharField(max_length=20, choices=APPROVAL_CHOICES, default="approved", db_index=True)
+    seo_title = models.CharField("SEO title", max_length=70, blank=True, help_text="Title in Google results (max 70). Empty = product name.")
+    seo_description = models.CharField("SEO description", max_length=170, blank=True, help_text="Snippet in Google results (max 160). Empty = start of the description.")
+    updated_at = models.DateTimeField(auto_now=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
@@ -316,6 +319,7 @@ class Order(models.Model):
     phone = models.CharField(max_length=30)
     PAYMENT_METHOD_CHOICES = [
         ("card", "Card (Stripe)"),
+        ("paypal", "PayPal"),
         ("cod", "Cash on delivery"),
     ]
     payment_method = models.CharField(max_length=30, choices=PAYMENT_METHOD_CHOICES, default="card")
@@ -333,9 +337,15 @@ class Order(models.Model):
     # instead of being cancelled.
     cod_fallback = models.BooleanField(default=False)
     stripe_payment_intent = models.CharField(max_length=255, blank=True)
+    paypal_order_id = models.CharField(max_length=64, blank=True, db_index=True)
+    paypal_capture_id = models.CharField(max_length=64, blank=True)
     currency = models.CharField(max_length=3, default="usd")
     shipping_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    tax_name = models.CharField(max_length=30, blank=True)
+    tax_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    tax_included = models.BooleanField(default=False, help_text="Prices already included this tax (shown, not added).")
+    customer_tax_id = models.CharField("Customer VAT / tax number", max_length=40, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending", db_index=True)
     coupon_code = models.CharField(max_length=30, blank=True)
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -389,7 +399,18 @@ class Order(models.Model):
     @property
     def grand_total(self):
         """Order value: items - discount + shipping + tax."""
-        return max(self.subtotal - self.discount_amount, 0) + self.shipping_amount + self.tax_amount
+        return max(self.subtotal - self.discount_amount, 0) + self.shipping_amount + self.added_tax
+
+    @property
+    def added_tax(self):
+        """Tax on top of the prices (0 when prices already include it)."""
+        return 0 if self.tax_included else self.tax_amount
+
+    @property
+    def tax_label(self):
+        name = self.tax_name or "Tax"
+        rate = f" {self.tax_rate.normalize():f}%" if self.tax_rate else ""
+        return f"{name}{rate}" + (" (included)" if self.tax_included else "")
 
     @property
     def total(self):
@@ -401,7 +422,7 @@ class Order(models.Model):
     def goods_paid(self):
         """What the items cost after the coupon, including their tax -
         the basis for refunding returned items."""
-        return max(self.subtotal - self.discount_amount, 0) + self.tax_amount
+        return max(self.subtotal - self.discount_amount, 0) + self.added_tax
 
     def refund_value(self, item):
         """Fair refund for one returned item: its share of what was paid
@@ -457,6 +478,8 @@ class Order(models.Model):
 
     @property
     def card_label(self):
+        if self.payment_method == "paypal":
+            return "PayPal"
         return f"{self.card_brand.title()} •••• {self.card_last4}" if self.card_last4 else ""
 
     @property
@@ -1267,7 +1290,7 @@ class ReturnRequest(models.Model):
         plan = {"value": value, "card": Decimal("0"), "credit": Decimal("0"), "manual": Decimal("0")}
         if as_credit or self.refund_method == "store_credit":
             plan["credit"] = value
-        elif order.payment_status == "paid" and order.stripe_payment_intent:
+        elif order.payment_status == "paid" and (order.stripe_payment_intent or order.paypal_capture_id):
             already = sum(
                 (r.card_refund_amount for r in ReturnRequest.objects.filter(
                     order_item__order=order, status="refunded").exclude(pk=self.pk)),
@@ -1375,7 +1398,16 @@ class SiteSettings(models.Model):
     twitter_url = models.URLField("X / Twitter URL", blank=True)
     youtube_url = models.URLField(blank=True)
     # --- Commerce ---
-    tax_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0, help_text="Applied to the discounted subtotal at checkout. 0 = no tax line.")
+    tax_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0, help_text="Default tax for countries without their own rate (Store settings > Tax rates). 0 = none.")
+    cookie_banner = models.BooleanField(default=True, help_text="Ask visitors before using analytics/marketing cookies (required in the EU/UK).")
+    ga4_id = models.CharField("Google Analytics 4 ID", max_length=20, blank=True, help_text="e.g. G-ABC123XYZ. Only loads after the visitor accepts cookies.")
+    meta_pixel_id = models.CharField("Meta (Facebook) Pixel ID", max_length=20, blank=True, help_text="Only loads after the visitor accepts cookies.")
+    google_site_verification = models.CharField(max_length=100, blank=True, help_text="Google Search Console verification code (content of the meta tag).")
+    prices_include_tax = models.BooleanField(default=False, help_text="On: product prices already include tax (usual in Europe, UK, Australia) - checkout shows it, doesn't add it. Off: tax is added at checkout (usual in the US).")
+    store_tax_id = models.CharField("Store VAT / tax number", max_length=40, blank=True, help_text="Printed on invoices.")
+    DUTIES = [("customer", "Customer pays import duties on delivery (DAP)"), ("included", "Prices include duties - we pay them (DDP)")]
+    duties_policy = models.CharField(max_length=10, choices=DUTIES, default="customer",
+                                     help_text="What international shoppers see at checkout about customs duties.")
     shipping_flat_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Flat shipping fee per order. 0 = free shipping.")
     free_shipping_threshold = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Orders at or above this subtotal ship free. 0 = disabled.")
     return_days = models.PositiveSmallIntegerField(
@@ -1742,3 +1774,18 @@ class Shipment(models.Model):
     @property
     def active(self):
         return self.status in ("booked", "in_transit", "out_for_delivery")
+
+
+class TaxRate(models.Model):
+    """Sales tax / VAT / GST for one destination country."""
+    country = models.CharField(max_length=2, unique=True, help_text="2-letter code, e.g. GB, DE, AE")
+    name = models.CharField(max_length=20, default="VAT", help_text="Shown at checkout: VAT, GST, Sales tax...")
+    rate = models.DecimalField(max_digits=5, decimal_places=2)
+    includes_shipping = models.BooleanField(default=True, help_text="Charge it on shipping too (true for VAT in most countries).")
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["country"]
+
+    def __str__(self):
+        return f"{self.country} {self.name} {self.rate}%"

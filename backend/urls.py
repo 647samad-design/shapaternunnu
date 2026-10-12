@@ -14,18 +14,19 @@ from bees import messaging as msgs
 from bees import account_views
 from bees import manage_views as mv
 from bees import seller_views as sv
-from bees.sitemaps import ProductSitemap, CategorySitemap, StaticViewSitemap
+from bees.sitemaps import ProductSitemap, CategorySitemap, SellerSitemap, StaticViewSitemap
 from bees.ratelimit import ratelimit
 
 sitemaps = {
     "products": ProductSitemap,
     "categories": CategorySitemap,
     "static": StaticViewSitemap,
+    "stores": SellerSitemap,
 }
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('sitemap.xml', sitemap, {'sitemaps': sitemaps}, name='sitemap'),
+    path('sitemap.xml', sitemap, {'sitemaps': sitemaps, 'template_name': 'sitemap_i18n.xml'}, name='sitemap'),
     path('manifest.webmanifest', pwa.manifest, name='pwa_manifest'),
     path('app-icon-<int:size>.png', pwa.icon, name='pwa_icon'),
     path('sw.js', pwa.service_worker, name='service_worker'),
@@ -172,6 +173,7 @@ urlpatterns = [
     path('problems/<int:pk>/photo/', claims_views.claim_photo, name='claim_photo'),
     path('manage/problems/', mv.claims, name='manage_claims'),
     path('manage/keys/', mv.keys, name='manage_keys'),
+    path('manage/taxes/', mv.tax_rates, name='manage_taxes'),
     path('manage/problems/<int:pk>/', mv.claim_detail, name='manage_claim'),
     path('seller/reviews/', sv.reviews, name='seller_reviews'),
     path('seller/team/', sv.team, name='seller_team'),
@@ -221,6 +223,9 @@ urlpatterns = [
     path('payment/resume/<int:order_id>/', views.resume_payment, name='resume_payment'),
     path('payment/pay-online/<int:order_id>/', views.pay_online, name='pay_online'),
     path('payment/stripe/webhook/', views.stripe_webhook, name='stripe_webhook'),
+    path('payment/paypal/<int:order_id>/return/', views.paypal_return, name='paypal_return'),
+    path('payment/paypal/<int:order_id>/cancel/', views.paypal_cancel, name='paypal_cancel'),
+    path('payment/paypal/webhook/', views.paypal_webhook, name='paypal_webhook'),
     path('staff/seller-document/<int:seller_id>/<str:field>/', views.seller_document, name='seller_document'),
 ]
 

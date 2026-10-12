@@ -1,4 +1,6 @@
 {% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block structured_data %}{% listing_jsonld products category_label as list_ld %}<script type="application/ld+json">{{ list_ld|jsonld }}</script>{% endblock %}
 {% block title %}{{ category_label }} — {{ brand.site_name }}{% endblock %}
 {% block meta_description %}Shop {{ category_label }} at {{ brand.site_name }}. Secure checkout, fast shipping and easy returns.{% endblock %}
 {% block og_title %}{{ category_label }} — {{ brand.site_name }}{% endblock %}

@@ -33,6 +33,10 @@ def site_language(request):
     brand_obj = _site_settings(request)
     lang = "en"
     if brand_obj.show_language_menu:
+        # ?lang=xx links (used by search engines via hreflang) pick the language.
+        url_lang = request.GET.get("lang", "")
+        if url_lang in TRANSLATIONS:
+            request.session["site_lang"] = url_lang
         lang = request.session.get("site_lang") or _browser_language(request)
     if lang not in TRANSLATIONS:
         lang = "en"

@@ -22,7 +22,7 @@
         {% endfor %}
         {% if order.discount_amount %}<tr><td style="padding:8px 0;color:#1E7B4F;">Discount</td><td style="padding:8px 0;text-align:right;color:#1E7B4F;">&minus;{{ order.discount_amount|money }}</td></tr>{% endif %}
         <tr><td style="padding:8px 0;">Shipping</td><td style="padding:8px 0;text-align:right;">{% if order.shipping_amount %}{{ order.shipping_amount|money }}{% else %}Free{% endif %}</td></tr>
-        {% if order.tax_amount %}<tr><td style="padding:8px 0;">Tax</td><td style="padding:8px 0;text-align:right;">{{ order.tax_amount|money }}</td></tr>{% endif %}
+        {% if order.tax_amount %}<tr><td style="padding:8px 0;">{{ order.tax_label }}</td><td style="padding:8px 0;text-align:right;">{{ order.tax_amount|money }}</td></tr>{% endif %}
         {% if order.credit_used %}<tr><td style="padding:8px 0;color:#1E7B4F;">Store credit</td><td style="padding:8px 0;text-align:right;color:#1E7B4F;">&minus;{{ order.credit_used|money }}</td></tr>{% endif %}
         <tr><td style="padding:12px 0;font-weight:bold;font-size:18px;border-top:2px solid #DDE2E6;">Total</td><td style="padding:12px 0;font-weight:bold;font-size:18px;text-align:right;border-top:2px solid #DDE2E6;">{{ order.total|money }}</td></tr>
     </table>

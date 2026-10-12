@@ -27,6 +27,12 @@ GROUPS = [
         ("STRIPE_API_BASE", "Relay address (only for PythonAnywhere free)", True, r"^https://"),
         ("STORE_CURRENCY", "Store currency (3 letters)", False, r"^[A-Za-z]{3}$"),
     ]),
+    ("PayPal", "developer.paypal.com > Apps & Credentials > your app: copy the Client ID and Secret (Sandbox for testing, Live for real money). Then add a webhook with the address shown below and copy its Webhook ID.", [
+        ("PAYPAL_CLIENT_ID", "Client ID", False, r"^[A-Za-z0-9_-]{20,}$"),
+        ("PAYPAL_CLIENT_SECRET", "Secret", True, r"^[A-Za-z0-9_-]{20,}$"),
+        ("PAYPAL_MODE", "Mode: sandbox or live", False, r"^(sandbox|live)$"),
+        ("PAYPAL_WEBHOOK_ID", "Webhook ID", False, r"^[A-Z0-9]{10,}$"),
+    ]),
     ("Email", "Gmail: your address + an App Password (Google Account > Security > App passwords). Any other provider: also set the server and port.", [
         ("EMAIL_HOST_USER", "Email address / user name", False, r"^\S+$"),
         ("EMAIL_HOST_PASSWORD", "Email password / App Password", True, None),
@@ -54,8 +60,9 @@ GROUPS = [
     ("Error alerts", "sentry.io > Create project > Django > copy the DSN.", [
         ("SENTRY_DSN", "Sentry DSN", True, r"^https://"),
     ]),
-    ("Website", "Your public address, used in emails and links.", [
+    ("Website", "Your public address, used in emails and links. A CDN address (e.g. from Cloudflare or BunnyCDN) makes pages load faster worldwide.", [
         ("SITE_URL", "Site address", False, r"^https://[^\s/]+"),
+        ("CDN_URL", "CDN address for static files (optional)", False, r"^https://[^\s]+$"),
     ]),
 ]
 EDITABLE = {key: (label, secret, pattern) for _g, _h, rows in GROUPS for key, label, secret, pattern in rows}

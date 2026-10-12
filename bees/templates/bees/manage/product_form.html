@@ -17,6 +17,7 @@
                 <div class="field span-2"><label for="m-desc">Description</label><textarea id="m-desc" name="description" rows="7">{{ p.description|default:'' }}</textarea>{% include "bees/partials/ai_writer.html" %}</div>
                 <div class="field span-2">{% include "bees/partials/guide_fields.html" %}</div>
                 <div class="field span-2">{% include "bees/partials/shipping_fields.html" %}</div>
+                <div class="field span-2">{% include "bees/partials/seo_fields.html" %}</div>
                 <div class="field"><label for="m-cat">Category</label><select id="m-cat" name="category">{% for v, l in categories %}<option value="{{ v }}" {% if p.category == v %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
                 <div class="field"><label for="m-seller">Seller name</label><input id="m-seller" name="seller_name" value="{{ p.seller_name|default:'Official Store' }}" maxlength="100"></div>
             </div>

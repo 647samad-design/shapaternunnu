@@ -500,6 +500,9 @@ def refund_order(order):
     from .models import Order, OrderEvent
     if order.total_cents == 0:
         return True  # paid entirely with store credit / coupon - nothing to send back to a card
+    if order.payment_method == "paypal":
+        from . import paypal
+        return paypal.refund(order)
     if not order.stripe_payment_intent:
         return False
     stripe = _stripe()
@@ -540,6 +543,9 @@ def remember_card(order):
 def refund_amount(order, amount, key):
     """Refunds part of a paid card order (e.g. one returned item).
     ``key`` makes the refund idempotent. Returns True on success."""
+    if order.payment_method == "paypal" and amount:
+        from . import paypal
+        return paypal.refund(order, amount, key)
     if not order.stripe_payment_intent or not amount:
         return False
     stripe = _stripe()

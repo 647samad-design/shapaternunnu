@@ -1,7 +1,7 @@
 {% load bees_extras %}
 <article class="pcard">
     <a class="pcard-media" href="{% url 'product_detail' product.id %}" onclick="return openQuickView(event, {{ product.id }})" aria-label="{{ product.name }}">
-        <img src="{{ product.image_url }}" alt="" loading="lazy">
+        <img src="{{ product.image_url }}" alt="{{ product.name }}" loading="lazy" decoding="async" width="400" height="400">
         {% if product.stock <= 0 %}<span class="pcard-flag badge">{{ t.out_of_stock }}</span>
         {% elif product.discount_percent %}<span class="pcard-flag badge badge-accent">Save {{ product.discount_percent }}%</span>{% endif %}
     </a>

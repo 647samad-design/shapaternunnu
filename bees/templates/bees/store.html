@@ -1,5 +1,6 @@
 {% extends "bees/base.html" %}
 {% load bees_extras %}
+{% block structured_data %}{% listing_jsonld products seller_name as list_ld %}<script type="application/ld+json">{{ list_ld|jsonld }}</script>{% endblock %}
 {% block title %}{{ seller_name }} — {{ brand.site_name }}{% endblock %}
 {% block meta_description %}{% if seller_account.store_description %}{{ seller_account.store_description|truncatechars:150 }}{% else %}Shop every product from {{ seller_name }} on {{ brand.site_name }}.{% endif %}{% endblock %}
 {% block og_title %}{{ seller_name }} on {{ brand.site_name }}{% endblock %}

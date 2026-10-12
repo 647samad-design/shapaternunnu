@@ -19,6 +19,9 @@
             </div>
         </div>
         {% endfor %}
+        {% if title == "PayPal" %}
+        <div class="callout" style="margin:12px 0 0;"><strong>Webhook address</strong> - in your PayPal app add this webhook with the events CHECKOUT.ORDER.APPROVED, PAYMENT.CAPTURE.COMPLETED, PAYMENT.CAPTURE.REFUNDED, PAYMENT.CAPTURE.DENIED and PAYMENT.CAPTURE.REVERSED, then paste its Webhook ID above:<br><code style="word-break:break-all;" data-no-translate>{{ paypal_webhook }}</code></div>
+        {% endif %}
         {% if title == "Couriers" %}
         <div class="callout" style="margin:12px 0 0;">
             {% if webhook_url %}<strong>Webhook address</strong> - paste it in your courier dashboard (EasyPost: Webhooks; Shippo: Settings > Webhooks, event "track_updated"):<br><code style="word-break:break-all;" data-no-translate>{{ webhook_url }}</code>{% else %}Tick the box below to create the webhook secret, then copy the address that appears here into your courier dashboard.{% endif %}

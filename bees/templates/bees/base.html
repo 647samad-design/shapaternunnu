@@ -10,22 +10,27 @@
     {% if brand.favicon_url %}<link rel="icon" href="{{ brand.favicon_url }}">{% elif brand.logo %}<link rel="icon" href="{{ brand.logo }}">{% endif %}
     <title>{% block title %}{{ brand.site_name }} — {{ brand.tagline }}{% endblock %}</title>
     <meta name="description" content="{% block meta_description %}{{ brand.site_name }}: {{ brand.tagline }} Secure checkout, fast shipping and easy returns.{% endblock %}">
-    <link rel="canonical" href="{% block canonical_url %}{{ request.scheme }}://{{ request.get_host }}{{ request.path }}{% endblock %}">
-    <meta name="robots" content="{% block robots_meta %}index, follow{% endblock %}">
+    {% seo_urls as seo %}
+    <link rel="canonical" href="{% block canonical_url %}{{ seo.canonical }}{% endblock %}">
+    {% for tag, href in seo.alternates %}<link rel="alternate" hreflang="{{ tag }}" href="{{ href }}">
+    {% endfor %}<meta name="robots" content="{% block robots_meta %}{% if seo.index %}index, follow, max-image-preview:large{% else %}noindex, follow{% endif %}{% endblock %}">
+    {% if brand.google_site_verification %}<meta name="google-site-verification" content="{{ brand.google_site_verification }}">{% endif %}
 
     <meta property="og:type" content="{% block og_type %}website{% endblock %}">
     <meta property="og:site_name" content="{{ brand.site_name }}">
     <meta property="og:title" content="{% block og_title %}{{ brand.site_name }}{% endblock %}">
     <meta property="og:description" content="{% block og_description %}{{ brand.tagline }}{% endblock %}">
-    <meta property="og:url" content="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}">
+    <meta property="og:url" content="{{ seo.canonical }}">
+    <meta property="og:locale" content="{% if current_lang == 'roman' %}ur_PK{% elif current_lang == 'ur' %}ur_PK{% elif current_lang == 'ar' %}ar_AR{% elif current_lang == 'es' %}es_ES{% elif current_lang == 'fr' %}fr_FR{% else %}en_US{% endif %}">
     {% block og_image_tag %}{% if brand.logo %}<meta property="og:image" content="{{ brand.logo|abs_url }}">{% endif %}{% endblock %}
+    {% block og_extra %}{% endblock %}
     <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{% block twitter_title %}{{ brand.site_name }}{% endblock %}">
 
-    {% block structured_data %}
-    <script type="application/ld+json">
-    {"@context": "https://schema.org", "@type": "Organization", "name": "{{ brand.site_name|escapejs }}", "url": "{{ request.scheme }}://{{ request.get_host }}/"{% if brand.logo %}, "logo": "{{ brand.logo|escapejs }}"{% endif %}}
-    </script>
-    {% endblock %}
+    {% site_jsonld as site_ld %}
+    <script type="application/ld+json">{{ site_ld|jsonld }}</script>
+    {% block structured_data %}{% endblock %}
+    {% block head_extra %}{% endblock %}
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -273,6 +278,11 @@
         .icon-btn .count { position: absolute; top: 3px; left: 18px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 0.75rem; font-weight: 700; display: grid; place-items: center; transition: transform .2s ease; }
         .icon-btn .count.pulse { transform: scale(1.3); }
         [data-live][hidden] { display: none !important; }
+        .cookie-bar { position: fixed; inset-inline: 12px; bottom: 12px; z-index: 900; max-width: 720px; margin-inline: auto; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; padding: 14px 16px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 18px 50px rgba(20,26,31,.22); }
+        .cookie-bar[hidden] { display: none; }
+        .cookie-bar p { margin: 0; flex: 1 1 320px; font-size: .92rem; }
+        .cookie-bar p strong { margin-inline-end: 6px; }
+        .cookie-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .icon-label { font-size: 0.95rem; }
         details.menu { position: relative; }
         details.menu > summary { list-style: none; }
@@ -645,6 +655,7 @@
                         <li><a href="{% url 'sell_on_bees' %}">{{ t.sell_on }}</a></li>
                         <li><a href="{% url 'terms_page' %}">{{ t.terms }}</a></li>
                         <li><a href="{% url 'privacy_page' %}">{{ t.privacy }}</a></li>
+                        {% if brand.cookie_banner %}<li><a href="#" data-cookie-settings>Cookie settings</a></li>{% endif %}
                     </ul>
                 </div>
             </div>
@@ -685,6 +696,15 @@
             </div>
         </div>
     </footer>
+    {% if brand.cookie_banner %}
+    <div class="cookie-bar" id="cookie-bar" role="dialog" aria-live="polite" aria-label="Cookies" hidden>
+        <p><strong>Cookies</strong> We use essential cookies to run the store (sign-in, cart, language). {% if brand.ga4_id or brand.meta_pixel_id %}With your OK we also use analytics{% if brand.meta_pixel_id %} and marketing{% endif %} cookies to improve it. {% endif %}<a href="{% url 'privacy_page' %}">Privacy policy</a></p>
+        <div class="cookie-actions">
+            <button type="button" class="btn btn-ghost btn-sm" data-consent="essential">Only essential</button>
+            <button type="button" class="btn btn-primary btn-sm" data-consent="all">Accept all</button>
+        </div>
+    </div>
+    {% endif %}
     {% endblock %}
 
     <div class="toasts" id="toast-container" aria-live="polite">
@@ -1118,6 +1138,35 @@
     })();
     </script>
     {% endif %}
+    <script>
+    /* Cookie consent: analytics / ad pixels load only after "Accept all". */
+    (function () {
+        var GA = '{{ brand.ga4_id|escapejs }}', PIXEL = '{{ brand.meta_pixel_id|escapejs }}', BANNER = {{ brand.cookie_banner|yesno:"true,false" }};
+        function get() { var m = document.cookie.match(/(?:^|; )lm_consent=([^;]+)/); return m ? m[1] : ''; }
+        function set(v) { document.cookie = 'lm_consent=' + v + '; Max-Age=' + 60 * 60 * 24 * 180 + '; Path=/; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : ''); }
+        function load() {
+            if (GA && !window.gtag) {
+                var s = document.createElement('script'); s.async = true; s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(GA); document.head.appendChild(s);
+                window.dataLayer = window.dataLayer || []; window.gtag = function () { dataLayer.push(arguments); };
+                gtag('js', new Date()); gtag('config', GA, { anonymize_ip: true });
+            }
+            if (PIXEL && !window.fbq) {
+                !function (f, b, e, v, n, t, s) { if (f.fbq) return; n = f.fbq = function () { n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments); }; if (!f._fbq) f._fbq = n; n.push = n; n.loaded = !0; n.version = '2.0'; n.queue = []; t = b.createElement(e); t.async = !0; t.src = v; s = b.getElementsByTagName(e)[0]; s.parentNode.insertBefore(t, s); }(window, document, 'script', 'https://connect.facebook.net/en_US/fbevents.js');
+                fbq('init', PIXEL); fbq('track', 'PageView');
+            }
+        }
+        var bar = document.getElementById('cookie-bar');
+        var choice = get();
+        if (!BANNER || choice === 'all') load();
+        if (bar && !choice) bar.hidden = false;
+        document.querySelectorAll('[data-consent]').forEach(function (b) {
+            b.addEventListener('click', function () { set(b.dataset.consent); bar.hidden = true; if (b.dataset.consent === 'all') load(); });
+        });
+        document.querySelectorAll('[data-cookie-settings]').forEach(function (a) {
+            a.addEventListener('click', function (e) { e.preventDefault(); if (bar) { bar.hidden = false; bar.querySelector('[data-consent="all"]').focus(); } });
+        });
+    })();
+    </script>
     <script>if ('serviceWorker' in navigator && location.protocol === 'https:') { window.addEventListener('load', function () { navigator.serviceWorker.register('{% url "service_worker" %}').catch(function () {}); }); }</script>
     {% block extra_js %}{% endblock %}
 </body>

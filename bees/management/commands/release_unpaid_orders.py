@@ -24,9 +24,18 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         cutoff = timezone.now() - timedelta(minutes=options["minutes"])
-        stale = Order.objects.filter(payment_method="card", payment_status="pending", created_at__lt=cutoff)
+        stale = Order.objects.filter(payment_method__in=["card", "paypal"], payment_status="pending", created_at__lt=cutoff)
         released = paid = 0
         for order in stale:
+            if order.payment_method == "paypal" and order.paypal_order_id:
+                from bees import paypal
+                try:
+                    _, newly_paid = paypal.capture(order.id)
+                except paypal.PayPalError:
+                    continue  # can't check right now - try again tomorrow
+                if newly_paid or Order.objects.filter(pk=order.pk, payment_status="paid").exists():
+                    paid += 1
+                    continue
             session = payments.retrieve_session(order.stripe_session_id) if order.stripe_session_id and payments.is_configured() else None
             if session and session.get("payment_status") == "paid":
                 _, newly_paid = payments.mark_order_paid(order.id, session)

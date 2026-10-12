@@ -215,6 +215,10 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+# Optional CDN (Cloudflare, BunnyCDN, CloudFront...) in front of /static/:
+# point the CDN at this site, then set CDN_URL=https://cdn.example.com
+if os.environ.get('CDN_URL', '').startswith('https://'):
+    STATIC_URL = os.environ['CDN_URL'].rstrip('/') + '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'

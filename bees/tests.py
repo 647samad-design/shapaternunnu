@@ -4141,6 +4141,201 @@ class CourierAndKeysTests(TestCase):
         _os.environ.pop("DEFAULT_FROM_EMAIL", None)
 
 
+class GlobalPackTests(TestCase):
+    """PayPal, per-country tax, cookie consent and SEO."""
+    def setUp(self):
+        import os as _os
+        self.os = _os
+        self.user = User.objects.create_user("glob", "glob@example.com", "pass12345")
+        self.product = make_product(price=Decimal("25.00"), stock=50)
+        self.client.force_login(self.user)
+        for k in ("PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_MODE", "PAYPAL_WEBHOOK_ID"):
+            self.addCleanup(self.os.environ.pop, k, None)
+
+    def _site(self, **values):
+        site = SiteSettings.load()
+        for k, v in values.items():
+            setattr(site, k, v)
+        site.save()
+
+    def _paypal_on(self):
+        self.os.environ.update({"PAYPAL_CLIENT_ID": "A" * 30, "PAYPAL_CLIENT_SECRET": "B" * 30, "PAYPAL_MODE": "sandbox"})
+
+    def _fake(self, routes):
+        import io
+        calls = []
+
+        def opener(req, timeout=None):
+            body = req.data.decode() if req.data else ""
+            calls.append((req.get_method(), req.full_url, body, dict(req.header_items())))
+            for method, frag, payload in routes:
+                if req.get_method() == method and frag in req.full_url:
+                    data = payload(order_amount=None) if callable(payload) else payload
+                    resp = mock.MagicMock()
+                    resp.__enter__.return_value = io.BytesIO(json.dumps(data).encode())
+                    return resp
+            raise AssertionError(f"unexpected {req.get_method()} {req.full_url}")
+        return mock.patch("urllib.request.urlopen", side_effect=opener), calls
+
+    def _paypal_order(self, value="50.00"):
+        return {"id": "PP-1", "status": "COMPLETED", "purchase_units": [{"custom_id": str(Order.objects.get().id), "payments": {"captures": [
+            {"id": "CAP-1", "status": "COMPLETED", "amount": {"currency_code": "USD", "value": value}}]}}]}
+
+    def test_paypal_full_flow(self):
+        self._paypal_on()
+        self.assertContains(self.client.get(reverse("checkout")) if self.client.post(reverse("add_to_cart", args=[self.product.id]), {"quantity": 2}) else None, 'value="paypal"')
+        patcher, calls = self._fake([
+            ("POST", "/v1/oauth2/token", {"access_token": "tok", "expires_in": 3600}),
+            ("POST", "/v2/checkout/orders", {"id": "PP-1", "status": "PAYER_ACTION_REQUIRED", "links": [{"rel": "payer-action", "href": "https://www.sandbox.paypal.com/checkoutnow?token=PP-1"}]}),
+        ])
+        with patcher:
+            r = self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "paypal"})
+        self.assertTrue(r.url.startswith("https://www.sandbox.paypal.com/"))
+        order = Order.objects.get()
+        self.assertEqual((order.payment_method, order.payment_status, order.paypal_order_id), ("paypal", "pending", "PP-1"))
+        body = json.loads(calls[1][2])
+        self.assertEqual(body["purchase_units"][0]["amount"], {"currency_code": "USD", "value": "50.00"})
+        self.assertEqual(body["purchase_units"][0]["custom_id"], str(order.id))
+        self.assertTrue(calls[1][3]["Authorization"].startswith("Bearer "))
+        # back from PayPal: approved -> captured -> paid
+        patcher, calls = self._fake([
+            ("GET", "/v2/checkout/orders/PP-1", {"id": "PP-1", "status": "APPROVED"}),
+            ("POST", "/v2/checkout/orders/PP-1/capture", self._paypal_order()),
+        ])
+        with patcher:
+            r = self.client.get(reverse("paypal_return", args=[order.id]) + "?token=PP-1")
+        self.assertRedirects(r, reverse("order_success", args=[order.id]), fetch_redirect_response=False)
+        order.refresh_from_db()
+        self.assertEqual((order.payment_status, order.status, order.paypal_capture_id), ("paid", "confirmed", "CAP-1"))
+        self.assertEqual(order.card_label, "PayPal")
+        # cancelling refunds to PayPal
+        patcher, calls = self._fake([("POST", "/v2/payments/captures/CAP-1/refund", {"id": "RF-1", "status": "COMPLETED"})])
+        with patcher:
+            self.client.post(reverse("cancel_order", args=[order.id]), {"reason": ""})
+        order.refresh_from_db()
+        self.assertEqual(order.payment_status, "refunded")
+        self.assertTrue(order.events.filter(text__icontains="PayPal").exists())
+
+    def test_paypal_amount_mismatch_is_not_paid(self):
+        self._paypal_on()
+        self.client.post(reverse("add_to_cart", args=[self.product.id]), {"quantity": 2})
+        patcher, _ = self._fake([("POST", "/v1/oauth2/token", {"access_token": "tok", "expires_in": 3600}),
+                                 ("POST", "/v2/checkout/orders", {"id": "PP-1", "links": [{"rel": "approve", "href": "https://p/x"}]})])
+        with patcher:
+            self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "paypal"})
+        order = Order.objects.get()
+        patcher, _ = self._fake([("GET", "/v2/checkout/orders/PP-1", self._paypal_order(value="1.00"))])
+        with patcher:
+            self.client.get(reverse("paypal_return", args=[order.id]))
+        order.refresh_from_db()
+        self.assertEqual(order.payment_status, "pending")
+
+    def test_paypal_cancel_returns_cart_and_webhook_needs_verification(self):
+        self._paypal_on()
+        self.client.post(reverse("add_to_cart", args=[self.product.id]), {"quantity": 1})
+        patcher, _ = self._fake([("POST", "/v1/oauth2/token", {"access_token": "tok", "expires_in": 3600}),
+                                 ("POST", "/v2/checkout/orders", {"id": "PP-1", "links": [{"rel": "approve", "href": "https://p/x"}]})])
+        with patcher:
+            self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "paypal"})
+        order = Order.objects.get()
+        self.client.get(reverse("paypal_cancel", args=[order.id]))
+        order.refresh_from_db()
+        self.assertEqual(order.status, "cancelled")
+        self.assertTrue(self.client.session.get("cart"))
+        self.assertEqual(self.client.post(reverse("paypal_webhook"), "{}", content_type="application/json").status_code, 400)
+
+    def test_paypal_hidden_for_unsupported_currency(self):
+        from bees import paypal
+        self._paypal_on()
+        with self.settings(STORE_CURRENCY="pkr"):
+            self.assertFalse(paypal.is_configured())
+            self.assertEqual(paypal.status_line()[0], "missing")
+
+    def test_tax_by_country_exclusive_and_inclusive(self):
+        from bees.models import TaxRate
+        TaxRate.objects.create(country="GB", name="VAT", rate=Decimal("20"), includes_shipping=True)
+        self._site(tax_percent=Decimal("0"), shipping_flat_fee=Decimal("10"), ship_from_country="PK")
+        self.client.post(reverse("add_to_cart", args=[self.product.id]), {"quantity": 2})
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "country": "GB", "payment_method": "cod", "customer_tax_id": "GB123456789"})
+        order = Order.objects.get()
+        self.assertEqual(order.tax_amount, Decimal("12.00"))  # 20% of 50 goods + 10 shipping
+        self.assertEqual(order.total, Decimal("72.00"))
+        self.assertEqual(order.tax_label, "VAT 20%")
+        self.assertEqual(order.customer_tax_id, "GB123456789")
+        # tax-inclusive store: shown, not added
+        self._site(prices_include_tax=True)
+        self.client.post(reverse("add_to_cart", args=[self.product.id]), {"quantity": 2})
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "country": "GB", "payment_method": "cod"})
+        o2 = Order.objects.order_by("-id").first()
+        self.assertEqual(o2.total, Decimal("60.00"))
+        self.assertEqual(o2.tax_amount, Decimal("10.00"))  # 60 - 60/1.2
+        self.assertTrue(o2.tax_included)
+        # US has no rate -> no tax
+        self.client.post(reverse("add_to_cart", args=[self.product.id]), {"quantity": 1})
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "country": "US", "payment_method": "cod"})
+        self.assertEqual(Order.objects.order_by("-id").first().tax_amount, Decimal("0"))
+        # checkout page carries the tax table and duties note
+        self.client.post(reverse("add_to_cart", args=[self.product.id]), {"quantity": 1})
+        resp = self.client.get(reverse("checkout"))
+        page = resp.content.decode()
+        self.assertIn('"GB": {"name": "VAT", "rate": 20.0', page)
+        self.assertIn("duties-note", page)
+        r = self.client.get(reverse("invoice_pdf", args=[order.id]))
+        self.assertEqual(r.status_code, 200)
+
+    def test_tax_rates_admin(self):
+        from bees.models import TaxRate
+        boss = User.objects.create_superuser("taxboss", "tb@example.com", "pass12345")
+        self.client.force_login(boss)
+        self.client.post(reverse("manage_taxes"), {"action": "presets"})
+        self.assertTrue(TaxRate.objects.filter(country="DE", rate=Decimal("19")).exists())
+        self.client.post(reverse("manage_taxes"), {"action": "save", "country": "DE", "name": "MwSt", "rate": "7"})
+        self.assertEqual(TaxRate.objects.get(country="DE").rate, Decimal("7"))
+        self.client.post(reverse("manage_taxes"), {"action": "save", "country": "XX", "rate": "7"})
+        self.assertFalse(TaxRate.objects.filter(country="XX").exists())
+        self.assertContains(self.client.get(reverse("manage_taxes")), "Germany")
+
+    def test_cookie_banner_and_analytics_only_after_consent(self):
+        self._site(cookie_banner=True, ga4_id="G-ABC123XYZ")
+        page = self.client.get(reverse("home")).content.decode()
+        self.assertIn('id="cookie-bar"', page)
+        self.assertNotIn("googletagmanager.com/gtag/js?id=G-", page)  # loaded by script only after consent
+        self.assertIn("ABC123XYZ", page)
+        self.assertContains(self.client.get(reverse("privacy_page")), "GDPR")
+        boss = User.objects.create_superuser("cboss", "cb@example.com", "pass12345")
+        self.client.force_login(boss)
+        from bees.manage_views import SiteSettingsForm
+        form = SiteSettingsForm(data={"ga4_id": "<script>"}, instance=SiteSettings.load())
+        form.is_valid()
+        self.assertIn("ga4_id", form.errors)
+
+    def test_seo_tags_structured_data_and_sitemap(self):
+        self._site(show_language_menu=True, google_site_verification="abc123def456ghi")
+        r = self.client.get(reverse("product_detail", args=[self.product.id]))
+        html = r.content.decode()
+        self.assertIn('hreflang="ar"', html)
+        self.assertIn('hreflang="x-default"', html)
+        self.assertIn('google-site-verification', html)
+        self.assertIn('max-image-preview:large', html)
+        import re
+        blocks = [json.loads(b) for b in re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.S)]
+        types = [b.get("@type") for b in blocks] + [g.get("@type") for b in blocks for g in b.get("@graph", [])]
+        for t in ("Product", "BreadcrumbList", "Organization", "WebSite"):
+            self.assertIn(t, types)
+        product = next(b for b in blocks if b.get("@type") == "Product")
+        self.assertEqual(product["offers"]["price"], "25.00")
+        self.assertIn("hasMerchantReturnPolicy", product["offers"])
+        # search / filter pages aren't indexed; ?lang shows that language
+        self.assertIn("noindex", self.client.get(reverse("all_products") + "?sort=price").content.decode())
+        self.assertIn('lang="es"', self.client.get(reverse("home") + "?lang=es").content.decode())
+        sm = self.client.get("/sitemap.xml").content.decode()
+        self.assertIn('hreflang="fr"', sm)
+        self.assertIn("<image:image>", sm)
+        # custom SEO title
+        Product.objects.filter(pk=self.product.pk).update(seo_title="Best Mug Ever")
+        self.assertContains(self.client.get(reverse("product_detail", args=[self.product.id])), "<title>Best Mug Ever</title>")
+
+
 class LiveUpdatesTests(TestCase):
     def setUp(self):
         from django.core.cache import caches

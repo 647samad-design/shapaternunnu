@@ -137,3 +137,93 @@ def date_add_days(value, days):
 def countries():
     from bees.countries import COUNTRIES
     return COUNTRIES
+
+
+HREFLANG = {"en": "en", "ur": "ur", "roman": "ur-Latn", "ar": "ar", "es": "es", "fr": "fr"}
+_INDEXABLE_PARAMS = {"page", "lang"}
+
+
+@register.simple_tag(takes_context=True)
+def seo_urls(context):
+    """Canonical URL, hreflang alternates and whether this URL should be
+    indexed (search results, filters and sorting are not)."""
+    request = context.get("request")
+    if request is None:
+        return {"canonical": "", "alternates": [], "index": True}
+    from urllib.parse import urlencode
+    base = f"{request.scheme}://{request.get_host()}{request.path}"
+    page = request.GET.get("page", "")
+    lang = context.get("current_lang", "en")
+    keep = {}
+    if page.isdigit() and int(page) > 1:
+        keep["page"] = page
+    canonical_params = dict(keep)
+    if request.GET.get("lang") and lang != "en":
+        canonical_params["lang"] = lang
+    canonical = base + ("?" + urlencode(canonical_params) if canonical_params else "")
+    alternates = []
+    brand = context.get("brand")
+    if brand is not None and getattr(brand, "show_language_menu", False):
+        for code, tag in HREFLANG.items():
+            params = dict(keep)
+            if code != "en":
+                params["lang"] = code
+            alternates.append((tag, base + ("?" + urlencode(params) if params else "")))
+        alternates.append(("x-default", base + ("?" + urlencode(keep) if keep else "")))
+    extra = set(request.GET.keys()) - _INDEXABLE_PARAMS
+    return {"canonical": canonical, "alternates": alternates, "index": not extra}
+
+
+@register.filter
+def jsonld(value):
+    """Safe JSON for <script type="application/ld+json">."""
+    import json
+    from django.utils.safestring import mark_safe
+    text = json.dumps(value, ensure_ascii=False, default=str)
+    return mark_safe(text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
+
+
+@register.simple_tag(takes_context=True)
+def site_jsonld(context):
+    """Organization + WebSite (with site search) for every page."""
+    request = context.get("request")
+    brand = context.get("brand")
+    if request is None or brand is None:
+        return {}
+    root = f"{request.scheme}://{request.get_host()}"
+    org = {"@type": "Organization", "@id": root + "/#org", "name": brand.site_name, "url": root + "/"}
+    logo = getattr(brand, "logo", "") or ""
+    if logo:
+        org["logo"] = logo if logo.startswith("http") else root + logo
+    same = [u for u in (getattr(brand, f, "") for f in ("facebook_url", "instagram_url", "twitter_url", "youtube_url")) if u]
+    if same:
+        org["sameAs"] = same
+    if getattr(brand, "support_email", "") or getattr(brand, "support_phone", ""):
+        cp = {"@type": "ContactPoint", "contactType": "customer support"}
+        if brand.support_email:
+            cp["email"] = brand.support_email
+        if getattr(brand, "support_phone", ""):
+            cp["telephone"] = brand.support_phone
+        org["contactPoint"] = cp
+    site = {"@type": "WebSite", "@id": root + "/#site", "name": brand.site_name, "url": root + "/", "publisher": {"@id": root + "/#org"},
+            "inLanguage": context.get("current_lang", "en"),
+            "potentialAction": {"@type": "SearchAction", "target": {"@type": "EntryPoint", "urlTemplate": root + "/search/?q={search_term_string}"},
+                                "query-input": "required name=search_term_string"}}
+    return {"@context": "https://schema.org", "@graph": [org, site]}
+
+
+@register.simple_tag(takes_context=True)
+def listing_jsonld(context, products, name):
+    request = context.get("request")
+    if request is None:
+        return {}
+    from bees import seo
+    return seo.item_list(request, list(products), str(name))
+
+
+@register.simple_tag
+def sitemap_languages():
+    from bees.models import SiteSettings
+    if not SiteSettings.load().show_language_menu:
+        return []
+    return list(HREFLANG.items())
