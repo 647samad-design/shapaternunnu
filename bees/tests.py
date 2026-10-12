@@ -50,7 +50,7 @@ from django.urls import reverse
 
 from .models import (
     Product, Order, OrderItem, SellerAccount, OrganizationMember,
-    Review, Notification, AuditLog,
+    Review, Notification, AuditLog, Claim, ReturnRequest,
 )
 from .views import with_ratings, get_seller_account_for_user
 
@@ -2598,6 +2598,11 @@ class SellerCenterTests(TestCase):
         o = Order.objects.get(pk=order.pk)
         o.status = "delivered"
         o.save()
+        # Delivered but still inside the return window: held
+        self.client.post(reverse("seller_request_payout"), {"amount": "80"})
+        self.assertFalse(Payout.objects.exists())
+        from datetime import timedelta
+        Order.objects.filter(pk=order.pk).update(delivered_at=timezone.now() - timedelta(days=30))
         self.client.post(reverse("seller_request_payout"), {"amount": "500"})  # too much
         self.assertFalse(Payout.objects.exists())
         self.client.post(reverse("seller_request_payout"), {"amount": "80"})
@@ -3611,6 +3616,198 @@ class FulfilmentFlowTests(TestCase):
             r = self.client.get(reverse(name))
             self.assertNotEqual(r.status_code, 200, name)
         self.assertEqual(self.client.get(reverse("seller_orders")).status_code, 200)
+
+
+class TrustPackTests(TestCase):
+    """Payout hold, item returns, problem reports, automation, review replies."""
+    def setUp(self):
+        from datetime import timedelta
+        self.td = timedelta
+        self.owner = User.objects.create_user("tpsell", "tps@example.com", "pass12345")
+        self.seller = SellerAccount.objects.create(user=self.owner, business_name="TP Shop", status="approved")
+        self.staff = User.objects.create_superuser("tpboss", "tpb@example.com", "pass12345")
+        self.buyer = User.objects.create_user("tpbuy", "tpbuy@example.com", "pass12345")
+        self.p1 = make_product(name="Lamp", seller_account=self.seller, seller_name="TP Shop", price=Decimal("40.00"))
+        self.p2 = make_product(name="Shade", seller_account=self.seller, seller_name="TP Shop", price=Decimal("10.00"))
+
+    def _order(self, status="confirmed", method="card", pay="paid", age_days=0, items=None):
+        o = Order.objects.create(user=self.buyer, email=self.buyer.email, full_name="Buyer", address="1 St", city="X", country="GB",
+                                 payment_method=method, payment_status=pay, status=status,
+                                 cod_confirmed=True)
+        out = []
+        for p in items or (self.p1,):
+            it = OrderItem(order=o, product=p, product_name=p.name, price=p.price, quantity=1)
+            it.apply_commission(self.seller)
+            it.save()
+            out.append(it)
+        if age_days:
+            Order.objects.filter(pk=o.pk).update(created_at=timezone.now() - self.td(days=age_days))
+            o.refresh_from_db()
+        return o, out
+
+    def _deliver(self, item, days_ago=0):
+        from bees import fulfilment
+        fulfilment.set_items_status([item], "delivered", by_staff=True)
+        if days_ago:
+            OrderItem.objects.filter(pk=item.pk).update(delivered_at=timezone.now() - self.td(days=days_ago))
+
+    def test_earnings_held_until_return_window_passes(self):
+        from bees import seller_center as sc
+        o, (item,) = self._order()
+        self._deliver(item)
+        self.assertEqual(sc.balance(self.seller)["available"], 0)
+        OrderItem.objects.filter(pk=item.pk).update(delivered_at=timezone.now() - self.td(days=30))
+        self.assertGreater(sc.balance(self.seller)["available"], 0)
+        # an open problem report puts it back on hold
+        Claim.objects.create(order_item=item, user=self.buyer, reason="damaged", details="Broken glass on arrival")
+        self.assertEqual(sc.balance(self.seller)["available"], 0)
+
+    def test_item_level_return_before_whole_order_is_delivered(self):
+        o, (a, b) = self._order(items=(self.p1, self.p2))
+        self._deliver(a)
+        o.refresh_from_db()
+        self.assertNotEqual(o.status, "delivered")
+        self.client.force_login(self.buyer)
+        page = self.client.get(reverse("my_orders")).content.decode()
+        self.assertIn(reverse("request_return", args=[a.id]), page)
+        self.assertNotIn(reverse("request_return", args=[b.id]), page)
+        self.client.post(reverse("request_return", args=[a.id]), {"reason": "Too big"})
+        self.assertTrue(ReturnRequest.objects.filter(order_item=a).exists())
+        self.assertTrue(Notification.objects.filter(user=self.owner, message__icontains="Return requested").exists())
+        self.assertTrue(Notification.objects.filter(user=self.staff, message__icontains="Return requested").exists())
+        r = self.client.get(reverse("request_return", args=[b.id]))
+        self.assertRedirects(r, reverse("my_orders"), fetch_redirect_response=False)
+
+    def test_problem_report_full_flow_with_refund(self):
+        o, (item,) = self._order()
+        from bees import fulfilment
+        fulfilment.set_items_status([item], "handed_to_courier", by_staff=True)
+        self.client.force_login(self.buyer)
+        self.assertContains(self.client.get(reverse("my_orders")), "Report a problem")
+        form = self.client.get(reverse("open_claim", args=[item.id]))
+        self.assertContains(form, "It didn&#x27;t arrive")
+        self.assertNotContains(form, "Arrived damaged")  # not delivered yet
+        r = self.client.post(reverse("open_claim", args=[item.id]), {"reason": "not_received", "details": "Tracking hasn't moved for 10 days."})
+        claim = Claim.objects.get()
+        self.assertRedirects(r, reverse("claim_detail", args=[claim.id]), fetch_redirect_response=False)
+        self.assertTrue(Notification.objects.filter(user=self.owner, link=reverse("seller_claims")).exists())
+        # second report blocked
+        self.client.post(reverse("open_claim", args=[item.id]), {"reason": "other", "details": "Another report here"})
+        self.assertEqual(Claim.objects.count(), 1)
+        # seller answers and offers a refund -> goes to the store team
+        self.client.force_login(self.owner)
+        self.assertContains(self.client.get(reverse("seller_claims")), "Tracking hasn")
+        self.client.post(reverse("seller_claims"), {"id": claim.id, "reply": "Sorry, courier lost it.", "offer_refund": "1"})
+        claim.refresh_from_db()
+        self.assertEqual(claim.status, "escalated")
+        # another seller can't see or answer it
+        other = User.objects.create_user("othersel", "os@example.com", "pass12345")
+        SellerAccount.objects.create(user=other, business_name="Other", status="approved")
+        self.client.force_login(other)
+        self.assertNotContains(self.client.get(reverse("seller_claims")), "Tracking hasn")
+        self.assertEqual(self.client.post(reverse("seller_claims"), {"id": claim.id, "reply": "x"}).status_code, 404)
+        # store team refunds (card refund mocked)
+        self.client.force_login(self.staff)
+        self.assertContains(self.client.get(reverse("manage_claims")), "It didn")
+        with mock.patch("bees.payments.refund_amount", return_value=True):
+            Order.objects.filter(pk=o.pk).update(stripe_payment_intent="pi_test")
+            self.client.post(reverse("manage_claim", args=[claim.id]), {"action": "refund", "note": "Courier lost it"})
+        claim.refresh_from_db()
+        self.assertEqual(claim.status, "refunded")
+        self.assertEqual(claim.return_request.status, "refunded")
+        self.assertTrue(Notification.objects.filter(user=self.buyer, message__icontains="was refunded").exists())
+        # the refunded item no longer counts in the seller's earnings
+        self.assertFalse(OrderItem.objects.counted().filter(pk=item.pk).exists())
+        # strangers can't open the claim page
+        self.client.force_login(other)
+        self.assertEqual(self.client.get(reverse("claim_detail", args=[claim.id])).status_code, 404)
+
+    def test_claim_reject_and_withdraw(self):
+        o, (item,) = self._order()
+        self._deliver(item)
+        claim = Claim.objects.create(order_item=item, user=self.buyer, reason="not_as_described", details="Colour is different")
+        self.client.force_login(self.staff)
+        self.client.post(reverse("manage_claim", args=[claim.id]), {"action": "reject", "note": "Photos match the listing"})
+        claim.refresh_from_db()
+        self.assertEqual(claim.status, "rejected")
+        o2, (item2,) = self._order()
+        self._deliver(item2)
+        c2 = Claim.objects.create(order_item=item2, user=self.buyer, reason="damaged", details="Cracked")
+        self.client.force_login(self.buyer)
+        self.client.post(reverse("claim_detail", args=[c2.id]), {"action": "withdraw"})
+        c2.refresh_from_db()
+        self.assertEqual(c2.status, "withdrawn")
+
+    def test_automation_late_orders(self):
+        from bees import automation
+        o_new, _ = self._order(age_days=3)
+        o_late, _ = self._order(age_days=5)
+        o_dead, _ = self._order(age_days=8)
+        cod_unconfirmed, _ = self._order(age_days=9, method="cod", pay="not_applicable")
+        Order.objects.filter(pk=cod_unconfirmed.pk).update(cod_confirmed=False)
+        with mock.patch("bees.payments.refund_order", return_value=True):
+            summary = automation.run()
+        self.assertEqual(summary["auto_cancelled"], 1)
+        self.assertEqual(Order.objects.get(pk=o_dead.pk).status, "cancelled")
+        self.assertEqual(Order.objects.get(pk=cod_unconfirmed.pk).status, "confirmed")
+        self.assertIsNotNone(Order.objects.get(pk=o_new.pk).late_reminded_at)
+        self.assertIsNotNone(Order.objects.get(pk=o_late.pk).late_escalated_at)
+        self.assertTrue(Notification.objects.filter(user=self.owner, message__icontains=f"Order #{o_new.id} is waiting").exists())
+        # running again doesn't repeat reminders
+        before = Notification.objects.count()
+        automation.run()
+        self.assertEqual(Notification.objects.count(), before)
+
+    def test_automation_arrival_reminder_and_auto_delivery(self):
+        from bees import automation, fulfilment
+        o, (item,) = self._order()
+        fulfilment.set_items_status([item], "handed_to_courier", by_staff=True)
+        OrderItem.objects.filter(pk=item.pk).update(shipped_at=timezone.now() - self.td(days=12))
+        automation.run()
+        self.assertTrue(Notification.objects.filter(user=self.buyer, message__icontains="arrived?").exists())
+        self.assertEqual(OrderItem.objects.get(pk=item.pk).fulfillment_status, "handed_to_courier")
+        OrderItem.objects.filter(pk=item.pk).update(shipped_at=timezone.now() - self.td(days=15))
+        # an open "not received" report stops auto-delivery
+        claim = Claim.objects.create(order_item=item, user=self.buyer, reason="not_received", details="Nothing yet")
+        automation.run()
+        self.assertEqual(OrderItem.objects.get(pk=item.pk).fulfillment_status, "handed_to_courier")
+        claim.status = "withdrawn"
+        claim.save()
+        automation.run()
+        self.assertEqual(OrderItem.objects.get(pk=item.pk).fulfillment_status, "delivered")
+        self.assertEqual(Order.objects.get(pk=o.pk).status, "delivered")
+
+    def test_unanswered_claims_go_to_store_team(self):
+        from bees import automation
+        o, (item,) = self._order()
+        self._deliver(item)
+        claim = Claim.objects.create(order_item=item, user=self.buyer, reason="damaged", details="Cracked")
+        Claim.objects.filter(pk=claim.pk).update(created_at=timezone.now() - self.td(days=4))
+        automation.run()
+        claim.refresh_from_db()
+        self.assertEqual(claim.status, "escalated")
+        self.assertTrue(Notification.objects.filter(user=self.staff, message__icontains=f"problem #{claim.id}").exists())
+
+    def test_review_alert_and_public_seller_reply(self):
+        o, (item,) = self._order()
+        self._deliver(item)
+        self.client.force_login(self.buyer)
+        self.client.post(reverse("product_detail", args=[self.p1.id]), {"rating": "4", "comment": "Nice lamp"})
+        self.assertTrue(Notification.objects.filter(user=self.owner, message__icontains="4★ review").exists())
+        review = Review.objects.get()
+        self.client.force_login(self.owner)
+        self.client.post(reverse("seller_reply_review", args=[review.id]), {"reply": "Thank you!"})
+        self.assertTrue(Notification.objects.filter(user=self.buyer, message__icontains="replied to your review").exists())
+        self.client.logout()
+        self.assertContains(self.client.get(reverse("product_detail", args=[self.p1.id])), "Thank you!")
+        other = User.objects.create_user("os2", "os2@example.com", "pass12345")
+        SellerAccount.objects.create(user=other, business_name="Other2", status="approved")
+        self.client.force_login(other)
+        self.assertEqual(self.client.post(reverse("seller_reply_review", args=[review.id]), {"reply": "hack"}).status_code, 404)
+
+    def test_order_rules_in_settings(self):
+        self.client.force_login(self.staff)
+        self.assertContains(self.client.get(reverse("manage_settings")), "auto_cancel_days")
 
 
 class LiveUpdatesTests(TestCase):

@@ -1,0 +1,26 @@
+{% extends "bees/manage/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Problems{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Problem reports</h1><p>Customers' reports about items. Sellers answer first; anything not solved comes here for your decision.</p></div></div>
+<div class="tabs" role="group" aria-label="Filter">{% for v, l in tabs %}<a href="?show={{ v }}" class="{% if show == v %}on{% endif %}">{{ l }}{% if v == 'escalated' and attention.claims %} ({{ attention.claims }}){% endif %}</a>{% endfor %}</div>
+<section class="panel">
+    <div class="table-scroll"><table class="table">
+        <thead><tr><th>#</th><th>Item</th><th>Problem</th><th>Seller</th><th>Customer</th><th>Status</th><th>Opened</th></tr></thead>
+        <tbody>
+        {% for c in page_obj %}
+        <tr>
+            <td><a class="rowlink" href="{% url 'manage_claim' c.id %}">#{{ c.id }}</a></td>
+            <td>{{ c.order_item.product_name }}<div class="muted small">Order #{{ c.order_item.order_id }}</div></td>
+            <td>{{ c.get_reason_display }}</td>
+            <td class="small">{% if c.order_item.seller_account %}{{ c.order_item.seller_account.display_name }}{% else %}Your store{% endif %}</td>
+            <td class="small">{{ c.user.email|default:c.user.username }}</td>
+            <td><span class="pill {% if c.status == 'escalated' %}warn{% elif c.status == 'refunded' %}ok{% elif c.is_open %}info{% endif %}">{{ c.get_status_display }}</span></td>
+            <td class="small">{{ c.created_at|date:"M j" }}</td>
+        </tr>
+        {% empty %}<tr><td colspan="7" class="muted" style="text-align:center;padding:28px;">Nothing here.</td></tr>{% endfor %}
+        </tbody>
+    </table></div>
+</section>
+{% include "bees/manage/_pagination.html" %}
+{% endblock %}

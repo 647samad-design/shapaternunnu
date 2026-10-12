@@ -175,14 +175,37 @@ def queue_counts(seller):
 # Balance and payouts
 # ---------------------------------------------------------------------------
 
+def on_hold_items(seller):
+    """Sold items whose earnings can't be paid out yet."""
+    from datetime import timedelta
+    from django.db.models import Q
+    from .models import SiteSettings
+    cutoff = timezone.now() - timedelta(days=SiteSettings.load().return_days)
+    items = sold_items(seller).counted().select_related("order").only(
+        "price", "quantity", "commission_amount", "delivered_at", "order__delivered_at", "order__status")
+    settled = (Q(delivered_at__lte=cutoff) | Q(delivered_at=None, order__status="delivered", order__delivered_at__lte=cutoff))
+    disputed = (Q(return_requests__status__in=["requested", "approved"])
+                | Q(claims__status__in=["open", "seller_replied", "escalated"]))
+    return items.filter(~settled | disputed).distinct()
+
+
+def release_date(item):
+    """When an item's earnings become available (None if not delivered)."""
+    from datetime import timedelta
+    from .models import SiteSettings
+    received = item.delivered_at or (item.order.delivered_at if item.order.status == "delivered" else None)
+    return received + timedelta(days=SiteSettings.load().return_days) if received else None
+
+
 def balance(seller):
     """What the seller has earned, been paid and is still owed."""
     requested = seller.payouts.filter(status="requested").aggregate(n=Sum("amount"))["n"] or ZERO
     owed = Decimal(str(seller.amount_owed))
-    # Earnings on orders that haven't been delivered yet are shown as
-    # "pending": they can still be cancelled or returned.
+    # Earnings stay "pending" until the item has been delivered AND its
+    # return window has passed with no open return or problem report - so
+    # the store never pays out money it may have to refund.
     pending = ZERO
-    for item in sold_items(seller).counted().exclude(order__status="delivered").only("price", "quantity", "commission_amount"):
+    for item in on_hold_items(seller):
         pending += item.seller_earning
     return {
         "earned": Decimal(str(seller.net_earnings)),

@@ -34,7 +34,7 @@
             <span class="muted small">Available for payout</span>
             <div class="big">{{ balance.available|money }}</div>
             <dl class="kv" style="margin-top:14px;">
-                <dt>On the way</dt><dd>{{ balance.pending|money }} <span class="muted small">from orders not delivered yet</span></dd>
+                <dt>On hold</dt><dd>{{ balance.pending|money }} <span class="muted small">until delivered + {{ brand.return_days }}-day return window</span></dd>
                 <dt>Paid to you</dt><dd>{{ balance.paid|money }}</dd>
                 <dt>Earned all time</dt><dd>{{ balance.earned|money }}</dd>
             </dl>

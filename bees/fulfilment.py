@@ -70,7 +70,11 @@ def set_items_status(items, new_status, user=None, by_staff=False, forward_only=
                 continue
             item.fulfillment_status = new_status
             item.delivered_at = now if new_status == "delivered" else None
-            item.save(update_fields=["fulfillment_status", "delivered_at"])
+            if new_status in ("handed_to_courier", "delivered"):
+                item.shipped_at = item.shipped_at or now
+            else:
+                item.shipped_at = None
+            item.save(update_fields=["fulfillment_status", "delivered_at", "shipped_at"])
             changed.append(item)
     if not changed and reasons:
         raise FulfilmentError(reasons[0])

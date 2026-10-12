@@ -540,3 +540,27 @@ ENTRIES.update({
     "are in Seller Center.": ("سیلر سینٹر میں ہیں۔", "Seller Center mein hain.", "موجودة في مركز البائع.", "están en el Centro de vendedores.", "sont dans l'Espace vendeur."),
     "This product is no longer sold. You can still review it if you bought it.": ("یہ چیز اب فروخت نہیں ہوتی۔ اگر آپ نے خریدی تھی تو جائزہ دے سکتے ہیں۔", "Yeh cheez ab nahi bikti. Agar aap ne khareedi thi to review de sakte hain.", "لم يعد هذا المنتج معروضاً للبيع. يمكنك تقييمه إذا اشتريته.", "Este producto ya no se vende. Puedes reseñarlo si lo compraste.", "Ce produit n'est plus vendu. Vous pouvez quand même le noter si vous l'avez acheté."),
 })
+
+ENTRIES.update({
+    'Report a problem': ('مسئلہ بتائیں', 'Masla batayein', 'الإبلاغ عن مشكلة', 'Informar de un problema', 'Signaler un problème'),
+    'What went wrong?': ('کیا مسئلہ ہوا؟', 'Kya masla hua?', 'ما المشكلة؟', '¿Qué salió mal?', "Que s'est-il passé ?"),
+    "It didn't arrive": ('نہیں پہنچا', 'Nahi pohancha', 'لم يصل', 'No llegó', 'Pas reçu'),
+    'Not as described': ('تفصیل کے مطابق نہیں', 'Description ke mutabiq nahi', 'ليس كما هو موصوف', 'No es como se describe', 'Non conforme à la description'),
+    'Arrived damaged or broken': ('ٹوٹا یا خراب پہنچا', 'Toota ya kharab pohancha', 'وصل تالفاً أو مكسوراً', 'Llegó dañado o roto', 'Arrivé endommagé ou cassé'),
+    'Wrong item sent': ('غلط چیز بھیجی گئی', 'Ghalat cheez bheji gayi', 'أُرسل منتج خاطئ', 'Se envió un artículo equivocado', 'Mauvais article envoyé'),
+    'Something else': ('کچھ اور', 'Kuch aur', 'شيء آخر', 'Otra cosa', 'Autre chose'),
+    'Details': ('تفصیل', 'Tafseel', 'التفاصيل', 'Detalles', 'Détails'),
+    'Photo (optional)': ('تصویر (اختیاری)', 'Photo (ikhtiyari)', 'صورة (اختياري)', 'Foto (opcional)', 'Photo (facultatif)'),
+    'Send report': ('رپورٹ بھیجیں', 'Report bhejein', 'إرسال البلاغ', 'Enviar informe', 'Envoyer le signalement'),
+    'Waiting for the seller': ('فروخت کنندہ کے جواب کا انتظار', 'Seller ke jawab ka intezar', 'بانتظار البائع', 'Esperando al vendedor', 'En attente du vendeur'),
+    'Seller replied': ('فروخت کنندہ نے جواب دیا', 'Seller ne jawab diya', 'ردّ البائع', 'El vendedor respondió', 'Le vendeur a répondu'),
+    'With the store team': ('اسٹور ٹیم کے پاس', 'Store team ke paas', 'لدى فريق المتجر', 'Con el equipo de la tienda', "Avec l'équipe du magasin"),
+    'Refunded': ('رقم واپس', 'Refund ho gaya', 'تم الاسترداد', 'Reembolsado', 'Remboursé'),
+    'Closed - no refund': ('بند - رقم واپس نہیں', 'Band - refund nahi', 'مغلق - دون استرداد', 'Cerrado - sin reembolso', 'Clôturé - sans remboursement'),
+    'Withdrawn by customer': ('گاہک نے واپس لے لیا', 'Customer ne wapas le liya', 'سحبه العميل', 'Retirado por el cliente', 'Retiré par le client'),
+    'Our team is reviewing it': ('ہماری ٹیم دیکھ رہی ہے', 'Hamari team dekh rahi hai', 'فريقنا يراجعه', 'Nuestro equipo lo está revisando', "Notre équipe l'examine"),
+    "We'll let you know the decision.": ('فیصلہ ہونے پر ہم آپ کو بتائیں گے۔', 'Faisla hone par hum aap ko batayenge.', 'سنبلغك بالقرار.', 'Te avisaremos de la decisión.', 'Nous vous informerons de la décision.'),
+    'Problem solved - close report': ('مسئلہ حل ہو گیا - رپورٹ بند کریں', 'Masla hal ho gaya - report band karein', 'تم حل المشكلة - أغلق البلاغ', 'Problema resuelto - cerrar informe', 'Problème résolu - clôturer'),
+    'Return window closed': ('واپسی کی مدت ختم', 'Wapsi ki muddat khatam', 'انتهت مدة الإرجاع', 'Plazo de devolución cerrado', 'Délai de retour dépassé'),
+    'Request a return': ('واپسی کی درخواست', 'Wapsi ki darkhwast', 'طلب إرجاع', 'Solicitar una devolución', 'Demander un retour'),
+})

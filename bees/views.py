@@ -376,7 +376,7 @@ def _submit_review(request, product):
         messages.error(request, blocked)
         return redirect("product_detail", pk=product.pk)
     verified = True
-    Review.objects.update_or_create(
+    review, created = Review.objects.update_or_create(
         product=product, user=request.user,
         defaults={
             "username": request.user.get_full_name() or request.user.username,
@@ -385,6 +385,13 @@ def _submit_review(request, product):
             "is_verified_purchase": verified,
         },
     )
+    if product.seller_account_id:
+        from .seller_center import _seller_users
+        verb = "New" if created else "Updated"
+        Notification.objects.bulk_create([
+            Notification(user=u, link="/seller/reviews/?tab=reviews",
+                         message=f"{verb} {rating}★ review on '{product.name}': {comment[:60]}"[:255])
+            for u in _seller_users(product.seller_account)])
     messages.success(request, "Thanks - your review has been posted.")
     return redirect("product_detail", pk=product.pk)
 
@@ -1481,10 +1488,27 @@ def order_track(request, order_id, token):
 @login_required
 def my_orders(request):
     orders = Order.objects.filter(user=request.user).prefetch_related(
-        "items", "items__product", "items__return_requests", "items__seller_account"
+        "items", "items__product", "items__return_requests", "items__seller_account", "items__claims"
     ).order_by("-created_at")
     reviewed = set(Review.objects.filter(user=request.user).values_list("product_id", flat=True))
     return render(request, "bees/my_orders.html", {"orders": orders, "cancel_reasons": CANCEL_REASONS, "reviewed": reviewed})
+
+
+@login_required
+@require_POST
+def seller_reply_review(request, pk):
+    """A seller answers a review of their product (shown under it)."""
+    seller, role = _approved_seller_or_404(request.user)
+    review = get_object_or_404(Review, pk=pk, product__seller_account=seller)
+    reply = request.POST.get("reply", "").strip()[:1000]
+    review.seller_reply = reply
+    review.seller_reply_at = timezone.now() if reply else None
+    review.save(update_fields=["seller_reply", "seller_reply_at"])
+    if reply and review.user_id:
+        Notification.objects.create(user_id=review.user_id, link=f"/product/{review.product_id}/#reviews",
+                                    message=f"{seller.display_name} replied to your review of '{review.product.name}'."[:255])
+    messages.success(request, "Reply published." if reply else "Reply removed.")
+    return redirect_back(request, "seller_reviews")
 
 
 @login_required
@@ -1546,12 +1570,12 @@ CANCEL_REASONS = [
 
 @login_required
 def request_return(request, item_id):
-    item = get_object_or_404(OrderItem, pk=item_id, order__user=request.user)
-    if item.order.status != "delivered":
-        messages.error(request, "Returns can only be requested for delivered orders.")
+    item = get_object_or_404(OrderItem.objects.select_related("order"), pk=item_id, order__user=request.user)
+    if not item.received_at:
+        messages.error(request, "You can return an item once it has been delivered.")
         return redirect("my_orders")
-    if not item.order.can_return:
-        messages.error(request, f"The {_brand().return_days}-day return window for order #{item.order_id} has closed. Please contact support if something is wrong.")
+    if not item.can_return:
+        messages.error(request, f"The {_brand().return_days}-day return window for '{item.product_name}' has closed. Use 'Report a problem' if something is wrong.")
         return redirect("my_orders")
     if item.return_requests.exclude(status="rejected").exists():
         messages.error(request, "A return request already exists for this item.")
@@ -1568,6 +1592,14 @@ def request_return(request, item_id):
             ReturnRequest.objects.create(
                 order_item=item, user=request.user, reason=reason, refund_method=refund_method,
             )
+            from .alerts import notify_staff
+            notify_staff(f"Return requested for '{item.product_name}' (order #{item.order_id}).", link="/manage/returns/")
+            if item.seller_account_id:
+                from .seller_center import _seller_users
+                Notification.objects.bulk_create([
+                    Notification(user=u, link="/seller/returns/",
+                                 message=f"Return requested for '{item.product_name}' (order #{item.order_id}).")
+                    for u in _seller_users(item.seller_account)])
             messages.success(request, "Return request submitted. We'll review it shortly.")
             return redirect("my_orders")
 
@@ -1576,7 +1608,7 @@ def request_return(request, item_id):
         "item": item,
         "refund_value": order.refund_value(item),
         "card_order": order.payment_status == "paid" and bool(order.stripe_payment_intent),
-        "deadline": order.return_deadline(),
+        "deadline": item.return_deadline(),
     })
 
 

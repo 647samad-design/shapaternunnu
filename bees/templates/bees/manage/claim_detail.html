@@ -1,0 +1,34 @@
+{% extends "bees/manage/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Problem #{{ claim.id }}{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><a class="link small" href="{% url 'manage_claims' %}">← Problems</a><h1 style="margin-top:6px;">Problem #{{ claim.id }}: {{ claim.get_reason_display }}</h1>
+    <p>{{ claim.order_item.product_name }} × {{ claim.order_item.quantity }} · <a class="link" href="{% url 'manage_order' claim.order_item.order_id %}">Order #{{ claim.order_item.order_id }}</a> · {% if claim.order_item.seller_account %}{{ claim.order_item.seller_account.display_name }}{% else %}Your store{% endif %} · item status: {{ claim.order_item.get_fulfillment_status_display|lower }}</p></div>
+    <span class="pill {% if claim.status == 'escalated' %}warn{% elif claim.status == 'refunded' %}ok{% endif %}">{{ claim.get_status_display }}</span></div>
+<div class="two-col">
+    <div class="col-stack">
+        <section class="panel"><h2>Customer</h2><p class="muted small">{{ claim.user.get_full_name|default:claim.user.username }} · {{ claim.user.email }} · {{ claim.created_at|date:"M j, Y H:i" }}</p><p style="white-space:pre-line;">{{ claim.details }}</p>{% if claim.photo %}<a href="{% url 'claim_photo' claim.id %}" target="_blank" rel="noopener"><img src="{% url 'claim_photo' claim.id %}" alt="Customer photo" style="max-width:260px;border-radius:var(--radius-sm);margin-top:8px;"></a>{% endif %}</section>
+        <section class="panel"><h2>Seller</h2>{% if claim.seller_reply %}<p class="muted small">{{ claim.seller_replied_at|date:"M j, Y H:i" }}{% if claim.seller_offers_refund %} · <strong>agreed to refund</strong>{% endif %}</p><p style="white-space:pre-line;">{{ claim.seller_reply }}</p>{% else %}<p class="muted">No answer yet.</p>{% endif %}</section>
+        <section class="panel"><h2>Order timeline</h2><ol class="ev-list" style="margin:0;padding-left:18px;">{% for e in events %}<li><strong>{{ e.text }}</strong> <span class="muted small">{{ e.created_at|date:"M j, H:i" }}</span></li>{% endfor %}</ol>{% if claim.order_item.order.tracking_link %}<p><a class="link small" href="{{ claim.order_item.order.tracking_link }}" target="_blank" rel="noopener">Courier tracking</a></p>{% endif %}</section>
+    </div>
+    <div class="col-stack">
+        {% if claim.is_open %}
+        <section class="panel"><h2>Decision</h2>
+            <form method="post" style="display:grid;gap:10px;">{% csrf_token %}
+                <label for="note">Note to the customer and seller</label>
+                <textarea id="note" name="note" rows="3" maxlength="500" placeholder="e.g. Courier confirms the parcel was lost."></textarea>
+                <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="restock" value="1"> Item is coming back - put it back in stock</label>
+                <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="as_credit" value="1"> Refund as store credit instead</label>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button class="btn btn-primary btn-sm" name="action" value="refund">{% if plan.card %}Refund {{ plan.card|money }} to card{% if plan.credit %} + {{ plan.credit|money }} credit{% endif %}{% elif plan.credit %}Give {{ plan.credit|money }} store credit{% else %}Mark paid back ({{ plan.manual|money }}){% endif %}</button>
+                    <button class="btn btn-ghost btn-sm" name="action" value="reject" style="color:var(--sale);">Close without refund</button>
+                </div>
+                <p class="muted small" style="margin:0;">A refund comes out of the seller's earnings for this item.</p>
+            </form>
+        </section>
+        {% else %}
+        <section class="panel"><h2>Decided</h2><p>{{ claim.get_status_display }}{% if claim.decided_at %} on {{ claim.decided_at|date:"M j, Y" }}{% endif %}.</p>{% if claim.decision_note %}<p class="muted">{{ claim.decision_note }}</p>{% endif %}</section>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

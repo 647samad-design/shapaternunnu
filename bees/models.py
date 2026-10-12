@@ -40,6 +40,10 @@ def message_image_path(instance, filename):
     return _public_upload_path("chat")(instance, filename)
 
 
+def claim_photo_path(instance, filename):
+    return _public_upload_path("claims")(instance, filename)
+
+
 def seller_banner_path(instance, filename):
     return _public_upload_path("seller_docs/banners")(instance, filename)
 
@@ -265,6 +269,8 @@ class StockAlert(models.Model):
 
 class Review(models.Model):
     product = models.ForeignKey(Product, related_name="reviews", on_delete=models.CASCADE)
+    seller_reply = models.TextField(blank=True, max_length=1000)
+    seller_reply_at = models.DateTimeField(null=True, blank=True)
     user = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="reviews")
     username = models.CharField(max_length=100)
     rating = models.PositiveSmallIntegerField(default=5)
@@ -287,6 +293,11 @@ class Order(models.Model):
         ("delivered", "Delivered"),
         ("cancelled", "Cancelled"),
     ]
+
+    # Automation bookkeeping (see bees.automation): when reminders went out.
+    late_reminded_at = models.DateTimeField(null=True, blank=True, editable=False)
+    late_escalated_at = models.DateTimeField(null=True, blank=True, editable=False)
+    arrival_reminded_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     user = models.ForeignKey("auth.User", related_name="orders", on_delete=models.CASCADE, null=True, blank=True)
     guest_email = models.EmailField(blank=True)
@@ -620,10 +631,34 @@ class OrderItem(models.Model):
     ]
     fulfillment_status = models.CharField(max_length=20, choices=FULFILLMENT_CHOICES, default="pending")
     delivered_at = models.DateTimeField(null=True, blank=True)
+    shipped_at = models.DateTimeField(null=True, blank=True)
 
     @property
     def subtotal(self):
         return self.price * self.quantity
+
+    @property
+    def received_at(self):
+        """When this item reached the customer (its own delivery, or the
+        whole order's), or None."""
+        if self.delivered_at:
+            return self.delivered_at
+        return self.order.delivered_at if self.order.status == "delivered" else None
+
+    def return_deadline(self):
+        from datetime import timedelta
+        received = self.received_at
+        return received + timedelta(days=SiteSettings.load().return_days) if received else None
+
+    @property
+    def can_return(self):
+        from django.utils import timezone
+        deadline = self.return_deadline()
+        return bool(deadline) and self.order.status != "cancelled" and timezone.now() <= deadline
+
+    @property
+    def open_claim(self):
+        return next((c for c in self.claims.all() if c.is_open), None)
 
     @property
     def seller_earning(self):
@@ -1324,6 +1359,12 @@ class SiteSettings(models.Model):
     return_days = models.PositiveSmallIntegerField(
         default=14, help_text="How many days after delivery customers can request a return.",
     )
+    auto_deliver_days = models.PositiveSmallIntegerField(
+        default=14, help_text="Items still 'on the way' this many days after shipping are marked delivered automatically (the customer is reminded 2 days before). 0 = off.")
+    auto_cancel_days = models.PositiveSmallIntegerField(
+        default=7, help_text="Paid orders nobody has shipped after this many days are cancelled and refunded automatically. Sellers are reminded after 2 days, the store team after 4. 0 = off.")
+    claim_reply_days = models.PositiveSmallIntegerField(
+        default=3, help_text="Days a seller has to answer a customer's problem report before the store team decides.")
     delivery_days = models.PositiveSmallIntegerField(
         default=5, help_text="Usual delivery time in business days. Used for the 'Arrives by' date customers see and get emailed.",
     )
@@ -1577,3 +1618,53 @@ def _clear_shipping_cache(sender, **kwargs):
 def _clear_seller_flag(sender, instance, **kwargs):
     from django.core.cache import cache
     cache.delete(f"is_seller:{instance.user_id}")
+
+
+class Claim(models.Model):
+    """A customer reports a problem with an item ("didn't arrive", "not as
+    described"...). The seller answers; the store team makes the final call
+    and can refund straight from here."""
+    REASONS = [
+        ("not_received", "It didn't arrive"),
+        ("not_as_described", "Not as described"),
+        ("damaged", "Arrived damaged or broken"),
+        ("wrong_item", "Wrong item sent"),
+        ("other", "Something else"),
+    ]
+    STATUS = [
+        ("open", "Waiting for the seller"),
+        ("seller_replied", "Seller replied"),
+        ("escalated", "With the store team"),
+        ("refunded", "Refunded"),
+        ("rejected", "Closed - no refund"),
+        ("withdrawn", "Withdrawn by customer"),
+    ]
+    OPEN_STATUSES = ("open", "seller_replied", "escalated")
+    order_item = models.ForeignKey("OrderItem", related_name="claims", on_delete=models.CASCADE)
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="claims")
+    reason = models.CharField(max_length=20, choices=REASONS)
+    details = models.TextField(max_length=2000)
+    photo = models.ImageField(upload_to=claim_photo_path, storage=_private_storage, blank=True, null=True)
+    status = models.CharField(max_length=20, choices=STATUS, default="open", db_index=True)
+    seller_reply = models.TextField(blank=True, max_length=2000)
+    seller_offers_refund = models.BooleanField(default=False)
+    seller_replied_at = models.DateTimeField(null=True, blank=True)
+    decision_note = models.CharField(max_length=500, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    return_request = models.ForeignKey("ReturnRequest", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Claim #{self.pk} on {self.order_item.product_name}"
+
+    @property
+    def is_open(self):
+        return self.status in self.OPEN_STATUSES
+
+    @property
+    def seller(self):
+        return self.order_item.seller_account

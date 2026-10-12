@@ -27,7 +27,7 @@ from django.views.decorators.http import require_POST
 from . import badges as seller_badges
 from . import payments
 from .models import (
-    AuditLog, ChatMessage, ChatThread, Conversation, Coupon, Currency, Notification, Order, OrderItem,
+    AuditLog, ChatMessage, ChatThread, Claim, Conversation, Coupon, Currency, Notification, Order, OrderItem,
     Payout, Product, Profile, Question, ReturnRequest, Review, SellerAccount, SellerPlan, ShippingZone, SiteSettings,
 )
 from .templatetags.bees_extras import money
@@ -64,9 +64,10 @@ def attention_counts(force=False):
             "questions": Question.objects.filter(answer="").count(),
             "messages": ChatThread.objects.filter(is_resolved=False).filter(Exists(unread_user_msgs)).count(),
             "reported": Conversation.objects.filter(reported=True).count(),
+            "claims": Claim.objects.filter(status="escalated").count(),
         }
         data["messages"] += data["reported"]
-        data["total"] = data["orders"] + data["products"] + data["sellers"] + data["returns"] + data["messages"]
+        data["total"] = data["orders"] + data["products"] + data["sellers"] + data["returns"] + data["messages"] + data["claims"]
         cache.set("manage:attention", data, 30)
     return data
 
@@ -298,8 +299,9 @@ def order_detail(request, pk):
             if new_status != was:
                 _log(request, f"Order #{order.id}: {was} -> {new_status}")
                 if new_status == "shipped":
-                    order.items.exclude(fulfillment_status="delivered").update(fulfillment_status="handed_to_courier")
+                    order.items.exclude(fulfillment_status="delivered").update(fulfillment_status="handed_to_courier", shipped_at=timezone.now())
                 if new_status == "delivered":
+                    order.items.filter(shipped_at=None).update(shipped_at=timezone.now())
                     order.items.exclude(fulfillment_status="delivered").update(fulfillment_status="delivered", delivered_at=timezone.now())
             emailed = new_status != was and new_status in ("confirmed", "shipped", "delivered") and order.contact_email
             messages.success(request, "Order updated." + (" The customer has been emailed." if emailed else ""))
@@ -1098,39 +1100,13 @@ def returns(request):
             rr.save()
             messages.success(request, "Return rejected. The customer has been notified.")
         elif action in ("refund", "refund_credit"):
-            with transaction.atomic():
-                rr = ReturnRequest.objects.select_for_update().select_related("order_item__order").get(pk=rr.pk)
-                if rr.status == "refunded":
-                    messages.error(request, "This return has already been refunded.")
-                    return redirect("manage_returns")
-                if note:
-                    rr.admin_note = note
-                order = rr.order_item.order
-                plan = rr.refund_plan(as_credit=action == "refund_credit")
-                if plan["card"] and not payments.refund_amount(order, plan["card"], f"return-{rr.id}"):
-                    messages.error(request, "Stripe couldn't process the refund. Try again, or refund from the Stripe dashboard and then mark it refunded.")
-                    return redirect("manage_returns")
-                if plan["credit"]:
-                    Profile.objects.get_or_create(user=rr.user)
-                    Profile.objects.filter(user=rr.user).update(store_credit=F("store_credit") + plan["credit"])
-                if plan["manual"] and not rr.admin_note:
-                    rr.admin_note = f"Paid back {money(plan['manual'])} directly (cash on delivery order)."
-                # Take back the reward points this item earned.
-                Profile.objects.filter(user=rr.user, loyalty_points__gte=int(plan["value"])).update(
-                    loyalty_points=F("loyalty_points") - int(plan["value"]))
-                rr.card_refund_amount = plan["card"]
-                rr.credit_refund_amount = plan["credit"]
-                rr.status = "refunded"
-                rr.save()
-                payments.restock_item(rr.order_item, rr.order_item.quantity)
-            parts = []
-            if plan["card"]:
-                parts.append(f"{money(plan['card'])} sent back to the card")
-            if plan["credit"]:
-                parts.append(f"{money(plan['credit'])} added as store credit")
-            if plan["manual"]:
-                parts.append(f"remember to pay the customer {money(plan['manual'])} yourself (cash on delivery order)")
-            messages.success(request, "Refunded: " + ", ".join(parts) + ". Stock returned.")
+            from .refunds import RefundError, describe, refund_return
+            try:
+                plan = refund_return(rr, as_credit=action == "refund_credit", note=note)
+            except RefundError as exc:
+                messages.error(request, str(exc))
+                return redirect("manage_returns")
+            messages.success(request, "Refunded: " + describe(plan) + ". Stock returned.")
         _log(request, f"Return #{rr.id}: {action}")
         _refresh_attention()
         return redirect("manage_returns")
@@ -1143,6 +1119,50 @@ def returns(request):
         if r.status in ("requested", "approved"):
             r.plan = r.refund_plan()
     return _render(request, "returns.html", {"section": "returns", "page_obj": page_obj, "status": status, "status_choices": ReturnRequest.STATUS_CHOICES})
+
+
+# ---------------------------------------------------------------------------
+# Problem reports (claims)
+# ---------------------------------------------------------------------------
+
+@staff_required
+def claims(request):
+    show = request.GET.get("show", "escalated")
+    qs = Claim.objects.select_related("order_item__order", "order_item__seller_account", "user")
+    tabs = [("escalated", "Needs a decision"), ("waiting", "Waiting for seller"), ("closed", "Closed"), ("all", "All")]
+    if show == "escalated":
+        qs = qs.filter(status="escalated")
+    elif show == "waiting":
+        qs = qs.filter(status__in=["open", "seller_replied"])
+    elif show == "closed":
+        qs = qs.exclude(status__in=Claim.OPEN_STATUSES)
+    return _render(request, "claims.html", {"section": "claims", "page_obj": _page(request, qs), "show": show, "tabs": tabs})
+
+
+@staff_required
+def claim_detail(request, pk):
+    claim = get_object_or_404(Claim.objects.select_related("order_item__order", "order_item__seller_account", "user"), pk=pk)
+    if request.method == "POST":
+        from .claims import decide
+        from .refunds import RefundError
+        action = request.POST.get("action")
+        if not claim.is_open:
+            messages.error(request, "This report is already closed.")
+        elif action in ("refund", "reject"):
+            try:
+                result = decide(claim, action, request.user, note=request.POST.get("note", "").strip(),
+                                as_credit=request.POST.get("as_credit") == "1", restock=request.POST.get("restock") == "1")
+            except RefundError as exc:
+                messages.error(request, str(exc))
+            else:
+                messages.success(request, result)
+        _refresh_attention()
+        return redirect("manage_claim", pk=pk)
+    plan = None
+    if claim.is_open:
+        plan = ReturnRequest(order_item=claim.order_item, user=claim.user).refund_plan()
+    return _render(request, "claim_detail.html", {"section": "claims", "claim": claim, "plan": plan,
+                                                  "events": claim.order_item.order.events.all()})
 
 
 # ---------------------------------------------------------------------------
@@ -1217,7 +1237,9 @@ class SiteSettingsForm(forms.ModelForm):
         ("Selling", "Commission taken from each sale. Applies to sellers who join from now on; change an existing seller's rate on their page.",
          ["commission_individual", "commission_organization"]),
         ("Shipping, tax & payment", "Applied at checkout.", ["shipping_flat_fee", "free_shipping_threshold", "tax_percent", "delivery_days", "return_days", "allow_cash_on_delivery", "allow_guest_checkout"]),
-        ("Contact & social", "Shown in the footer, emails and help page.",
+        ("Order rules", "Automatic steps that keep orders moving and protect your money. Runs with the daily tasks.",
+         ["auto_cancel_days", "auto_deliver_days", "claim_reply_days"]),
+                ("Contact & social", "Shown in the footer, emails and help page.",
          ["support_email", "support_phone", "company_address", "facebook_url", "instagram_url", "twitter_url", "youtube_url"]),
         ("Referral program", "Customers invite friends with their own link. Discount codes are created automatically.",
          ["referral_enabled", "referral_friend_percent", "referral_reward_percent"]),
@@ -1234,7 +1256,24 @@ class SiteSettingsForm(forms.ModelForm):
             if name in self.fields:
                 self.fields[name].required = False  # left out = keep the current value
 
-    OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent")
+    OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent",
+                "auto_cancel_days", "auto_deliver_days", "claim_reply_days")
+
+    def _keep(self, name):
+        value = self.cleaned_data.get(name)
+        return getattr(self.instance, name) if value is None else value
+
+    def clean_auto_cancel_days(self):
+        return self._keep("auto_cancel_days")
+
+    def clean_auto_deliver_days(self):
+        value = self._keep("auto_deliver_days")
+        if value and value < 3:
+            raise ValidationError("Use at least 3 days (or 0 to turn it off).")
+        return value
+
+    def clean_claim_reply_days(self):
+        return self._keep("claim_reply_days") or 1
 
     def _clean_percent(self, name):
         value = self.cleaned_data.get(name)

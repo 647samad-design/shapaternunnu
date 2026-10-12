@@ -34,6 +34,14 @@
             <div class="ph" style="margin-bottom:4px;"><a class="link small" href="{% url 'product_detail' obj.product_id %}" target="_blank" rel="noopener">{{ obj.product.name|truncatechars:60 }}</a><span class="stars" aria-label="{{ obj.rating }} out of 5">{{ obj.rating|stars }}</span></div>
             <p>{{ obj.comment }}</p>
             <span class="muted small">{{ obj.username }}{% if obj.is_verified_purchase %} · <span class="pill ok" style="font-size:.75rem;">Verified purchase</span>{% endif %} · {{ obj.created_at|date:"M j, Y" }}</span>
+            {% if seller.status == "approved" %}
+            <form method="post" action="{% url 'seller_reply_review' obj.id %}" style="display:grid;gap:8px;margin-top:10px;">
+                {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <label class="sr-only" for="rr{{ obj.id }}">Public reply</label>
+                <textarea class="input" id="rr{{ obj.id }}" name="reply" rows="2" style="min-height:60px;" maxlength="1000" placeholder="Reply publicly (shown under the review)">{{ obj.seller_reply }}</textarea>
+                <button type="submit" class="btn {% if obj.seller_reply %}btn-ghost{% else %}btn-secondary{% endif %} btn-sm" style="justify-self:start;">{% if obj.seller_reply %}Update reply{% else %}Publish reply{% endif %}</button>
+            </form>
+            {% endif %}
         {% elif tab == "store" %}
             <div class="ph" style="margin-bottom:4px;"><strong>{{ obj.user.username }}</strong><span class="stars" aria-label="{{ obj.rating }} out of 5">{{ obj.rating|stars }}</span></div>
             {% if obj.comment %}<p>{{ obj.comment }}</p>{% endif %}

@@ -29,7 +29,7 @@ from . import badges as seller_badges
 from . import seller_center as sc
 from .messaging import unread_for_seller
 from .models import (
-    AuditLog, Notification, Order, OrderItem, Payout, Product, ProductImage, Question, ReturnRequest, Review,
+    AuditLog, Claim, Notification, Order, OrderItem, Payout, Product, ProductImage, Question, ReturnRequest, Review,
     SellerReview,
 )
 from .security import safe_next_url
@@ -74,7 +74,14 @@ def _nav_counts(seller):
         "returns": ReturnRequest.objects.filter(order_item__seller_account=seller, status="requested").count(),
         "questions": Question.objects.filter(product__seller_account=seller, answer="").count(),
         "messages": unread_for_seller(seller),
+        "claims": Claim.objects.filter(order_item__seller_account=seller, status="open").count(),
     }
+
+
+@seller_required()
+def claims(request):
+    from .claims import seller_claims
+    return seller_claims(request)
 
 
 def _render(request, template, context):
@@ -580,7 +587,7 @@ def request_payout(request):
             messages.error(request, f"The minimum payout is {money(min_payout)}.")
             return redirect("seller_earnings")
         if amount > available:
-            messages.error(request, f"You can request up to {money(available)} (earnings from delivered orders).")
+            messages.error(request, f"You can request up to {money(available)}. Earnings become available once an item is delivered and its return window has passed.")
             return redirect("seller_earnings")
         payout = Payout.objects.create(seller=seller, amount=amount, status="requested", requested_by=request.user)
     from .alerts import notify_staff

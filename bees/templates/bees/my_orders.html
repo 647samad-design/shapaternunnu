@@ -83,16 +83,17 @@
                     {% endif %}{% endif %}
                 </div>
                 {% endif %}
-                {% if order.status == "delivered" %}
+                {% if item.received_at %}
                 <div style="margin-top:6px;">
                 {% with latest_return=item.return_requests.first %}
                 {% if latest_return and latest_return.status != "rejected" %}<span class="badge">Return {{ latest_return.get_status_display|lower }}</span>
-                {% elif order.can_return and guest %}<span class="muted small">To return an item, <a class="link" href="{% url 'signup' %}">create an account</a> with {{ order.contact_email }} or contact us.</span>
-                {% elif order.can_return %}<a href="{% url 'request_return' item.id %}" class="link small">Request a return</a> <span class="muted small">by {{ order.return_deadline|date:"M j" }}</span>
+                {% elif item.can_return and guest %}<span class="muted small">To return an item, <a class="link" href="{% url 'signup' %}">create an account</a> with {{ order.contact_email }} or contact us.</span>
+                {% elif item.can_return %}<a href="{% url 'request_return' item.id %}" class="link small">Request a return</a> <span class="muted small">by {{ item.return_deadline|date:"M j" }}</span>
                 {% else %}<span class="muted small">Return window closed</span>{% endif %}
                 {% endwith %}
                 </div>
                 {% endif %}
+                {% if not guest and order.status != "cancelled" and order.status != "pending" %}<div style="margin-top:4px;">{% with claim=item.open_claim %}{% if claim %}<a class="link small" href="{% url 'claim_detail' claim.id %}">⚠ Problem report: {{ claim.get_status_display|lower }}</a>{% elif item.fulfillment_status == "handed_to_courier" or item.received_at %}<a class="link small muted" href="{% url 'open_claim' item.id %}">Report a problem</a>{% endif %}{% endwith %}</div>{% endif %}
             </div>
             <strong>{{ item.subtotal|money }}</strong>
         </div>

@@ -28,6 +28,8 @@
 </script>
 {% endblock %}
 {% block extra_css %}
+    .seller-reply { margin: 8px 0 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); border-inline-start: 3px solid var(--brand); font-size: .93rem; }
+    .seller-reply p { margin: 4px 0 0; }
     .crumbs { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.95rem; color: var(--muted); margin-bottom: 20px; }
     .crumbs a { text-decoration: none; }
     .crumbs a:hover { text-decoration: underline; color: var(--ink); }
@@ -337,6 +339,7 @@
                     </div>
                     <span class="muted small">{{ review.created_at|date:"M j, Y" }}</span>
                     <p data-no-translate>{{ review.comment }}</p>
+                    {% if review.seller_reply %}<div class="seller-reply"><strong>Response from {% if product.seller_account %}<span data-no-translate>{{ product.seller_account.display_name }}</span>{% else %}{{ brand.site_name }}{% endif %}</strong><p data-no-translate>{{ review.seller_reply }}</p></div>{% endif %}
                 </article>
                 {% empty %}
                 <p class="muted">{{ t.no_reviews }}</p>

@@ -7,6 +7,7 @@ from django.contrib.sitemaps.views import sitemap
 from django.views.generic import TemplateView
 from bees import views
 from bees import live
+from bees import claims as claims_views
 from bees import pwa
 from bees import messaging as msgs
 from bees import account_views
@@ -155,6 +156,12 @@ urlpatterns = [
     path('seller/payouts/request/', sv.request_payout, name='seller_request_payout'),
     path('seller/payouts/<int:pk>/cancel/', sv.cancel_payout_request, name='seller_cancel_payout'),
     path('seller/returns/', sv.returns, name='seller_returns'),
+    path('seller/problems/', sv.claims, name='seller_claims'),
+    path('my-orders/item/<int:item_id>/problem/', claims_views.open_claim, name='open_claim'),
+    path('problems/<int:pk>/', claims_views.claim_detail, name='claim_detail'),
+    path('problems/<int:pk>/photo/', claims_views.claim_photo, name='claim_photo'),
+    path('manage/problems/', mv.claims, name='manage_claims'),
+    path('manage/problems/<int:pk>/', mv.claim_detail, name='manage_claim'),
     path('seller/reviews/', sv.reviews, name='seller_reviews'),
     path('seller/team/', sv.team, name='seller_team'),
     path('seller/holiday/', sv.vacation, name='seller_vacation'),
@@ -165,6 +172,7 @@ urlpatterns = [
     path('seller/order-item/<int:item_id>/status/', views.update_fulfillment_status, name='update_fulfillment_status'),
     path('seller/product/add/', views.seller_add_product, name='seller_add_product'),
     path('seller/question/<int:pk>/answer/', views.seller_answer_question, name='seller_answer_question'),
+    path('seller/review/<int:pk>/reply/', views.seller_reply_review, name='seller_reply_review'),
     path('seller/team/add/', views.add_team_member, name='add_team_member'),
     path('seller/team/<int:member_id>/remove/', views.remove_team_member, name='remove_team_member'),
     path('seller/product/<int:pk>/edit/', views.seller_edit_product, name='seller_edit_product'),

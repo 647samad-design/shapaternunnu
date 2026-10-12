@@ -121,3 +121,13 @@ def fill(text, product):
 def courier_names():
     from bees.tracking import courier_names as names
     return names()
+
+
+@register.filter
+def date_add_days(value, days):
+    """{{ some_datetime|date_add_days:3 }}"""
+    from datetime import timedelta
+    try:
+        return value + timedelta(days=int(days))
+    except (TypeError, ValueError):
+        return value

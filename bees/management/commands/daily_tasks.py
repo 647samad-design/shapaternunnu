@@ -4,7 +4,10 @@ PythonAnywhere scheduled task covers it:
     cd ~/Lumen-Market && venv/bin/python manage.py daily_tasks
 
   1. cancel card orders that were never paid (safety net for webhooks)
-  2. email cart reminders
+  2. keep orders moving: remind sellers of late orders, cancel + refund
+     orders nobody shipped, mark long-shipped items delivered, send
+     unanswered problem reports to the store team
+  3. email cart reminders
   3. back up the database and images
   4. remind sellers whose paid plan ends soon, refresh Top seller badges
      and currency rates
@@ -22,7 +25,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         failed = []
         from django.conf import settings
-        jobs = [("release_unpaid_orders",), ("send_cart_reminders",), ("plan_reminders",), ("update_seller_badges",), ("update_currency_rates",), ("backup_data",), ("clearsessions",)]
+        jobs = [("release_unpaid_orders",), ("order_automation",), ("send_cart_reminders",), ("plan_reminders",), ("update_seller_badges",), ("update_currency_rates",), ("backup_data",), ("clearsessions",)]
         if getattr(settings, "DEMO_MODE", False):
             jobs.append(("demo_setup", "--reset"))
         for job in jobs:
