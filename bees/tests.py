@@ -3810,6 +3810,142 @@ class TrustPackTests(TestCase):
         self.assertContains(self.client.get(reverse("manage_settings")), "auto_cancel_days")
 
 
+class ProPackTests(TestCase):
+    """Seller score, emails in the customer's language, price drops, statements."""
+    def setUp(self):
+        from datetime import timedelta
+        self.td = timedelta
+        self.owner = User.objects.create_user("ppsell", "pps@example.com", "pass12345")
+        self.seller = SellerAccount.objects.create(user=self.owner, business_name="PP Shop", status="approved")
+        self.staff = User.objects.create_superuser("ppboss", "ppb@example.com", "pass12345")
+        self.buyer = User.objects.create_user("ppbuy", "ppbuy@example.com", "pass12345")
+        self.product = make_product(name="Kettle", seller_account=self.seller, seller_name="PP Shop", price=Decimal("50.00"))
+
+    def _order(self, days_ago=10, shipped_after=None, lang=""):
+        o = Order.objects.create(user=self.buyer, email=self.buyer.email, full_name="Buyer", address="1 St", city="X", country="GB",
+                                 payment_method="card", payment_status="paid", status="confirmed", language=lang)
+        it = OrderItem(order=o, product=self.product, product_name="Kettle", price=Decimal("50.00"), quantity=1)
+        it.apply_commission(self.seller)
+        it.save()
+        created = timezone.now() - self.td(days=days_ago)
+        Order.objects.filter(pk=o.pk).update(created_at=created)
+        if shipped_after is not None:
+            OrderItem.objects.filter(pk=it.pk).update(fulfillment_status="handed_to_courier", shipped_at=created + self.td(days=shipped_after))
+        o.refresh_from_db()
+        return o, it
+
+    def test_score_levels_and_warning(self):
+        from bees import badges, performance
+        for _ in range(4):
+            self._order(shipped_after=1)
+        data = performance.measure(self.seller)
+        self.assertEqual(data["score"], 100)
+        self.assertEqual(data["level"], "excellent")
+        for _ in range(6):
+            self._order(shipped_after=5)
+        data = performance.measure(self.seller)
+        self.assertEqual(data["late_pct"], 60)
+        self.assertLess(data["score"], 75)
+        self.assertTrue(data["tips"])
+        # lots of refunded problems -> at risk, warned once, no Top seller
+        for it in OrderItem.objects.filter(seller_account=self.seller)[:4]:
+            Claim.objects.create(order_item=it, user=self.buyer, reason="damaged", details="broken", status="refunded")
+        self.assertEqual(performance.update_all(), 1)
+        self.seller.refresh_from_db()
+        self.assertEqual(self.seller.performance_level, "at_risk")
+        self.assertTrue(Notification.objects.filter(user=self.owner, message__icontains="seller score").exists())
+        self.assertTrue(Notification.objects.filter(user=self.staff, message__icontains="at risk").exists())
+        before = Notification.objects.count()
+        performance.update_all()
+        self.assertEqual(Notification.objects.count(), before)
+        self.assertFalse(badges.qualifies(self.seller))
+        self.client.force_login(self.owner)
+        self.assertContains(self.client.get(reverse("seller_dashboard")), "Seller score")
+        self.client.force_login(self.staff)
+        self.assertContains(self.client.get(reverse("manage_seller", args=[self.seller.id])), "Seller score")
+
+    def test_new_sellers_are_not_judged(self):
+        from bees import performance
+        self._order(shipped_after=6)
+        self.assertEqual(performance.measure(self.seller)["level"], "new")
+
+    def test_emails_in_customer_language(self):
+        from django.core import mail
+        from bees import order_emails
+        o, it = self._order(lang="ur")
+        mail.outbox.clear()
+        order_emails.send(o, "delivered")
+        msg = mail.outbox[-1]
+        self.assertIn("پہنچ گیا", msg.subject)
+        html = msg.alternatives[0][0]
+        self.assertIn('dir="rtl"', html)
+        self.assertIn("آرڈر #", html)
+        self.assertIn("Buyer", html)  # names stay as they are
+        # language saved from the site switcher is used for other emails
+        self.client.force_login(self.buyer)
+        with self.settings(LANGUAGE_CODE="en"):
+            SiteSettings.objects.filter(pk=1).update(show_language_menu=True)
+            self.client.get(reverse("set_language", args=["es"]))
+        self.assertEqual(Profile.objects.get(user=self.buyer).language, "es")
+        o2, _ = self._order()
+        mail.outbox.clear()
+        order_emails.send(o2, "shipped")
+        self.assertIn("en camino", mail.outbox[-1].subject)
+        # English stays English
+        Profile.objects.filter(user=self.buyer).update(language="")
+        mail.outbox.clear()
+        order_emails.send(Order.objects.get(pk=o2.pk), "shipped")
+        self.assertIn("on its way", mail.outbox[-1].subject)
+
+    def test_price_drop_alerts(self):
+        from django.core import mail
+        from bees import price_alerts
+        from bees.models import Wishlist
+        Profile.objects.get_or_create(user=self.buyer)
+        w = Wishlist.objects.create(user=self.buyer, product=self.product)
+        self.assertEqual(w.price_seen, Decimal("50.00"))
+        Product.objects.filter(pk=self.product.pk).update(price=Decimal("48.00"))  # only 4% - no alert
+        self.assertEqual(price_alerts.run(), 0)
+        Product.objects.filter(pk=self.product.pk).update(price=Decimal("40.00"))
+        mail.outbox.clear()
+        self.assertEqual(price_alerts.run(), 1)
+        self.assertTrue(Notification.objects.filter(user=self.buyer, message__icontains="20% cheaper").exists())
+        self.assertTrue(any("Price dropped" in m.subject for m in mail.outbox))
+        self.assertEqual(price_alerts.run(), 0)  # not twice for the same drop
+        # opted out: notification yes, email no
+        Profile.objects.filter(user=self.buyer).update(price_drop_alerts=False)
+        Product.objects.filter(pk=self.product.pk).update(price=Decimal("30.00"))
+        mail.outbox.clear()
+        price_alerts.run()
+        self.assertEqual(mail.outbox, [])
+        self.client.force_login(self.buyer)
+        self.client.post(reverse("account_privacy"), {"action": "emails", "price_drop_alerts": "1", "language": "fr"})
+        p = Profile.objects.get(user=self.buyer)
+        self.assertTrue(p.price_drop_alerts)
+        self.assertEqual(p.language, "fr")
+
+    def test_monthly_statement_pdf(self):
+        o, it = self._order(days_ago=0)
+        month = timezone.localdate().strftime("%Y-%m")
+        self.client.force_login(self.owner)
+        self.assertContains(self.client.get(reverse("seller_earnings")), "Monthly statement")
+        r = self.client.get(reverse("seller_statement") + f"?month={month}")
+        self.assertEqual(r["Content-Type"], "application/pdf")
+        self.assertTrue(r.content.startswith(b"%PDF"))
+        self.assertIn(month, r["Content-Disposition"])
+        from bees import statements
+        d = statements.data(self.seller, month)
+        self.assertEqual(d["sales"], Decimal("50.00"))
+        self.assertEqual(d["net"], d["sales"] - d["commission"])
+        self.assertEqual(self.client.get(reverse("seller_statement") + "?month=garbage").status_code, 200)
+        # team staff (no money access) can't download it
+        from bees.models import OrganizationMember
+        helper = User.objects.create_user("pphelp", "pph@example.com", "pass12345")
+        OrganizationMember.objects.create(organization=self.seller, user=helper, role="staff")
+        self.client.force_login(helper)
+        self.assertNotEqual(self.client.get(reverse("seller_statement")).status_code, 200)
+
+
 class LiveUpdatesTests(TestCase):
     def setUp(self):
         from django.core.cache import caches

@@ -3,22 +3,28 @@
 {% block email_body %}{% site_brand as b %}
 {% if kind == "confirmed" %}
     <h1 style="margin:0 0 8px;font-size:24px;">Your order is confirmed</h1>
-    <p style="margin:0 0 20px;color:#56606B;">Hi {{ order.full_name }}, good news: we've confirmed order #{{ order.id }} and we're getting it ready. We'll email you again when it ships.</p>
+    <p style="margin:0 0 6px;color:#56606B;">Hi <span data-no-translate>{{ order.full_name }}</span>,</p>
+    <p style="margin:0 0 20px;color:#56606B;">Good news: we've confirmed order #{{ order.id }} and we're getting it ready. We'll email you again when it ships.</p>
 {% elif kind == "shipped" %}
     <h1 style="margin:0 0 8px;font-size:24px;">Your order is on its way</h1>
-    <p style="margin:0 0 20px;color:#56606B;">Hi {{ order.full_name }}, order #{{ order.id }} has shipped.</p>
+    <p style="margin:0 0 6px;color:#56606B;">Hi <span data-no-translate>{{ order.full_name }}</span>,</p>
+    <p style="margin:0 0 20px;color:#56606B;">Order #{{ order.id }} has shipped.</p>
 {% elif kind == "delivered" %}
     <h1 style="margin:0 0 8px;font-size:24px;">Your order has been delivered</h1>
-    <p style="margin:0 0 20px;color:#56606B;">Hi {{ order.full_name }}, order #{{ order.id }} has been delivered. We hope you love it! If something isn't right, you can request a return from My orders.</p>
+    <p style="margin:0 0 6px;color:#56606B;">Hi <span data-no-translate>{{ order.full_name }}</span>,</p>
+    <p style="margin:0 0 20px;color:#56606B;">Order #{{ order.id }} has been delivered. We hope you love it! If something isn't right, you can request a return from My orders.</p>
 {% elif kind == "item_shipped" %}
     <h1 style="margin:0 0 8px;font-size:24px;">Part of your order is on its way</h1>
-    <p style="margin:0 0 20px;color:#56606B;">Hi {{ order.full_name }}, these items from order #{{ order.id }} have shipped. The rest of your order is coming separately.</p>
+    <p style="margin:0 0 6px;color:#56606B;">Hi <span data-no-translate>{{ order.full_name }}</span>,</p>
+    <p style="margin:0 0 20px;color:#56606B;">These items from order #{{ order.id }} have shipped. The rest of your order is coming separately.</p>
 {% elif kind == "item_delivered" %}
     <h1 style="margin:0 0 8px;font-size:24px;">Part of your order has been delivered</h1>
-    <p style="margin:0 0 20px;color:#56606B;">Hi {{ order.full_name }}, these items from order #{{ order.id }} have been delivered. The rest of your order is still on its way. We'd love to hear what you think!</p>
+    <p style="margin:0 0 6px;color:#56606B;">Hi <span data-no-translate>{{ order.full_name }}</span>,</p>
+    <p style="margin:0 0 20px;color:#56606B;">These items from order #{{ order.id }} have been delivered. The rest of your order is still on its way. We'd love to hear what you think!</p>
 {% elif kind == "cancelled" %}
     <h1 style="margin:0 0 8px;font-size:24px;">Your order has been cancelled</h1>
-    <p style="margin:0 0 20px;color:#56606B;">Hi {{ order.full_name }}, order #{{ order.id }} has been cancelled.
+    <p style="margin:0 0 6px;color:#56606B;">Hi <span data-no-translate>{{ order.full_name }}</span>,</p>
+    <p style="margin:0 0 20px;color:#56606B;">Order #{{ order.id }} has been cancelled.
     {% if order.payment_status == "refunded" %}A full refund of <strong style="color:#141A1F;">{{ order.total|money }}</strong> has been sent to your original payment method. Banks usually show it within 5&ndash;10 business days.
     {% elif order.payment_status == "failed" %}The payment wasn't completed, so you have not been charged.
     {% else %}You have not been charged.{% endif %}{% if order.credit_used %} The {{ order.credit_used|money }} of store credit you used is back in your account.{% endif %}</p>
@@ -57,7 +63,7 @@
 
 {% if kind != "cancelled" %}
     <p style="margin:0 0 4px;font-weight:bold;">Delivering to</p>
-    <p style="margin:0 0 24px;color:#56606B;">{{ order.full_name }}<br>{{ order.address }}<br>{{ order.city }}{% if order.state %}, {{ order.state }}{% endif %} {{ order.postal_code }}<br>{{ order.country|country_name }}</p>
+    <p style="margin:0 0 24px;color:#56606B;" data-no-translate>{{ order.full_name }}<br>{{ order.address }}<br>{{ order.city }}{% if order.state %}, {{ order.state }}{% endif %} {{ order.postal_code }}<br>{{ order.country|country_name }}</p>
     <p style="margin:0 0 6px;color:#56606B;font-size:14px;">Payment: {% if order.payment_status == "paid" %}paid online{% else %}{{ order.get_payment_method_display }}{% endif %}</p>
 {% endif %}
 

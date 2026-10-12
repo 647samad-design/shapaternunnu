@@ -294,6 +294,7 @@ class Order(models.Model):
         ("cancelled", "Cancelled"),
     ]
 
+    language = models.CharField(max_length=8, blank=True, help_text="Site language when ordering; emails use it.")
     # Automation bookkeeping (see bees.automation): when reminders went out.
     late_reminded_at = models.DateTimeField(null=True, blank=True, editable=False)
     late_escalated_at = models.DateTimeField(null=True, blank=True, editable=False)
@@ -682,6 +683,14 @@ class Wishlist(models.Model):
     user = models.ForeignKey("auth.User", related_name="wishlist_items", on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Price-drop alerts compare against the last price the shopper saw.
+    price_seen = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    alerted_at = models.DateTimeField(null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        if self.price_seen is None and self.product_id:
+            self.price_seen = self.product.price
+        super().save(*args, **kwargs)
 
     class Meta:
         unique_together = ("user", "product")
@@ -767,6 +776,8 @@ class Profile(models.Model):
     # delivered (so fake sign-ups earn nothing).
     referral_rewarded = models.BooleanField(default=False)
     loyalty_points = models.PositiveIntegerField(default=0)
+    language = models.CharField(max_length=8, blank=True, help_text="Language for emails (the one picked on the site).")
+    price_drop_alerts = models.BooleanField(default=True, help_text="Email when something in the wishlist gets cheaper.")
     store_credit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     # Stripe customer that holds this person's saved cards. Card numbers
     # never touch our servers - Stripe stores them.
@@ -912,6 +923,11 @@ class SellerAccount(models.Model):
 
     business_certificate = models.FileField(upload_to=seller_cert_path, storage=_private_storage, blank=True, null=True)
     id_document = models.FileField(upload_to=seller_id_path, storage=_private_storage, blank=True, null=True)
+    # Seller performance (bees.performance), refreshed daily.
+    performance_score = models.PositiveSmallIntegerField(null=True, blank=True)
+    performance_level = models.CharField(max_length=12, blank=True)
+    performance_data = models.JSONField(default=dict, blank=True)
+    performance_warned_at = models.DateTimeField(null=True, blank=True)
     quick_replies = models.TextField(
         blank=True, default="Thanks for your message! I'll get back to you shortly.\nYes, it's in stock and ready to ship.\nIt usually arrives in 3-7 working days.\nYes, we ship to your country.",
         help_text="Saved replies for Messages, one per line.")

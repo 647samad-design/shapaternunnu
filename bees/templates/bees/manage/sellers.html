@@ -17,7 +17,7 @@
 <section class="panel" style="padding:8px 20px;">
     <div class="table-scroll">
         <table class="table" style="min-width:640px;">
-            <thead><tr><th>Seller</th><th>Type</th><th>Status</th><th class="num">Products</th><th class="num">Commission</th><th>Applied</th></tr></thead>
+            <thead><tr><th>Seller</th><th>Type</th><th>Status</th><th class="num">Products</th><th class="num">Commission</th><th class="num">Score</th><th>Applied</th></tr></thead>
             <tbody>
             {% for s in page_obj %}
             <tr>
@@ -25,10 +25,10 @@
                 <td>{% if s.account_type == 'organization' %}Business{% else %}Individual{% endif %}</td>
                 <td>{% if s.status == 'approved' %}<span class="pill ok">Approved</span>{% elif s.status == 'pending' %}<span class="pill warn">Waiting</span>{% else %}<span class="pill bad">{{ s.get_status_display }}</span>{% endif %}</td>
                 <td class="num">{{ s.product_count }}</td>
-                <td class="num">{{ s.commission_rate|floatformat:"-2" }}%</td>
+                <td class="num">{{ s.commission_rate|floatformat:"-2" }}%</td><td class="num">{% if s.performance_score is not None and s.performance_level != "new" %}<span class="pill {% if s.performance_level == "excellent" or s.performance_level == "good" %}ok{% elif s.performance_level == "fair" %}warn{% else %}bad{% endif %}">{{ s.performance_score }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
                 <td class="small">{{ s.created_at|date:"M j, Y" }}</td>
             </tr>
-            {% empty %}<tr class="empty-row"><td colspan="6">No sellers here yet.</td></tr>{% endfor %}
+            {% empty %}<tr class="empty-row"><td colspan="7">No sellers here yet.</td></tr>{% endfor %}
             </tbody>
         </table>
     </div>

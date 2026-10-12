@@ -28,6 +28,7 @@ from django.views.decorators.http import require_POST
 from . import badges as seller_badges
 from . import seller_center as sc
 from .messaging import unread_for_seller
+from . import performance, statements
 from .models import (
     AuditLog, Claim, Notification, Order, OrderItem, Payout, Product, ProductImage, Question, ReturnRequest, Review,
     SellerReview,
@@ -175,6 +176,7 @@ def overview(request):
         "balance": sc.balance(seller) if request.seller_role in MONEY_ROLES else None,
         "tier": tier_progress(seller),
         "badge": seller_badges.progress(seller),
+        "perf": performance.measure(seller),
         "setup": sc.setup_steps(seller),
         "recent": recent,
         "live_count": products.live().count(),
@@ -517,6 +519,17 @@ def _decorate(items):
 
 
 @seller_required(roles=MONEY_ROLES)
+def monthly_statement(request):
+    from django.http import HttpResponse
+    from . import statements
+    content, month = statements.pdf(request.seller, request.GET.get("month", ""))
+    response = HttpResponse(content, content_type="application/pdf")
+    slug = "".join(c for c in request.seller.display_name if c.isalnum())[:30] or "store"
+    response["Content-Disposition"] = f'attachment; filename="{slug}-statement-{month:%Y-%m}.pdf"'
+    return response
+
+
+@seller_required(roles=MONEY_ROLES)
 def earnings(request):
     seller = request.seller
     period = sc.Period(request.GET.get("range", "30"))
@@ -532,6 +545,7 @@ def earnings(request):
         "section": "earnings", "period": period, "ranges": sc.RANGES.items(),
         "stats": stats, "page_obj": page_obj, "balance": balance, "tier": tier_progress(seller),
         "payouts": seller.payouts.all()[:50], "min_payout": min_payout,
+        "statement_months": statements.months_with_sales(seller),
         "open_request": seller.payouts.filter(status="requested").first(),
         "lifetime": {"sales": seller.lifetime_sales, "commission": seller.commission_total, "net": seller.net_earnings},
     })

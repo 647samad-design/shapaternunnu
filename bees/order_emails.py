@@ -102,6 +102,8 @@ def send(order, kind, item_ids=None):
         }
         html = render_to_string("bees/emails/order_update.html", context)
         subject = f"{brand.site_name}: " + SUBJECTS[kind].format(id=order.id)
+        from .email_i18n import language_for, localize
+        html, subject = localize(html, subject, language_for(order=order))
         email = EmailMultiAlternatives(subject, strip_tags(html), None, [recipient])
         email.attach_alternative(html, "text/html")
         email.send(fail_silently=False)

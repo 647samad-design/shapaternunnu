@@ -2,6 +2,10 @@
 {% load bees_extras %}
 {% block page_title %}Overview{% endblock %}
 {% block page_css %}
+    .perf-score { display: flex; align-items: baseline; gap: 6px; margin: 4px 0 8px; }
+    .perf-score strong { font-size: 2.4rem; line-height: 1; font-family: var(--font-display, inherit); }
+    .text-bad { color: var(--sale); }
+    .perf-tips { margin: 12px 0 0; padding-inline-start: 18px; display: grid; gap: 6px; font-size: .92rem; }
     .setup ol { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
     .setup li { display: flex; align-items: center; gap: 10px; }
     .setup .tick { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; flex-shrink: 0; border: 2px solid var(--line); font-size: .8rem; font-weight: 800; }
@@ -106,6 +110,19 @@
             {% for c in countries %}
             <div class="bar-row"><div class="top"><span>{{ c.name }}</span><span><strong>{{ c.revenue|money }}</strong> <span class="muted small">{{ c.share }}%</span></span></div><div class="meter" aria-hidden="true"><i style="width:{{ c.share }}%"></i></div></div>
             {% empty %}<p class="muted">You'll see which countries buy from you once orders come in.</p>{% endfor %}
+        </section>
+        <section class="panel" id="performance" style="scroll-margin-top:110px;">
+            <div class="ph"><h2>Seller score</h2><span class="pill {% if perf.level == 'excellent' or perf.level == 'good' %}ok{% elif perf.level == 'fair' %}warn{% elif perf.level == 'at_risk' %}bad{% endif %}">{{ perf.label }}</span></div>
+            <div class="perf-score"><strong>{{ perf.score }}</strong><span class="muted">/ 100</span></div>
+            <div class="meter" aria-hidden="true"><i style="width:{{ perf.score }}%"></i></div>
+            <p class="muted small" style="margin:6px 0 10px;">Last 90 days · {{ perf.orders }} order{{ perf.orders|pluralize }}{% if perf.level == "new" %} · you'll get a full score after 3 orders{% endif %}</p>
+            <div class="list-row"><span>Shipped late <span class="muted small">(&lt; 10%)</span></span><strong class="{% if perf.late_pct > 10 %}text-bad{% endif %}">{{ perf.late_pct }}%</strong></div>
+            <div class="list-row"><span>Cancelled - not shipped</span><strong class="{% if perf.cancel_pct %}text-bad{% endif %}">{{ perf.cancel_pct }}%</strong></div>
+            <div class="list-row"><span>Refunded problems <span class="muted small">(&lt; 3%)</span></span><strong class="{% if perf.problem_pct > 3 %}text-bad{% endif %}">{{ perf.problem_pct }}%</strong></div>
+            <div class="list-row"><span>Typical reply time</span><strong>{% if perf.reply_hours is not None %}{% if perf.reply_hours < 1 %}under 1 h{% else %}{{ perf.reply_hours|floatformat:0 }} h{% endif %}{% else %}—{% endif %}</strong></div>
+            <div class="list-row"><span>Rating</span><strong>{% if perf.rating %}{{ perf.rating }} ★ <span class="muted small">({{ perf.reviews }})</span>{% else %}—{% endif %}</strong></div>
+            {% if perf.tips %}<ul class="perf-tips">{% for tip in perf.tips %}<li>{{ tip }}</li>{% endfor %}</ul>{% elif perf.level != "new" %}<p class="small" style="margin:10px 0 0;">Great work - customers get their orders fast and problem-free. 🎉</p>{% endif %}
+            <p class="muted small" style="margin:10px 0 0;">A good score keeps you eligible for the Top seller badge. Sellers at risk may be paused.</p>
         </section>
         <section class="panel">
             <h2>Your badges</h2>

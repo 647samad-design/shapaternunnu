@@ -568,8 +568,10 @@ def seller_detail(request, pk):
         return redirect("manage_seller", pk=pk)
     products_qs = seller.products.order_by("-id")[:12]
     from .seller_center import balance
+    from .performance import measure
     return _render(request, "seller_detail.html", {
         "section": "sellers", "seller": seller, "products": products_qs,
+        "perf": measure(seller) if seller.status == "approved" else None,
         "product_count": seller.products.count(),
         "payouts": seller.payouts.select_related("recorded_by")[:20],
         "payout_request": seller.payouts.filter(status="requested").first(),

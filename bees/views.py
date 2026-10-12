@@ -180,12 +180,14 @@ def _can_view_unapproved(user, product):
     return bool(seller and product.seller_account_id == seller.id)
 
 
-def _send_html_email(subject, template, context, recipient):
+def _send_html_email(subject, template, context, recipient, lang=None):
     if not recipient:
         return
     try:
         context = {"brand": _brand(), **context}
         html_body = render_to_string(template, context)
+        from .email_i18n import language_for, localize
+        html_body, subject = localize(html_body, subject, lang if lang is not None else language_for(email=recipient))
         email = EmailMultiAlternatives(subject, strip_tags(html_body), None, [recipient])
         email.attach_alternative(html_body, "text/html")
     except Exception as exc:
@@ -206,6 +208,11 @@ def _deliver_email(email, subject, recipient):
         # the owner (Admin > System check).
         from .alerts import email_failed
         email_failed(subject, recipient, exc)
+
+
+def _order_lang(order):
+    from .email_i18n import language_for
+    return language_for(order=order)
 
 
 def _email_verified(user):
@@ -229,6 +236,7 @@ def _send_order_confirmation(request, order):
         "bees/emails/order_confirmation.html",
         {"order": order, "invoice_url": invoice_url, "track_url": track_url},
         order.contact_email,
+        lang=_order_lang(order),
     )
     from . import seller_center
     seller_center.notify_new_order(order)
@@ -934,6 +942,8 @@ def set_language(request, lang_code):
     from .translations import TRANSLATIONS
     if lang_code in TRANSLATIONS:
         request.session["site_lang"] = lang_code
+        from .email_i18n import remember
+        remember(request.user, lang_code)
     return redirect_back(request, "home")
 
 
@@ -1344,7 +1354,11 @@ def _place_order(request, items, data, payment_method, use_credit=False):
             raise CheckoutError("Sorry, we don't deliver to that country yet.")
         is_card = payment_method == "card"
         signed_in = request.user.is_authenticated
+        from .email_i18n import remember, request_language
+        shop_lang = request_language(request)
+        remember(request.user, shop_lang)
         order = Order.objects.create(
+            language=shop_lang,
             user=request.user if signed_in else None,
             guest_email="" if signed_in else data["email"],
             email=data["email"],
@@ -2577,6 +2591,7 @@ def _send_cod_confirmation(request, order):
         "bees/emails/cod_confirm.html",
         {"order": order, "url": url, "hours": COD_CONFIRM_HOURS},
         order.contact_email,
+        lang=_order_lang(order),
     )
 
 

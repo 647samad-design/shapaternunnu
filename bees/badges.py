@@ -45,7 +45,8 @@ def qualifies(seller):
     if seller.status != "approved":
         return False
     p = progress(seller)
-    return p["orders_ok"] and p["rating_ok"]
+    good_service = seller.performance_level in ("", "new", "excellent", "good")
+    return p["orders_ok"] and p["rating_ok"] and good_service
 
 
 def update_all():

@@ -2,7 +2,8 @@
 {% load bees_extras %}
 {% block email_body %}{% site_brand as b %}
     <h1 style="margin:0 0 8px;font-size:24px;">Still thinking it over?</h1>
-    <p style="margin:0 0 20px;color:#56606B;">Hi {{ user.first_name|default:user.username }}, you left {% if rows|length == 1 %}this{% else %}these{% endif %} in your cart. We've kept {% if rows|length == 1 %}it{% else %}them{% endif %} for you, but stock can run out.</p>
+    <p style="margin:0 0 6px;color:#56606B;">Hi <span data-no-translate>{{ user.first_name|default:user.username }}</span>,</p>
+    <p style="margin:0 0 20px;color:#56606B;">{% if rows|length == 1 %}You left this in your cart. We've kept it for you, but stock can run out.{% else %}You left these in your cart. We've kept them for you, but stock can run out.{% endif %}</p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
         {% for row in rows %}
         <tr>

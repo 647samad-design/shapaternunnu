@@ -153,6 +153,7 @@ urlpatterns = [
     path('seller/products/<int:pk>/quick-update/', sv.quick_update, name='seller_quick_update'),
     path('seller/products/<int:pk>/duplicate/', sv.duplicate_product, name='seller_duplicate_product'),
     path('seller/earnings/', sv.earnings, name='seller_earnings'),
+    path('seller/earnings/statement/', sv.monthly_statement, name='seller_statement'),
     path('seller/payouts/request/', sv.request_payout, name='seller_request_payout'),
     path('seller/payouts/<int:pk>/cancel/', sv.cancel_payout_request, name='seller_cancel_payout'),
     path('seller/returns/', sv.returns, name='seller_returns'),

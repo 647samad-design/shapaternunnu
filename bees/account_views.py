@@ -219,7 +219,12 @@ def _seller_block(user):
 def privacy(request):
     email = (request.user.email or "").lower()
     if request.method == "POST" and request.POST.get("action") == "emails":
-        Profile.objects.filter(pk=_profile(request.user).pk).update(cart_reminders=bool(request.POST.get("cart_reminders")))
+        from .translations import TRANSLATIONS
+        lang = request.POST.get("language", "")
+        Profile.objects.filter(pk=_profile(request.user).pk).update(
+            cart_reminders=bool(request.POST.get("cart_reminders")),
+            price_drop_alerts=bool(request.POST.get("price_drop_alerts")),
+            language=lang if lang in TRANSLATIONS else "")
         wants = bool(request.POST.get("marketing"))
         if wants and email:
             NewsletterSubscriber.objects.get_or_create(email=email)
@@ -232,6 +237,8 @@ def privacy(request):
         "tab": "privacy",
         "subscribed": bool(email) and NewsletterSubscriber.objects.filter(email__iexact=email).exists(),
         "cart_reminders": _profile(request.user).cart_reminders,
+        "price_drop_alerts": _profile(request.user).price_drop_alerts,
+        "email_language": _profile(request.user).language,
         "open_orders": open_orders,
         "seller_block": _seller_block(request.user),
     })
