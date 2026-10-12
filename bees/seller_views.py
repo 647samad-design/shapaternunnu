@@ -302,7 +302,14 @@ def order_detail(request, order_id):
         ("Shipped", all(i.fulfillment_status in ("handed_to_courier", "delivered") for i in my_items), None),
         ("Delivered", all(i.fulfillment_status == "delivered" for i in my_items), order.delivered_at),
     ]
+    from . import couriers
+    from .models import Shipment
+    provider = couriers.active()
+    shipments = list(Shipment.objects.filter(order=order, seller=seller))
+    quote = next((s for s in shipments if s.status == "rated" and str(s.id) == request.GET.get("shipment", "")), None)
     return _render(request, "order_detail.html", {
+        "courier_on": provider is not None, "courier_name": getattr(provider, "name", ""), "shipments": shipments, "quote": quote,
+        "can_book": can_ship and any(i.fulfillment_status in ("pending", "packed") for i in my_items),
         "section": "orders", "order": order, "items": my_items, "totals": totals, "steps": steps,
         "only_seller": only_seller, "can_ship": can_ship, "fulfilment_choices": OrderItem.FULFILLMENT_CHOICES,
         "other_sellers": not only_seller,

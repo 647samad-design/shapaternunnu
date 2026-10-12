@@ -1,0 +1,53 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Keys & passwords{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Keys &amp; passwords</h1>
+    <p>Connect payments, email, couriers, storage and AI by pasting their keys here - no console needed. Saved values are never shown again (only the last 4 characters). Leave a box empty to keep what's there.</p></div></div>
+{% if not env_exists %}<div class="callout warn" style="margin:0;">No .env file yet - one will be created when you save.</div>{% endif %}
+<form method="post" autocomplete="off" class="col-stack">{% csrf_token %}
+    {% for title, hint, rows in groups %}
+    <section class="panel">
+        <h2>{{ title }}</h2>
+        <p class="muted small" style="margin:4px 0 12px;">{{ hint }}</p>
+        {% for r in rows %}
+        <div class="key-row">
+            <div class="key-meta"><label for="k-{{ r.key }}"><strong>{{ r.label }}</strong></label><code class="muted small">{{ r.key }}</code>
+                <span class="small">{% if r.set %}<span class="pill ok">Set</span> <span data-no-translate>{{ r.shown }}</span>{% else %}<span class="pill">Not set</span>{% endif %}</span></div>
+            <div class="key-input">
+                <input class="input" id="k-{{ r.key }}" name="{{ r.key }}" {% if r.secret %}type="password"{% else %}type="text"{% endif %} autocomplete="off" spellcheck="false" placeholder="{% if r.set %}Leave empty to keep{% else %}Paste here{% endif %}">
+                {% if r.set %}<label class="small key-remove"><input type="checkbox" name="remove_{{ r.key }}" value="1"> Remove</label>{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+        {% if title == "Couriers" %}
+        <div class="callout" style="margin:12px 0 0;">
+            {% if webhook_url %}<strong>Webhook address</strong> - paste it in your courier dashboard (EasyPost: Webhooks; Shippo: Settings > Webhooks, event "track_updated"):<br><code style="word-break:break-all;" data-no-translate>{{ webhook_url }}</code>{% else %}Tick the box below to create the webhook secret, then copy the address that appears here into your courier dashboard.{% endif %}
+            <label class="small" style="display:flex;gap:8px;align-items:center;margin-top:8px;"><input type="checkbox" name="new_webhook_token" value="1"> {% if webhook_url %}Make a new webhook secret (the old address stops working){% else %}Create the webhook secret{% endif %}</label>
+        </div>
+        {% endif %}
+    </section>
+    {% endfor %}
+    <section class="panel">
+        <h2>Server settings (console only)</h2>
+        <p class="muted small" style="margin:4px 0 10px;">A mistake in these could take the site offline, so they can only be changed in the .env file on the server.</p>
+        <div class="locked">{% for key, is_set in locked %}<span class="pill {% if is_set %}ok{% endif %}"><code>{{ key }}</code> {% if is_set %}set{% else %}not set{% endif %}</span>{% endfor %}</div>
+    </section>
+    <section class="panel">
+        <h2>Save</h2>
+        <div class="field" style="max-width:360px;"><label for="confirm_password">Your password</label><input id="confirm_password" type="password" name="confirm_password" required autocomplete="current-password"><span class="hint">Asked every time, so nobody can change keys from an unlocked computer.</span></div>
+        <button class="btn btn-primary" type="submit" style="margin-top:10px;">Save &amp; restart</button>
+        <p class="muted small" style="margin:8px 0 0;">The old file is backed up automatically. On PythonAnywhere the site restarts by itself; on other hosts press Reload / Restart after saving.</p>
+    </section>
+</form>
+<style>
+    .key-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+    .key-row:first-of-type { border-top: 0; }
+    .key-meta { display: grid; gap: 2px; min-width: 0; }
+    .key-meta code { overflow-wrap: anywhere; }
+    .key-input { display: flex; gap: 10px; align-items: center; min-width: 0; }
+    .key-input input[type=text], .key-input input[type=password] { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, monospace; }
+    .key-remove { white-space: nowrap; display: flex; gap: 4px; align-items: center; }
+    .locked { display: flex; flex-wrap: wrap; gap: 6px; }
+    @media (max-width: 720px) { .key-row { grid-template-columns: minmax(0, 1fr); } }
+</style>
+{% endblock %}

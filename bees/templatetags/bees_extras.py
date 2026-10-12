@@ -131,3 +131,9 @@ def date_add_days(value, days):
         return value + timedelta(days=int(days))
     except (TypeError, ValueError):
         return value
+
+
+@register.simple_tag
+def countries():
+    from bees.countries import COUNTRIES
+    return COUNTRIES

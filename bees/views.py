@@ -2118,6 +2118,10 @@ def _product_fields_from_post(request):
         "discount_percent": discount, "stock": stock, "image_url": image_url,
         "description": request.POST.get("description", "").strip()[:10000],
         "bulk_min_qty": bulk_qty or None, "bulk_percent": bulk_pct,
+        "weight_grams": _parse_int(request.POST.get("weight_grams"), "Weight", minimum=1, maximum=100000, default=None),
+        "length_cm": _parse_decimal(request.POST.get("length_cm"), "Length", required=False),
+        "width_cm": _parse_decimal(request.POST.get("width_cm"), "Width", required=False),
+        "height_cm": _parse_decimal(request.POST.get("height_cm"), "Height", required=False),
         **_guide_fields_from_post(request),
     }
 

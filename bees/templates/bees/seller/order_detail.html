@@ -64,6 +64,8 @@
         </section>
 
         {% if can_ship and seller.status == "approved" %}
+        {% url 'seller_courier_rates' order.id as rates_url %}
+        {% include "bees/partials/courier_panel.html" with buy_url_name="seller_courier_buy" label_url_name="seller_courier_label" is_admin=False %}
         <section class="panel no-print">
             <h2>Ship it</h2>
             <form method="post" action="{% url 'seller_ship_order' order.id %}" class="stack-sm">

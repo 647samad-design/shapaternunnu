@@ -116,6 +116,10 @@ class Product(models.Model):
         ("rejected", "Rejected"),
         ("archived", "Removed by seller"),
     ]
+    weight_grams = models.PositiveIntegerField(null=True, blank=True, help_text="Packed weight in grams, for courier labels and rates.")
+    length_cm = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
+    width_cm = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
+    height_cm = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
     approval_status = models.CharField(max_length=20, choices=APPROVAL_CHOICES, default="approved", db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
@@ -915,6 +919,8 @@ class SellerAccount(models.Model):
     business_address = models.CharField(max_length=255, blank=True)
     city = models.CharField(max_length=100, blank=True)
     country = models.CharField(max_length=100, blank=True)
+    pickup_state = models.CharField("State / province", max_length=100, blank=True)
+    pickup_postal_code = models.CharField("Postal code", max_length=20, blank=True)
     store_description = models.TextField(blank=True)
     product_categories = models.CharField(max_length=255, blank=True, help_text="Comma-separated categories the store will sell")
     brand_info = models.TextField(blank=True)
@@ -1375,6 +1381,18 @@ class SiteSettings(models.Model):
     return_days = models.PositiveSmallIntegerField(
         default=14, help_text="How many days after delivery customers can request a return.",
     )
+    SHIPPING_PROVIDERS = [("", "Off - add tracking numbers by hand"), ("easypost", "EasyPost (100+ carriers worldwide)"),
+                          ("shippo", "Shippo (DHL, UPS, FedEx, USPS and more)")]
+    shipping_provider = models.CharField(max_length=20, choices=SHIPPING_PROVIDERS, blank=True,
+                                         help_text="Courier service for booking pickups, printing labels and live tracking. Add its API key under Store settings > Keys & passwords.")
+    ship_from_name = models.CharField("Store's shipping name", max_length=120, blank=True)
+    ship_from_street = models.CharField("Store's street address", max_length=200, blank=True, help_text="Pickup address for the store's own products.")
+    ship_from_city = models.CharField(max_length=100, blank=True)
+    ship_from_state = models.CharField(max_length=100, blank=True)
+    ship_from_postal_code = models.CharField(max_length=20, blank=True)
+    ship_from_country = models.CharField(max_length=2, blank=True, help_text="2-letter code, e.g. PK, AE, GB, US")
+    ship_from_phone = models.CharField(max_length=30, blank=True)
+    default_weight_grams = models.PositiveIntegerField(default=500, help_text="Used when a product has no weight.")
     auto_deliver_days = models.PositiveSmallIntegerField(
         default=14, help_text="Items still 'on the way' this many days after shipping are marked delivered automatically (the customer is reminded 2 days before). 0 = off.")
     auto_cancel_days = models.PositiveSmallIntegerField(
@@ -1684,3 +1702,43 @@ class Claim(models.Model):
     @property
     def seller(self):
         return self.order_item.seller_account
+
+
+class Shipment(models.Model):
+    """A parcel booked with a courier service (EasyPost, Shippo...) for one
+    seller's items in an order (or the store's own items)."""
+    STATUS = [("rated", "Rates fetched"), ("booked", "Label ready"), ("in_transit", "In transit"),
+              ("out_for_delivery", "Out for delivery"), ("delivered", "Delivered"), ("returned", "Returned to sender"),
+              ("failed", "Delivery problem"), ("cancelled", "Cancelled")]
+    order = models.ForeignKey("Order", related_name="shipments", on_delete=models.CASCADE)
+    seller = models.ForeignKey(SellerAccount, null=True, blank=True, on_delete=models.SET_NULL, related_name="shipments")
+    item_ids = models.JSONField(default=list)
+    provider = models.CharField(max_length=20)
+    external_id = models.CharField(max_length=100, blank=True)
+    transaction_id = models.CharField(max_length=100, blank=True)
+    tracker_id = models.CharField(max_length=100, blank=True)
+    rates = models.JSONField(default=list, blank=True)
+    carrier = models.CharField(max_length=60, blank=True)
+    service = models.CharField(max_length=80, blank=True)
+    tracking_number = models.CharField(max_length=80, blank=True, db_index=True)
+    tracking_url = models.URLField(max_length=500, blank=True)
+    label_url = models.URLField(max_length=500, blank=True)
+    cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    cost_currency = models.CharField(max_length=3, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS, default="rated", db_index=True)
+    carrier_status = models.CharField(max_length=40, blank=True)
+    error = models.CharField(max_length=500, blank=True)
+    created_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    checked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.provider} {self.tracking_number or self.external_id} (order #{self.order_id})"
+
+    @property
+    def active(self):
+        return self.status in ("booked", "in_transit", "out_for_delivery")

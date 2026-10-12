@@ -67,6 +67,8 @@
             {% for r in returns %}<p><span class="pill {% if r.status == 'requested' %}warn{% elif r.status == 'rejected' %}bad{% else %}ok{% endif %}">{{ r.get_status_display }}</span> {{ r.order_item.product_name }}: <span class="muted">{{ r.reason|truncatechars:90 }}</span> <a class="link small" href="{% url 'manage_returns' %}?status={{ r.status }}">Open</a></p>{% endfor %}
         </section>
         {% endif %}
+        {% url 'manage_courier_rates' order.id as rates_url %}
+        {% include "bees/partials/courier_panel.html" with buy_url_name="manage_courier_buy" label_url_name="manage_courier_label" is_admin=True %}
     </div>
 
     <div class="col-stack">

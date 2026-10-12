@@ -50,7 +50,7 @@ from django.urls import reverse
 
 from .models import (
     Product, Order, OrderItem, SellerAccount, OrganizationMember,
-    Review, Notification, AuditLog, Claim, ReturnRequest,
+    Review, Notification, AuditLog, Claim, ReturnRequest, Shipment,
 )
 from .views import with_ratings, get_seller_account_for_user
 
@@ -3944,6 +3944,201 @@ class ProPackTests(TestCase):
         OrganizationMember.objects.create(organization=self.seller, user=helper, role="staff")
         self.client.force_login(helper)
         self.assertNotEqual(self.client.get(reverse("seller_statement")).status_code, 200)
+
+
+class CourierAndKeysTests(TestCase):
+    """Courier booking (EasyPost / Shippo, APIs mocked) and the .env editor."""
+    def setUp(self):
+        import os as _os
+        import tempfile
+        self.os = _os
+        self.owner = User.objects.create_user("cksell", "cks@example.com", "pass12345")
+        self.seller = SellerAccount.objects.create(user=self.owner, business_name="CK Shop", status="approved",
+                                                   business_address="1 Mill Rd", city="Lahore", country="Pakistan", phone="+923001234567")
+        self.boss = User.objects.create_superuser("ckboss", "ckb@example.com", "pass12345")
+        self.buyer = User.objects.create_user("ckbuy", "ckbuy@example.com", "pass12345")
+        self.product = make_product(name="Rug", seller_account=self.seller, seller_name="CK Shop", price=Decimal("80.00"))
+        Product.objects.filter(pk=self.product.pk).update(weight_grams=1200)
+        self.order = Order.objects.create(user=self.buyer, email=self.buyer.email, full_name="Ann Buyer", address="5 High St", city="London",
+                                          postal_code="E1 6AN", country="GB", phone="+447700900000",
+                                          payment_method="card", payment_status="paid", status="confirmed")
+        self.item = OrderItem(order=self.order, product=self.product, product_name="Rug", price=Decimal("80.00"), quantity=1)
+        self.item.apply_commission(self.seller)
+        self.item.save()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        for k in ("EASYPOST_API_KEY", "SHIPPO_API_TOKEN", "SHIPPING_WEBHOOK_TOKEN"):
+            self.addCleanup(self.os.environ.pop, k, None)
+
+    def _provider(self, name):
+        site = SiteSettings.load()
+        site.shipping_provider = name
+        site.save()
+
+    def _fake(self, routes):
+        """Mocks urllib: routes = [(method, url-fragment, response dict)]."""
+        import io
+        calls = []
+
+        def opener(req, timeout=None):
+            calls.append((req.get_method(), req.full_url, json.loads(req.data) if req.data else None, dict(req.header_items())))
+            for method, frag, payload in routes:
+                if req.get_method() == method and frag in req.full_url:
+                    resp = mock.MagicMock()
+                    resp.__enter__.return_value = io.BytesIO(json.dumps(payload).encode())
+                    return resp
+            raise AssertionError(f"unexpected call {req.get_method()} {req.full_url}")
+        return mock.patch("urllib.request.urlopen", side_effect=opener), calls
+
+    def test_manual_mode_until_configured(self):
+        self.client.force_login(self.owner)
+        page = self.client.get(reverse("seller_order", args=[self.order.id]))
+        self.assertNotContains(page, "Get courier rates")
+        self._provider("easypost")
+        self.assertNotContains(self.client.get(reverse("seller_order", args=[self.order.id])), "Get courier rates")  # no key yet
+        from bees.couriers import status_line
+        self.assertEqual(status_line()[0], "missing")
+
+    def test_easypost_booking_and_tracking(self):
+        self._provider("easypost")
+        self.os.environ["EASYPOST_API_KEY"] = "EZTK_testkey123"
+        self.os.environ["SHIPPING_WEBHOOK_TOKEN"] = "hook-secret-token-123456"
+        patcher, calls = self._fake([
+            ("POST", "/v2/shipments/shp_1/buy", {"id": "shp_1", "tracking_code": "1Z999", "postage_label": {"label_url": "https://labels.example/1.png"},
+                                                  "tracker": {"id": "trk_1", "public_url": "https://track.example/1Z999"},
+                                                  "selected_rate": {"carrier": "DHLExpress", "service": "ExpressWorldwide", "rate": "41.20", "currency": "USD"}}),
+            ("POST", "/v2/shipments", {"id": "shp_1", "rates": [
+                {"id": "rate_b", "carrier": "DHLExpress", "service": "ExpressWorldwide", "rate": "41.20", "currency": "USD", "delivery_days": 3},
+                {"id": "rate_a", "carrier": "Aramex", "service": "PriorityParcel", "rate": "29.50", "currency": "USD", "delivery_days": 6}]}),
+            ("GET", "/v2/trackers/trk_1", {"id": "trk_1", "status": "delivered"}),
+        ])
+        self.client.force_login(self.owner)
+        with patcher:
+            self.assertContains(self.client.get(reverse("seller_order", args=[self.order.id])), "Get courier rates")
+            r = self.client.post(reverse("seller_courier_rates", args=[self.order.id]))
+            shipment = Shipment.objects.get()
+            self.assertIn(f"shipment={shipment.id}", r.url)
+            self.assertEqual([x["id"] for x in shipment.rates], ["rate_a", "rate_b"])  # cheapest first
+            body = calls[0][2]["shipment"]
+            self.assertEqual(body["from_address"]["country"], "PK")
+            self.assertEqual(body["to_address"]["country"], "GB")
+            self.assertIn("customs_info", body)  # international
+            self.assertAlmostEqual(body["parcel"]["weight"], 42.3, places=1)  # 1200 g in ounces
+            self.assertTrue(calls[0][3]["Authorization"].startswith("Basic "))
+            page = self.client.get(r.url)
+            self.assertContains(page, "Aramex")
+            self.client.post(reverse("seller_courier_buy", args=[shipment.id]), {"rate": "rate_b"})
+        shipment.refresh_from_db()
+        self.assertEqual(shipment.status, "booked")
+        self.assertEqual(shipment.tracking_number, "1Z999")
+        self.assertEqual(OrderItem.objects.get(pk=self.item.pk).fulfillment_status, "handed_to_courier")
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.tracking_number, "1Z999")
+        self.assertEqual(self.client.get(reverse("seller_courier_label", args=[shipment.id])).url, "https://labels.example/1.png")
+        # webhook: wrong token -> 404, right token -> re-checks with the API and delivers
+        self.assertEqual(self.client.post("/shipping/webhook/nope/", "{}", content_type="application/json").status_code, 404)
+        patcher, calls = self._fake([("GET", "/v2/trackers/trk_1", {"id": "trk_1", "status": "delivered"})])
+        with patcher:
+            r = self.client.post("/shipping/webhook/hook-secret-token-123456/", json.dumps({"result": {"id": "trk_1", "status": "in_transit"}}),
+                                 content_type="application/json")
+        self.assertEqual(r.status_code, 200)
+        shipment.refresh_from_db()
+        self.assertEqual(shipment.status, "delivered")  # trusted the API, not the posted body
+        self.assertEqual(OrderItem.objects.get(pk=self.item.pk).fulfillment_status, "delivered")
+        # other sellers can't see the label
+        other = User.objects.create_user("ckother", "cko@example.com", "pass12345")
+        SellerAccount.objects.create(user=other, business_name="Other CK", status="approved")
+        self.client.force_login(other)
+        self.assertEqual(self.client.get(reverse("seller_courier_label", args=[shipment.id])).status_code, 404)
+
+    def test_shippo_booking_and_refresh_job(self):
+        from bees import couriers
+        self._provider("shippo")
+        self.os.environ["SHIPPO_API_TOKEN"] = "shippo_test_abc123"
+        patcher, calls = self._fake([
+            ("POST", "/customs/declarations/", {"object_id": "cust_1"}),
+            ("POST", "/shipments/", {"object_id": "shp_9", "rates": [{"object_id": "r1", "provider": "UPS", "servicelevel": {"name": "Worldwide Saver"},
+                                                                        "amount": "55.00", "currency": "USD", "estimated_days": 4}]}),
+            ("POST", "/transactions/", {"status": "SUCCESS", "object_id": "tx_1", "tracking_number": "UPS123", "label_url": "https://l/1.pdf",
+                                        "tracking_url_provider": "https://ups.example/UPS123"}),
+            ("GET", "/transactions/tx_1", {"object_id": "tx_1", "tracking_status": "TRANSIT"}),
+        ])
+        with patcher:
+            shipment = couriers.get_rates(self.order, [self.item], self.seller, self.owner)
+            self.assertEqual(calls[0][3]["Authorization"], "Shippo-token".replace("-token", "Token") + " shippo_test_abc123")
+            self.assertEqual(calls[1][2]["customs_declaration"], "cust_1")
+            couriers.buy(shipment, "r1", user=self.owner)
+            self.assertEqual(shipment.tracking_number, "UPS123")
+            self.assertEqual(couriers.refresh_active(), 1)
+        shipment.refresh_from_db()
+        self.assertEqual(shipment.status, "in_transit")
+
+    def test_courier_errors_are_friendly(self):
+        from bees import couriers
+        self._provider("easypost")
+        self.os.environ["EASYPOST_API_KEY"] = "EZTK_testkey123"
+        SellerAccount.objects.filter(pk=self.seller.pk).update(business_address="")
+        self.seller.refresh_from_db()
+        with self.assertRaisesMessage(couriers.CourierError, "street address"):
+            couriers.get_rates(self.order, [self.item], self.seller, self.owner)
+        import urllib.error
+        SellerAccount.objects.filter(pk=self.seller.pk).update(business_address="1 Mill Rd")
+        self.seller.refresh_from_db()
+        with mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("blocked")):
+            with self.assertRaisesMessage(couriers.CourierError, "Couldn't reach"):
+                couriers.get_rates(self.order, [self.item], self.seller, self.owner)
+
+    def test_keys_page_edits_env_safely(self):
+        import os as _os
+        from bees import envfile
+        env = _os.path.join(self.tmp.name, ".env")
+        with open(env, "w") as fh:
+            fh.write("# my settings\nSECRET_KEY=abc\nSTRIPE_SECRET_KEY=sk_test_OLDKEY1234\nDEFAULT_FROM_EMAIL=Shop <a@b.com>\n")
+        with mock.patch.object(envfile, "path", return_value=env), mock.patch.object(envfile, "reload_app", return_value=False):
+            staff = User.objects.create_user("ckstaff", "ckst@example.com", "pass12345", is_staff=True)
+            self.client.force_login(staff)
+            self.assertRedirects(self.client.get(reverse("manage_keys")), reverse("manage_settings"), fetch_redirect_response=False)
+            self.client.force_login(self.boss)
+            page = self.client.get(reverse("manage_keys")).content.decode()
+            self.assertIn("••••1234", page)
+            self.assertNotIn("OLDKEY", page)  # secrets never shown
+            # wrong password: nothing changes
+            self.client.post(reverse("manage_keys"), {"confirm_password": "nope", "STRIPE_SECRET_KEY": "sk_test_NEW"})
+            self.assertIn("OLDKEY1234", open(env).read())
+            # bad format refused
+            self.client.post(reverse("manage_keys"), {"confirm_password": "pass12345", "STRIPE_SECRET_KEY": "hello"})
+            self.assertIn("OLDKEY1234", open(env).read())
+            # good change + new key + webhook secret + removal
+            self.client.post(reverse("manage_keys"), {"confirm_password": "pass12345", "STRIPE_SECRET_KEY": "sk_test_NEWKEY5678",
+                                                      "EASYPOST_API_KEY": "EZAK_live_123456789", "new_webhook_token": "1",
+                                                      "remove_DEFAULT_FROM_EMAIL": "1", "SECRET_KEY": "hacked"})
+            text = open(env).read()
+            self.assertIn("STRIPE_SECRET_KEY=sk_test_NEWKEY5678", text)
+            self.assertIn("EASYPOST_API_KEY=EZAK_live_123456789", text)
+            self.assertIn("SHIPPING_WEBHOOK_TOKEN=", text)
+            self.assertNotIn("DEFAULT_FROM_EMAIL", text)
+            self.assertIn("SECRET_KEY=abc", text)  # locked key untouched
+            self.assertIn("# my settings", text)
+            self.assertEqual(oct(_os.stat(env).st_mode & 0o777), "0o600")
+            self.assertTrue(any(f.startswith(".env.bak-") for f in _os.listdir(self.tmp.name)))
+            self.assertTrue(AuditLog.objects.filter(action__icontains="STRIPE_SECRET_KEY").exists())
+            self.assertFalse(AuditLog.objects.filter(action__icontains="NEWKEY").exists())
+            self.assertContains(self.client.get(reverse("manage_keys")), "/shipping/webhook/")
+        for k in ("STRIPE_SECRET_KEY", "EASYPOST_API_KEY"):
+            _os.environ.pop(k, None)
+
+    def test_env_quoting_round_trip(self):
+        import os as _os
+        from bees import envfile
+        env = _os.path.join(self.tmp.name, ".env")
+        with mock.patch.object(envfile, "path", return_value=env):
+            envfile.write({"DEFAULT_FROM_EMAIL": 'Lumen "Market" <hi@x.com>'})
+            self.assertEqual(envfile.read()["DEFAULT_FROM_EMAIL"], 'Lumen "Market" <hi@x.com>')
+            from dotenv import dotenv_values
+            self.assertEqual(dotenv_values(env)["DEFAULT_FROM_EMAIL"], 'Lumen "Market" <hi@x.com>')
+            with self.assertRaises(envfile.EnvError):
+                envfile.write({"EMAIL_HOST_PASSWORD": "a\nSECRET_KEY=x"})
+        _os.environ.pop("DEFAULT_FROM_EMAIL", None)
 
 
 class LiveUpdatesTests(TestCase):

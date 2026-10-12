@@ -7,6 +7,7 @@ from django.contrib.sitemaps.views import sitemap
 from django.views.generic import TemplateView
 from bees import views
 from bees import live
+from bees import courier_views as cv
 from bees import claims as claims_views
 from bees import pwa
 from bees import messaging as msgs
@@ -148,6 +149,14 @@ urlpatterns = [
     path('seller/orders/bulk/', sv.bulk_fulfilment, name='seller_bulk_fulfilment'),
     path('seller/orders/<int:order_id>/', sv.order_detail, name='seller_order'),
     path('seller/orders/<int:order_id>/ship/', sv.ship_order, name='seller_ship_order'),
+    path('seller/orders/<int:order_id>/courier/', cv.seller_rates, name='seller_courier_rates'),
+    path('seller/courier/<int:pk>/buy/', cv.seller_buy, name='seller_courier_buy'),
+    path('seller/courier/<int:pk>/label/', cv.seller_label, name='seller_courier_label'),
+    path('manage/orders/<int:order_id>/courier/', cv.admin_rates, name='manage_courier_rates'),
+    path('manage/courier/<int:pk>/buy/', cv.admin_buy, name='manage_courier_buy'),
+    path('manage/courier/<int:pk>/label/', cv.admin_label, name='manage_courier_label'),
+    path('manage/courier/<int:pk>/refresh/', cv.admin_refresh, name='manage_courier_refresh'),
+    path('shipping/webhook/<str:token>/', cv.webhook, name='courier_webhook'),
     path('seller/orders/<int:order_id>/packing-slip/', sv.packing_slip, name='seller_packing_slip'),
     path('seller/products/', sv.products, name='seller_products'),
     path('seller/products/<int:pk>/quick-update/', sv.quick_update, name='seller_quick_update'),
@@ -162,6 +171,7 @@ urlpatterns = [
     path('problems/<int:pk>/', claims_views.claim_detail, name='claim_detail'),
     path('problems/<int:pk>/photo/', claims_views.claim_photo, name='claim_photo'),
     path('manage/problems/', mv.claims, name='manage_claims'),
+    path('manage/keys/', mv.keys, name='manage_keys'),
     path('manage/problems/<int:pk>/', mv.claim_detail, name='manage_claim'),
     path('seller/reviews/', sv.reviews, name='seller_reviews'),
     path('seller/team/', sv.team, name='seller_team'),

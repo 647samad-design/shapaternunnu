@@ -1,4 +1,5 @@
 {% extends "bees/seller/base.html" %}
+{% load bees_extras %}
 {% block page_title %}Store settings{% endblock %}
 {% block seller %}
 <div class="adm-head">
@@ -16,8 +17,10 @@
                 <div class="field"><label for="s_banner">Banner</label>{% if seller.store_banner %}<img src="{{ seller.store_banner.url }}" alt="Current banner" style="width:100%;height:64px;object-fit:cover;border-radius:var(--radius-sm);margin-bottom:6px;"><label class="small"><input type="checkbox" name="remove_store_banner" value="1"> Remove</label>{% endif %}<input type="file" id="s_banner" name="store_banner" accept="image/jpeg,image/png,image/webp,image/gif" style="padding:9px;min-height:0;"><span class="hint">Wide, about 1600 × 400 px.</span></div>
                 <div class="field"><label for="s_phone">Phone</label><input type="tel" id="s_phone" name="phone" value="{{ seller.phone }}" maxlength="30"></div>
                 <div class="field"><label for="s_city">City</label><input type="text" id="s_city" name="city" value="{{ seller.city }}" maxlength="100"></div>
-                <div class="field span-2"><label for="s_addr">Business address</label><input type="text" id="s_addr" name="business_address" value="{{ seller.business_address }}" maxlength="255"></div>
-                <div class="field"><label for="s_country">Country</label><input type="text" id="s_country" name="country" value="{{ seller.country }}" maxlength="100"></div>
+                <div class="field span-2"><label for="s_addr">Business / pickup address</label><input type="text" id="s_addr" name="business_address" value="{{ seller.business_address }}" maxlength="255"><span class="hint">Couriers collect parcels here. Street and building number.</span></div>
+                <div class="field"><label for="s_state">State / province</label><input type="text" id="s_state" name="pickup_state" value="{{ seller.pickup_state }}" maxlength="100"></div>
+                <div class="field"><label for="s_zip">Postal code</label><input type="text" id="s_zip" name="pickup_postal_code" value="{{ seller.pickup_postal_code }}" maxlength="20"></div>
+                <div class="field"><label for="s_country">Country</label><select id="s_country" name="country">{% countries as country_list %}<option value="">Choose…</option>{% for code, cname in country_list %}<option value="{{ cname }}" {% if seller.country == cname or seller.country == code %}selected{% endif %}>{{ cname }}</option>{% endfor %}</select></div>
                 <div class="field"><label for="s_tax">Tax / VAT number</label><input type="text" id="s_tax" name="tax_info" value="{{ seller.tax_info }}" maxlength="100"></div>
                 <div class="field span-2"><label for="s_bank">Payout details</label><input type="text" id="s_bank" name="bank_details" value="{{ seller.bank_details }}" maxlength="255" autocomplete="off"><span class="hint">Bank account / IBAN, or PayPal / Wise / Payoneer email where we send your earnings.</span></div>
                 <div class="field span-2"><label for="s_brand">Brands you sell <span class="muted">(optional)</span></label><textarea id="s_brand" name="brand_info" rows="2" maxlength="5000">{{ seller.brand_info }}</textarea></div>

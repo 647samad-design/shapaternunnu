@@ -125,6 +125,11 @@ def run(now=None):
     late_shipping(now, site, summary)
     arrivals(now, site, summary)
     unanswered_claims(now, site, summary)
+    try:
+        from .couriers import refresh_active
+        summary["tracking_checked"] = refresh_active()
+    except Exception:  # courier problems never stop the other jobs
+        summary["tracking_checked"] = 0
     from .manage_views import _refresh_attention
     _refresh_attention()
     return summary

@@ -20,6 +20,7 @@
             <div class="field span-2"><span class="label" style="font-weight:700;">Sizes &amp; colours <span class="muted">(optional)</span></span>{% include "bees/partials/variant_editor.html" %}</div>
             <div class="field span-2"><label for="pf_desc">Description</label><textarea id="pf_desc" name="description" rows="6" placeholder="Materials, size, what's in the box, care instructions">{{ p.description|default:'' }}</textarea>{% include "bees/partials/ai_writer.html" %}</div>
             <div class="field span-2">{% include "bees/partials/guide_fields.html" %}</div>
+                <div class="field span-2">{% include "bees/partials/shipping_fields.html" %}</div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:22px;">
             <button type="submit" class="btn btn-primary">{% if product %}Save changes{% else %}Submit for review{% endif %}</button>

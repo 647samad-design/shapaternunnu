@@ -6,7 +6,8 @@
     .save-bar { position: sticky; bottom: 0; padding: 14px 0 calc(14px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(to top, var(--paper) 70%, transparent); }
 {% endblock %}
 {% block admin %}
-<div class="adm-head"><div><h1>Store settings</h1><p>Everything here updates your live store right away.</p></div><div class="actions"><a class="btn btn-ghost btn-sm" href="{% url 'manage_currencies' %}">Currencies</a><a class="btn btn-ghost btn-sm" href="{% url 'manage_translations' %}">Translations</a>{% if user.is_superuser %}<a class="btn btn-ghost btn-sm" href="{% url 'manage_setup' %}">Run setup wizard</a>{% endif %}</div></div>
+<div class="adm-head"><div><h1>Store settings</h1><p>Everything here updates your live store right away.</p></div><div class="actions"><a class="btn btn-ghost btn-sm" href="{% url 'manage_currencies' %}">Currencies</a><a class="btn btn-ghost btn-sm" href="{% url 'manage_translations' %}">Translations</a>{% if user.is_superuser %}<a class="btn btn-ghost btn-sm" href="{% url 'manage_keys' %}">Keys &amp; passwords</a><a class="btn btn-ghost btn-sm" href="{% url 'manage_setup' %}">Run setup wizard</a>{% endif %}</div></div>
+<div class="callout {% if courier_status.0 == 'missing' %}warn{% endif %}" style="margin:0;">🚚 {{ courier_status.1 }}</div>
 <form method="post" enctype="multipart/form-data" style="display:grid;gap:20px;">
     {% csrf_token %}
     {% for title, hint, fields in form.groups %}

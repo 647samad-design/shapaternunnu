@@ -1,0 +1,45 @@
+{# Courier booking. Needs: courier_on, shipments, quote (Shipment or None), rates_url, buy_url_name, label_url_name, seller_value (admin only), is_admin #}
+<section class="panel no-print" id="courier" style="scroll-margin-top:110px;">
+    <div class="ph"><h2>Courier</h2>{% if courier_on %}<span class="pill ok">{{ courier_name }}</span>{% endif %}</div>
+    {% for s in shipments %}{% if s.status != "rated" %}
+    <div class="ship-row">
+        <div><strong>{{ s.carrier|default:"Courier" }}{% if s.service %} · {{ s.service }}{% endif %}</strong>
+            <div class="muted small">Tracking <strong data-no-translate>{{ s.tracking_number|default:"—" }}</strong> · {{ s.get_status_display }}{% if s.cost %} · {{ s.cost }} {{ s.cost_currency }}{% endif %}</div></div>
+        <div class="ship-actions">
+            {% if s.label_url %}<a class="btn btn-primary btn-sm" href="{% url label_url_name s.id %}" target="_blank" rel="noopener">Print label</a>{% endif %}
+            {% if s.tracking_url %}<a class="btn btn-ghost btn-sm" href="{{ s.tracking_url }}" target="_blank" rel="noopener">Track</a>{% endif %}
+            {% if is_admin and s.active %}<form method="post" action="{% url 'manage_courier_refresh' s.id %}">{% csrf_token %}<button class="btn btn-ghost btn-sm">Check now</button></form>{% endif %}
+        </div>
+    </div>
+    {% endif %}{% endfor %}
+    {% if quote %}
+    <form method="post" action="{% url buy_url_name quote.id %}" class="rate-list">{% csrf_token %}
+        <p class="small" style="margin:0 0 6px;">Choose a service for {{ quote.item_ids|length }} item{{ quote.item_ids|length|pluralize }}:</p>
+        {% for r in quote.rates %}
+        <label class="rate"><input type="radio" name="rate" value="{{ r.id }}" {% if forloop.first %}checked{% endif %}>
+            <span><strong>{{ r.carrier }}</strong> {{ r.service }}{% if r.days %} <span class="muted small">· {{ r.days }} day{{ r.days|pluralize }}</span>{% endif %}</span>
+            <strong>{{ r.amount }} {{ r.currency }}</strong></label>
+        {% endfor %}
+        <button class="btn btn-primary btn-sm" type="submit">Book &amp; get label</button>
+        <p class="muted small" style="margin:6px 0 0;">The courier charges the account connected by the store. Items are marked "Handed to courier" and the customer gets the tracking number.</p>
+    </form>
+    {% elif courier_on and can_book %}
+    <form method="post" action="{{ rates_url }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">{% csrf_token %}
+        {% if is_admin %}<label class="sr-only" for="ship-who">Whose items</label><select id="ship-who" name="seller" style="width:auto;">{% for value, label in seller_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>{% endif %}
+        <button class="btn btn-secondary btn-sm" type="submit">Get courier rates</button>
+        <span class="muted small">Compare prices and delivery times, then print the label.</span>
+    </form>
+    {% elif not courier_on %}
+    <p class="muted small" style="margin:0;">{% if is_admin %}Connect a courier service (EasyPost or Shippo) in Store settings to book pickups and print labels here.{% else %}Add the courier's name and tracking number below once you've handed the parcel over.{% endif %}</p>
+    {% endif %}
+</section>
+<style>
+    .ship-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--line); }
+    .ship-row:first-of-type { border-top: 0; }
+    .ship-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .ship-actions form { margin: 0; }
+    .rate-list { display: grid; gap: 8px; }
+    .rate { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; }
+    .rate > span { flex: 1; min-width: 0; }
+    .rate:has(input:checked) { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+</style>

@@ -3,6 +3,7 @@ Store admin ("/manage/"): the owner's day-to-day back office, built with the
 same design system as the storefront. The full Django admin stays available
 at /admin/ for anything not covered here.
 """
+import os
 import csv
 from datetime import date, timedelta
 from decimal import Decimal
@@ -308,7 +309,21 @@ def order_detail(request, pk):
         _refresh_attention()
         return redirect("manage_order", pk=pk)
     items = order.items.select_related("product", "seller_account__user")
+    from . import couriers
+    from .models import Shipment
+    provider = couriers.active()
+    shipments = list(Shipment.objects.filter(order=order))
+    quote = next((s for s in shipments if s.status == "rated" and str(s.id) == request.GET.get("shipment", "")), None)
+    pending = [i for i in items if i.fulfillment_status in ("pending", "packed")]
+    choices = []
+    for i in pending:
+        value = str(i.seller_account_id) if i.seller_account_id else "store"
+        label = i.seller_account.display_name if i.seller_account_id else "Your store's items"
+        if (value, label) not in choices:
+            choices.append((value, label))
     return _render(request, "order_detail.html", {
+        "courier_on": provider is not None, "courier_name": getattr(provider, "name", ""), "shipments": shipments, "quote": quote,
+        "can_book": bool(pending) and order.status != "cancelled", "seller_choices": choices,
         "section": "orders", "order": order, "items": items,
         "status_choices": [c for c in Order.STATUS_CHOICES if c[0] != "cancelled"],
         "fulfilment_choices": OrderItem.FULFILLMENT_CHOICES,
@@ -1124,6 +1139,66 @@ def returns(request):
 
 
 # ---------------------------------------------------------------------------
+# Keys & passwords (.env editor)
+# ---------------------------------------------------------------------------
+
+@staff_required
+def keys(request):
+    import secrets as _secrets
+    from django.conf import settings as dj
+    from django.urls import reverse as _reverse
+    from . import envfile
+    if not request.user.is_superuser:
+        messages.error(request, "Only the store owner (superuser) can change keys and passwords.")
+        return redirect("manage_settings")
+    if getattr(dj, "DEMO_MODE", False):
+        messages.info(request, "Keys can't be changed on the demo.")
+        return redirect("manage_settings")
+    if request.method == "POST":
+        if not request.user.check_password(request.POST.get("confirm_password", "")):
+            messages.error(request, "Your password wasn't right, so nothing was changed.")
+            return redirect("manage_keys")
+        changes = {}
+        for key in envfile.EDITABLE:
+            if request.POST.get(f"remove_{key}"):
+                changes[key] = None
+                continue
+            value = request.POST.get(key, "").strip()
+            if value:
+                changes[key] = value
+        if request.POST.get("new_webhook_token"):
+            changes["SHIPPING_WEBHOOK_TOKEN"] = _secrets.token_urlsafe(24)
+        if not changes:
+            messages.info(request, "Nothing to change.")
+            return redirect("manage_keys")
+        try:
+            envfile.write(changes)
+        except envfile.EnvError as exc:
+            messages.error(request, str(exc))
+            return redirect("manage_keys")
+        except OSError as exc:
+            messages.error(request, f"Couldn't save the .env file: {exc}")
+            return redirect("manage_keys")
+        _log(request, "Keys changed: " + ", ".join(sorted(changes)))
+        if envfile.reload_app():
+            messages.success(request, f"Saved {len(changes)} setting(s). The site is restarting to use them - refresh in a few seconds.")
+        else:
+            messages.success(request, f"Saved {len(changes)} setting(s). Now press Reload on your hosting's Web tab so the site uses them.")
+        return redirect("manage_keys")
+    current = envfile.read()
+    groups = []
+    for title, hint, rows in envfile.GROUPS:
+        groups.append((title, hint, [{"key": key, "label": label, "secret": secret, "set": bool(current.get(key)),
+                                      "shown": envfile.mask(current.get(key, ""), secret)} for key, label, secret, _p in rows]))
+    token = current.get("SHIPPING_WEBHOOK_TOKEN", "")
+    webhook = request.build_absolute_uri(_reverse("courier_webhook", args=[token])) if token else ""
+    return _render(request, "keys.html", {
+        "section": "keys", "groups": groups, "webhook_url": webhook, "env_exists": os.path.exists(envfile.path()),
+        "locked": [(k, bool(current.get(k))) for k in envfile.LOCKED],
+    })
+
+
+# ---------------------------------------------------------------------------
 # Problem reports (claims)
 # ---------------------------------------------------------------------------
 
@@ -1239,7 +1314,9 @@ class SiteSettingsForm(forms.ModelForm):
         ("Selling", "Commission taken from each sale. Applies to sellers who join from now on; change an existing seller's rate on their page.",
          ["commission_individual", "commission_organization"]),
         ("Shipping, tax & payment", "Applied at checkout.", ["shipping_flat_fee", "free_shipping_threshold", "tax_percent", "delivery_days", "return_days", "allow_cash_on_delivery", "allow_guest_checkout"]),
-        ("Order rules", "Automatic steps that keep orders moving and protect your money. Runs with the daily tasks.",
+        ("Shipping labels", "Book couriers and print labels from the order page. Pick a service, then add its API key under Keys & passwords. The address below is used for the store's own products; sellers set theirs in Seller Center.",
+         ["shipping_provider", "ship_from_name", "ship_from_street", "ship_from_city", "ship_from_state", "ship_from_postal_code", "ship_from_country", "ship_from_phone", "default_weight_grams"]),
+                ("Order rules", "Automatic steps that keep orders moving and protect your money. Runs with the daily tasks.",
          ["auto_cancel_days", "auto_deliver_days", "claim_reply_days"]),
                 ("Contact & social", "Shown in the footer, emails and help page.",
          ["support_email", "support_phone", "company_address", "facebook_url", "instagram_url", "twitter_url", "youtube_url"]),
@@ -1259,7 +1336,16 @@ class SiteSettingsForm(forms.ModelForm):
                 self.fields[name].required = False  # left out = keep the current value
 
     OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent",
-                "auto_cancel_days", "auto_deliver_days", "claim_reply_days")
+                "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams")
+
+    def clean_default_weight_grams(self):
+        return self._keep("default_weight_grams") or 500
+
+    def clean_ship_from_country(self):
+        value = (self.cleaned_data.get("ship_from_country") or "").strip().upper()
+        if value and (len(value) != 2 or not value.isalpha()):
+            raise ValidationError("Use the 2-letter country code, e.g. PK, AE, GB, US.")
+        return value
 
     def _keep(self, name):
         value = self.cleaned_data.get(name)
@@ -1330,7 +1416,8 @@ def store_settings(request):
             messages.success(request, "Settings saved. Your store has been updated.")
             return redirect("manage_settings")
         messages.error(request, "Please fix the highlighted fields.")
-    return _render(request, "settings.html", {"section": "settings", "form": form})
+    from .couriers import status_line
+    return _render(request, "settings.html", {"section": "settings", "form": form, "courier_status": status_line()})
 
 
 # ---------------------------------------------------------------------------
@@ -1771,6 +1858,9 @@ def operations_checks(dj=None):
             f"Still showing in English: {detail}. Usually product or brand names - open Admin > Translations and "
             "type a translation, press 'Translate missing with AI', or press 'Keep the rest in English' for names that shouldn't change.",
             level="warn")
+    from .couriers import status_line
+    c_state, c_text = status_line()
+    add("Shipping", "Courier service", c_state != "missing", c_text, level="ok" if c_state != "missing" else "warn")
     add("Languages & currencies", "AI assistant", True,
         "On: listing writer, buying guides, shopper Q&A and one-click translation use Claude." if getattr(dj, "AI_API_KEY", "")
         else "Off: add ANTHROPIC_API_KEY to .env for AI buying guides, shopper Q&A and one-click translation (built-in writer still works).", level="ok")
