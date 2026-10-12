@@ -71,7 +71,8 @@
         .demo-ribbon { background: #111827; color: #F9FAFB; text-align: center; font-size: .86rem; padding: 6px 12px; }
         .demo-ribbon a { color: #FCD34D; font-weight: 700; }
         .locale-menu .menu-label { display: block; padding: 8px 14px 2px; font-size: .75rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-        .locale-menu .menu-panel { max-height: min(75vh, 600px); overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 6px; min-width: min(340px, 92vw); }
+        .locale-menu[open] .menu-panel { display: grid; }
+        .locale-menu .menu-panel { max-height: min(75vh, 600px); overflow-y: auto; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 6px; min-width: min(340px, 92vw); }
         .locale-menu .menu-panel a { gap: 6px; }
         .locale-menu .menu-panel a.on { font-weight: 800; color: var(--brand); }
         html[data-theme="dark"] .locale-menu .menu-panel a.on { color: var(--accent); }
@@ -80,8 +81,10 @@
         .bulk-offer { margin-top: 10px; display: inline-block; padding: 6px 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--ok) 10%, var(--surface)); color: var(--ok); font-weight: 700; font-size: .95rem; }
         .pcard-timer { display: inline-flex; gap: 4px; color: var(--sale); font-weight: 700; font-size: .82rem; font-variant-numeric: tabular-nums; }
         .pcard-bulk { display: block; color: var(--ok); font-weight: 700; font-size: .8rem; }
-        .ship-est select { min-height: 38px; padding: 4px 8px; max-width: 100%; }
-        .ship-est > span:last-child { display: grid; gap: 6px; justify-items: end; text-align: right; min-width: 0; }
+        .ship-est { flex-wrap: wrap; gap: 6px 12px; }
+        .ship-est select { min-height: 38px; padding: 4px 8px; width: 100%; max-width: 260px; }
+        .ship-est > span:last-child { display: grid; gap: 6px; justify-items: end; text-align: right; min-width: 0; flex: 1 1 180px; }
+        html[dir="rtl"] .ship-est > span:last-child { justify-items: start; text-align: left; }
         .ship-result.ok { color: var(--ok); font-weight: 700; }
         .ship-result.bad { color: var(--sale); font-weight: 700; }
         .seller-badge { display: inline-flex; align-items: center; gap: 3px; vertical-align: middle; padding: 1px 8px; border-radius: 999px; font: 800 .72rem/1.5 var(--font-body, system-ui, sans-serif); white-space: nowrap; }
