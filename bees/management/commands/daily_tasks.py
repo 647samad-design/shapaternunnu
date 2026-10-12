@@ -33,6 +33,8 @@ class Command(BaseCommand):
             except Exception as exc:  # keep going, report at the end
                 failed.append(name)
                 self.stderr.write(f"  {name} failed: {exc}")
+        from bees.alerts import DAILY_TASKS, log_once
+        log_once(DAILY_TASKS, "ok" if not failed else "errors in " + ", ".join(failed), minutes=0)
         if failed:
             self.stderr.write(self.style.ERROR(f"Finished with errors in: {', '.join(failed)}"))
             raise SystemExit(1)

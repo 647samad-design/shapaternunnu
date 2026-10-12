@@ -117,6 +117,7 @@ MIDDLEWARE = [
     'bees.i18n.PageTranslationMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'bees.middleware.NoCacheMiddleware',
+    'bees.middleware.ErrorAlertMiddleware',
 ]
 
 ROOT_URLCONF = 'backend.urls'

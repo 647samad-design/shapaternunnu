@@ -23,6 +23,7 @@
 {% endblock %}
 {% block admin %}
 {% if setup_pending %}<div class="callout warn" style="margin:0;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;"><span><strong>Finish setting up your store.</strong> Five quick steps: name, look, commission, payments and launch.</span><a class="btn btn-primary btn-sm" href="{% url 'manage_setup' %}">Continue setup</a></div>{% endif %}
+{% if health.bad %}<div class="callout bad" style="margin:0;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;"><span><strong>{{ health.bad }} thing{{ health.bad|pluralize }} need{{ health.bad|pluralize:"s," }} fixing:</strong> {{ health.names|join:", " }}.</span><a class="btn btn-secondary btn-sm" href="{% url 'manage_system' %}">Open System check</a></div>{% endif %}
 <div class="adm-head">
     <div><h1>Good to see you, {{ user.first_name|default:user.username }}</h1><p>Here's how {{ brand.site_name }} is doing.</p></div>
     <div class="tabs" role="group" aria-label="Period">

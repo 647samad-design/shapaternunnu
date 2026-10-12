@@ -3616,3 +3616,240 @@ class SellerBadgeTests(TestCase):
         Review.objects.create(product=self.product, user=buyer, username="b2", rating=1, comment="Broke")
         Review.objects.create(product=self.product, user=buyer, username="b2", rating=1, comment="Broke")
         self.assertEqual(badges.update_all(), (0, 1))
+
+
+# ---------------------------------------------------------------------------
+# Ultra pack: COD confirmation, shipments, refunds, guides, translation,
+# system health
+# ---------------------------------------------------------------------------
+
+from .models import OrderEvent, UIText  # noqa: E402
+
+
+class CodConfirmationTests(TestCase):
+    real_cod_confirmation = True
+
+    def setUp(self):
+        from django.core import mail as _mail
+        self.mail = _mail
+        owner = User.objects.create_user("codseller", "cs@example.com", "pass12345")
+        self.seller = SellerAccount.objects.create(user=owner, business_name="Cod Co")
+        self.seller.status = "approved"
+        self.seller.save()
+        self.product = make_product(name="Tea", price=Decimal("10.00"), stock=5, seller_account=self.seller, seller_name="Cod Co")
+        self.buyer = User.objects.create_user("codbuyer", "cb@example.com", "pass12345")
+        self.client.force_login(self.buyer)
+
+    def _order(self):
+        self.client.post(reverse("add_to_cart", args=[self.product.id]))
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        return Order.objects.get()
+
+    def test_unverified_buyer_confirms_by_email_then_seller_is_told(self):
+        order = self._order()
+        self.assertFalse(order.cod_confirmed)
+        self.assertFalse(order.sellers_notified)
+        self.assertTrue(any("confirm" in m.subject.lower() for m in self.mail.outbox))
+        self.assertContains(self.client.get(reverse("my_orders")), "Please confirm this cash order")
+        self.client.force_login(self.seller.user)
+        self.client.post(reverse("seller_ship_order", args=[order.id]), {"status": "packed"})
+        self.assertFalse(OrderItem.objects.filter(order=order, fulfillment_status="packed").exists())
+        self.client.logout()
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.get(reverse("confirm_cod", args=[order.id, order.access_token]))
+        order.refresh_from_db()
+        self.assertTrue(order.cod_confirmed and order.sellers_notified)
+        self.assertTrue(Notification.objects.filter(user=self.seller.user, message__icontains="New order").exists())
+        self.assertEqual(self.client.get(reverse("confirm_cod", args=[order.id, "wrong"])).status_code, 404)
+
+    def test_verified_buyer_skips_confirmation(self):
+        from .models import Profile
+        Profile.objects.update_or_create(user=self.buyer, defaults={"email_verified": True})
+        order = self._order()
+        self.assertTrue(order.cod_confirmed)
+
+    def test_unconfirmed_orders_cancel_after_48_hours(self):
+        from django.core.management import call_command
+        order = self._order()
+        Order.objects.filter(pk=order.pk).update(created_at=timezone.now() - timedelta(hours=49))
+        call_command("release_unpaid_orders", stdout=io.StringIO())
+        order.refresh_from_db()
+        self.assertEqual((order.status, order.cancel_reason), ("cancelled", "not confirmed in time"))
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 5)
+
+    def test_delivery_marks_cash_collected(self):
+        from .models import Profile
+        Profile.objects.update_or_create(user=self.buyer, defaults={"email_verified": True})
+        order = self._order()
+        order.status = "delivered"
+        order.save()
+        self.assertIsNotNone(order.cod_collected_at)
+        self.assertTrue(OrderEvent.objects.filter(order=order, kind="cod").exists())
+
+
+class ShipmentAndTrackingPageTests(TestCase):
+    def test_every_order_gets_unique_shipment_number_and_courier(self):
+        a = Order.objects.create(full_name="A", address="1", city="Lahore", phone="1", country="PK")
+        b = Order.objects.create(full_name="B", address="1", city="Paris", phone="1", country="FR")
+        self.assertRegex(a.shipment_number, r"^[A-Z]{2,4}-\d{4}-[2-9A-Z]{6}$")
+        self.assertNotEqual(a.shipment_number, b.shipment_number)
+        from .tracking import suggest_courier
+        self.assertEqual((suggest_courier("PK"), suggest_courier("FR"), suggest_courier("BR")), ("TCS", "DPD", "DHL"))
+        ShippingZone.objects.create(name="Pakistan", countries="PK", fee=Decimal("2"), courier="Leopards")
+        self.assertEqual(suggest_courier("PK"), "Leopards")
+
+    def test_checkout_picks_courier_and_public_tracking_page(self):
+        user = User.objects.create_user("ship", "ship@example.com", "pass12345")
+        self.client.force_login(user)
+        p = make_product(name="Mat", price=Decimal("10"), stock=3)
+        self.client.post(reverse("add_to_cart", args=[p.id]))
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        order = Order.objects.get()
+        self.assertEqual(order.courier_name, "USPS")
+        order.status = "shipped"
+        order.save()
+        self.assertTrue(order.uses_store_tracking)
+        self.client.logout()
+        r = self.client.get(reverse("track_shipment", args=[order.shipment_number]))
+        self.assertContains(r, order.shipment_number)
+        self.assertContains(r, "Handed to USPS")
+        self.assertNotContains(r, "1 Main St")  # no street address on the public page
+        r = self.client.get(reverse("track_lookup") + f"?n={order.shipment_number.lower()}")
+        self.assertRedirects(r, reverse("track_shipment", args=[order.shipment_number]), fetch_redirect_response=False)
+
+
+@override_settings(STRIPE_SECRET_KEY="sk_test_dummy")
+class RefundRecordTests(TestCase):
+    def test_cancel_paid_order_refunds_to_card_with_reason(self):
+        user = User.objects.create_user("refundme", "r@example.com", "pass12345")
+        p = make_product(name="Cup", price=Decimal("12"), stock=4)
+        order = Order.objects.create(user=user, full_name="R", address="1", city="X", phone="1", country="US",
+                                     payment_method="card", payment_status="paid", status="confirmed",
+                                     stripe_payment_intent="pi_123", card_brand="visa", card_last4="4242")
+        OrderItem.objects.create(order=order, product=p, product_name="Cup", price=Decimal("12"), quantity=1)
+        self.client.force_login(user)
+        refund = mock.Mock(id="re_999")
+        with mock.patch("stripe.Refund.create", return_value=refund) as create:
+            r = self.client.post(reverse("cancel_order", args=[order.id]), {"reason": "Changed my mind"}, follow=True)
+        create.assert_called_once()
+        order.refresh_from_db()
+        self.assertEqual((order.payment_status, order.refund_id, order.cancel_reason), ("refunded", "re_999", "Changed my mind"))
+        self.assertContains(r, "Visa •••• 4242")
+        self.assertTrue(OrderEvent.objects.filter(order=order, kind="refunded").exists())
+
+    def test_card_details_saved_after_payment(self):
+        from . import payments
+        order = Order.objects.create(full_name="R", address="1", city="X", phone="1", stripe_payment_intent="pi_1")
+        intent = {"latest_charge": {"payment_method_details": {"card": {"brand": "mastercard", "last4": "4444"}}}}
+        with self.settings(STRIPE_CARD_DETAILS=True), mock.patch("stripe.PaymentIntent.retrieve", return_value=intent):
+            payments.remember_card(order)
+        order.refresh_from_db()
+        self.assertEqual(order.card_label, "Mastercard •••• 4444")
+
+
+class BuyingGuideTests(TestCase):
+    def setUp(self):
+        owner = User.objects.create_user("guide", "g@example.com", "pass12345")
+        self.seller = SellerAccount.objects.create(user=owner, business_name="Guide Co")
+        self.seller.status = "approved"
+        self.seller.save()
+        self.client.force_login(owner)
+
+    def test_seller_draft_and_save_guide(self):
+        r = self.client.post(reverse("ai_buying_guide_draft"), {"name": "Yoga Mat", "category": "fashion"})
+        self.assertEqual(r.json()["source"], "builtin")
+        self.assertTrue(r.json()["guide"]["pros"])
+        self.client.post(reverse("seller_add_product"), {"name": "Yoga Mat", "category": "fashion", "price": "20", "stock": "3",
+                                                         "discount_percent": "0", "image_url": "https://example.com/m.jpg",
+                                                         "guide_uses": "Yoga\\nPilates", "guide_pros": "Non-slip", "guide_cons": "Heavy"})
+        p = Product.objects.get(name="Yoga Mat")
+        p.approval_status = "approved"
+        p.save()
+        self.assertEqual(p.guide["pros"], ["Non-slip"])
+        r = self.client.get(reverse("product_detail", args=[p.id]))
+        self.assertContains(r, "Buying guide")
+        self.assertContains(r, "Non-slip")
+        self.assertContains(r, "message-seller" if False else "Message seller")
+
+    def test_shopper_ai_guide_and_question(self):
+        p = make_product(name="Kettle", seller_account=self.seller, seller_name="Guide Co")
+        reply = mock.MagicMock()
+        reply.__enter__.return_value.read.return_value = json.dumps({"content": [{"type": "text", "text":
+            '{"uses": ["Boiling water fast"], "pros": ["Quick", "Easy"], "cons": ["Check the voltage"]}'}]}).encode()
+        with self.settings(AI_API_KEY="k"), mock.patch("urllib.request.urlopen", return_value=reply):
+            r = self.client.post(reverse("ai_product_guide", args=[p.id]))
+        self.assertEqual(r.json()["guide"]["pros"], ["Quick", "Easy"])
+        p.refresh_from_db()
+        self.assertEqual(p.guide_source, "ai")
+        answer = mock.MagicMock()
+        answer.__enter__.return_value.read.return_value = json.dumps({"content": [{"type": "text", "text": "Yes, it suits travel."}]}).encode()
+        with self.settings(AI_API_KEY="k"), mock.patch("urllib.request.urlopen", return_value=answer):
+            r = self.client.post(reverse("ai_product_question", args=[p.id]), {"question": "Good for travel?"})
+        self.assertEqual(r.json()["answer"], "Yes, it suits travel.")
+        self.assertEqual(self.client.post(reverse("ai_product_question", args=[p.id]), {"question": "Hi"}).status_code, 400)
+
+
+class WholePageTranslationTests(TestCase):
+    def test_pages_translate_and_user_content_does_not(self):
+        p = make_product(name="Plain Mug", description="Add to cart this mug")
+        s = self.client.session
+        s["site_lang"] = "fr"
+        s.save()
+        r = self.client.get(reverse("product_detail", args=[p.id]))
+        html = r.content.decode()
+        self.assertIn("Tous les produits", html)       # header (built-in pack)
+        self.assertIn("Add to cart this mug", html)   # seller's description untouched
+        r = self.client.get(reverse("help_support"))
+        self.assertIn("Comment passer commande ?", r.content.decode())
+        s = self.client.session
+        s["site_lang"] = "ar"
+        s.save()
+        self.assertIn("قارن", self.client.get(reverse("all_products")).content.decode())
+
+    def test_owner_translation_overrides_and_admin_page(self):
+        from . import i18n
+        UIText.objects.create(source="Plain Mug", fr="Tasse simple")
+        i18n.clear_cache()
+        p = make_product(name="Plain Mug")
+        s = self.client.session
+        s["site_lang"] = "fr"
+        s.save()
+        self.assertIn("Tasse simple", self.client.get(reverse("product_detail", args=[p.id])).content.decode())
+        admin = User.objects.create_superuser("tr", "tr@example.com", "pass12345")
+        self.client.force_login(admin)
+        r = self.client.get(reverse("manage_translations") + "?lang=fr&show=all")
+        self.assertContains(r, "Plain Mug")
+        row = UIText.objects.get(source="Plain Mug")
+        self.client.post(reverse("manage_translations"), {"action": "save", "id": row.id, "lang": "fr", "text": "Mug uni"})
+        row.refresh_from_db()
+        self.assertEqual(row.fr, "Mug uni")
+        reply = mock.MagicMock()
+        UIText.objects.create(source="Brand new text")
+        reply.__enter__.return_value.read.return_value = json.dumps({"content": [{"type": "text", "text": '["Texte tout neuf"]'}]}).encode()
+        with self.settings(AI_API_KEY="k"), mock.patch("urllib.request.urlopen", return_value=reply):
+            self.client.post(reverse("manage_translations"), {"action": "ai", "lang": "fr"})
+        self.assertEqual(UIText.objects.get(source="Brand new text").fr, "Texte tout neuf")
+
+    def test_placeholders_dates_and_store_name(self):
+        from .i18n import translate_html
+        out = translate_html("<p>Placed Oct 8, 2026</p><p>6 items</p><h2>Sell on Acme</h2>", "es", "Acme")
+        self.assertIn("Realizado el oct 8, 2026", out)
+        self.assertIn("6 artículos", out)
+        self.assertIn("Vende en Acme", out)
+
+
+class SystemHealthTests(TestCase):
+    def test_system_check_lists_operations_and_dashboard_warns(self):
+        admin = User.objects.create_superuser("health", "h@example.com", "pass12345")
+        self.client.force_login(admin)
+        from .alerts import SERVER_ERROR, log
+        log(f"{SERVER_ERROR}: GET /boom/ - ValueError: bad")
+        r = self.client.get(reverse("manage_system"))
+        self.assertContains(r, "Page crashes (24 hours)")
+        self.assertContains(r, "Daily tasks")
+        self.assertContains(r, "/boom/")
+        cache.clear()
+        self.assertContains(self.client.get(reverse("manage_dashboard")), "Open System check")
