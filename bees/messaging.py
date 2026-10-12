@@ -132,30 +132,35 @@ def send(conv, user, side, body, product=None, request=None, photo=None):
 
 
 def _notify(conv, other, msg, request):
+    """In-site alert for everyone on the receiving side (the seller's whole
+    team), plus an email to the main contact at most every 30 minutes."""
+    from . import live
+    from .seller_center import _seller_users
     from .views import _send_html_email, _store_name
     if other == "seller":
-        recipient = conv.seller.user
+        recipients = _seller_users(conv.seller)
+        email_to = conv.seller.user
         link = reverse("seller_conversation", args=[conv.id])
         sender_name = conv.buyer.first_name or conv.buyer.username
     else:
-        recipient = conv.buyer
+        recipients = [conv.buyer]
+        email_to = conv.buyer
         link = reverse("conversation", args=[conv.id])
         sender_name = conv.seller.display_name
-    from . import live
-    if live.is_viewing(recipient.pk, conv.pk):
-        return  # they have the chat open and will see it straight away
-    # One notification per batch of unread messages, not one per message.
+    if any(live.is_viewing(u.pk, conv.pk) for u in recipients):
+        return  # someone on that side has the chat open and sees it straight away
+    preview = msg.body[:80] if msg.body else "📷 Photo"
+    # One alert per batch of unread messages, not one per message.
     if getattr(conv, f"{other}_unread") == 1:
-        Notification.objects.create(user=recipient, link=link, message=f"New message from {sender_name}"[:255])
+        Notification.objects.bulk_create([
+            Notification(user=u, link=link, message=f"New message from {sender_name}: {preview}"[:255]) for u in recipients
+        ])
     emailed_field = f"{other}_emailed_at"
     last = getattr(conv, emailed_field)
-    if recipient.email and (last is None or timezone.now() - last > EMAIL_GAP):
+    if email_to.email and (last is None or timezone.now() - last > EMAIL_GAP):
         url = request.build_absolute_uri(link) if request else link
-        try:
-            _send_html_email(f"New message from {sender_name} on {_store_name()}", "bees/emails/new_message.html",
-                             {"sender_name": sender_name, "body": msg.body or "📷 Photo", "url": url, "product": msg.product}, recipient.email)
-        except Exception:
-            pass
+        _send_html_email(f"New message from {sender_name} on {_store_name()}", "bees/emails/new_message.html",
+                         {"sender_name": sender_name, "body": msg.body or "📷 Photo", "url": url, "product": msg.product}, email_to.email)
         Conversation.objects.filter(pk=conv.pk).update(**{emailed_field: timezone.now()})
 
 

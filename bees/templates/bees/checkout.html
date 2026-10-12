@@ -3,6 +3,9 @@
 {% block title %}Checkout — {{ brand.site_name }}{% endblock %}
 {% block robots_meta %}noindex, nofollow{% endblock %}
 {% block extra_css %}
+    .paypal-mark { font-weight: 800; font-style: italic; color: #003087; margin-inline-end: 4px; letter-spacing: -.02em; }
+    .paypal-mark b { color: #009cde; }
+    html[data-theme="dark"] .paypal-mark { color: #8fb3ff; }
     .co { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 28px; align-items: start; }
     .co h2 { font-size: 1.3rem; margin-bottom: 16px; }
     .co-step + .co-step { margin-top: 20px; }
@@ -62,9 +65,15 @@
                     <span><strong>{{ t.card }}</strong><span class="muted">You'll enter your card on Stripe's secure page. We never see your card number.</span></span>
                 </label>
                 {% endif %}
+                {% if "paypal" in payment_methods %}
+                <label class="pay-option">
+                    <input type="radio" name="payment_method" value="paypal" {% if "card" not in payment_methods %}checked{% endif %}>
+                    <span><strong><span class="paypal-mark" aria-hidden="true">Pay<b>Pal</b></span> PayPal</strong><span class="muted">Pay with your PayPal balance, bank or card on PayPal's secure page. Buyer protection included.</span></span>
+                </label>
+                {% endif %}
                 {% if "cod" in payment_methods %}
                 <label class="pay-option">
-                    <input type="radio" name="payment_method" value="cod" {% if "card" not in payment_methods %}checked{% endif %}>
+                    <input type="radio" name="payment_method" value="cod" {% if "card" not in payment_methods and "paypal" not in payment_methods %}checked{% endif %}>
                     <span><strong>{{ t.cash_on_delivery }}</strong><span class="muted">Pay the courier when your order arrives{% if "card" in payment_methods %}, or pay online any time before it ships from My orders{% endif %}.</span></span>
                 </label>
                 {% endif %}
@@ -74,9 +83,11 @@
                     <span><strong>Use store credit</strong><span class="muted">Your balance: {{ store_credit|money }}. It's taken off the total.</span></span>
                 </label>
                 {% endif %}
+                <p id="duties-note" class="muted small" style="display:none;margin:10px 0 0;"><span aria-hidden="true">🌍 </span><span>{% if checkout_data.taxes.duties == "included" %}International order: import duties are included - nothing more to pay on delivery.{% else %}International order: the destination country may charge import duties or taxes on delivery. These are paid to the courier and aren't part of this total.{% endif %}</span></p>
+                <details class="vat-box" style="margin-top:12px;"><summary class="small">Buying for a business? Add your VAT / tax number</summary><div class="field" style="margin-top:8px;"><label for="id_customer_tax_id">VAT / tax number</label><input type="text" id="id_customer_tax_id" name="customer_tax_id" maxlength="40" autocomplete="off" value="{{ form.customer_tax_id|default:'' }}"><span class="hint">Printed on your invoice.</span></div></details>
                 <p id="ship-note" class="badge badge-sale" style="margin-top:12px;{% if pricing.ships %}display:none;{% endif %}">Sorry, we don't deliver to this country yet.</p>
                 <button type="submit" class="btn btn-primary btn-block place" id="place-btn">
-                    {% if "card" in payment_methods %}Continue to payment{% else %}{{ t.place_order }}{% endif %} · {% if store_credit > 0 %}{{ total_after_credit|money }}{% else %}{{ pricing.total|money }}{% endif %}
+                    {% if "card" in payment_methods or "paypal" in payment_methods %}Continue to payment{% else %}{{ t.place_order }}{% endif %} · {% if store_credit > 0 %}{{ total_after_credit|money }}{% else %}{{ pricing.total|money }}{% endif %}
                 </button>
                 {% else %}
                 <p class="muted">Checkout is temporarily unavailable. Please contact support{% if brand.support_email %} at <a class="link" href="mailto:{{ brand.support_email }}">{{ brand.support_email }}</a>{% endif %}.</p>
@@ -104,7 +115,7 @@
             <div class="sum-row"><span>Subtotal</span><span>{{ pricing.subtotal|money }}</span></div>
             {% if coupon %}<div class="sum-row" style="color:var(--ok);font-weight:700;"><span>Discount ({{ coupon.code }})</span><span>−{{ pricing.discount|money }}</span></div>{% endif %}
             <div class="sum-row"><span>Shipping</span><span id="sum-shipping">{% if pricing.shipping is None %}<span class="muted">Choose a country</span>{% elif pricing.shipping %}{{ pricing.shipping|money }}{% else %}Free{% endif %}</span></div>
-            {% if pricing.tax %}<div class="sum-row"><span>Tax ({{ pricing.tax_percent|floatformat:"-2" }}%)</span><span>{{ pricing.tax|money }}</span></div>{% endif %}
+            <div class="sum-row" id="tax-row" {% if not pricing.tax %}style="display:none;"{% endif %}><span id="tax-label">{% if pricing.tax_included %}Includes {% endif %}{{ pricing.tax_name }}{% if pricing.tax_rate %} {{ pricing.tax_rate|floatformat:"-2" }}%{% endif %}</span><span id="sum-tax">{{ pricing.tax|money }}</span></div>
             {% if store_credit > 0 %}<div class="sum-row" id="credit-row" style="color:var(--ok);font-weight:700;"><span>Store credit</span><span id="credit-amount">−{{ credit_applicable|money }}</span></div>{% endif %}
             <div class="sum-total"><span>{{ t.total }}</span><span><span id="sum-total">{% if store_credit > 0 %}{{ total_after_credit|money }}{% else %}{{ pricing.total|money }}{% endif %}</span> <span class="muted small" style="font-weight:400;">{{ store_currency }}</span></span></div>
             {% if shopper_currency %}<p class="muted small" style="margin-top:8px;">{{ t.approx_note }} {{ store_currency_code }}.</p>{% endif %}
@@ -146,7 +157,24 @@ function fillAddress(sel) {
     function update() {
         const goods = Math.max(num(d.subtotal) - num(d.discount), 0);
         const ship = shippingFor(country ? country.value : '', goods);
-        const before = goods + ship.fee + num(d.tax);
+        const tx = d.taxes || {};
+        const code = country ? country.value : '';
+        const rule = (tx.countries || {})[code] || tx.default;
+        let tax = 0;
+        if (rule) {
+            const base = goods + (rule.ship ? ship.fee : 0);
+            tax = tx.included ? base - base / (1 + rule.rate / 100) : base * rule.rate / 100;
+            tax = Math.round(tax * 100) / 100;
+        }
+        const taxRow = document.getElementById('tax-row');
+        if (taxRow) {
+            taxRow.style.display = tax ? '' : 'none';
+            if (rule) document.getElementById('tax-label').textContent = (tx.included ? 'Includes ' : '') + rule.name + ' ' + rule.rate + '%';
+            document.getElementById('sum-tax').textContent = fmt.format(tax);
+        }
+        const duties = document.getElementById('duties-note');
+        if (duties) duties.style.display = code && tx.home && code !== tx.home ? '' : 'none';
+        const before = goods + ship.fee + (tx.included ? 0 : tax);
         const credit = box && box.checked ? Math.min(num(d.credit), before) : 0;
         const total = before - credit;
         document.getElementById('sum-shipping').innerHTML = !ship.known ? '<span class="muted">Choose a country</span>' : !ship.ships ? '—' : ship.fee ? fmt.format(ship.fee) : 'Free';

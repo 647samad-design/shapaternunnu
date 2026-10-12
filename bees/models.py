@@ -40,6 +40,10 @@ def message_image_path(instance, filename):
     return _public_upload_path("chat")(instance, filename)
 
 
+def claim_photo_path(instance, filename):
+    return _public_upload_path("claims")(instance, filename)
+
+
 def seller_banner_path(instance, filename):
     return _public_upload_path("seller_docs/banners")(instance, filename)
 
@@ -110,8 +114,16 @@ class Product(models.Model):
         ("approved", "Approved"),
         ("pending", "Pending review"),
         ("rejected", "Rejected"),
+        ("archived", "Removed by seller"),
     ]
+    weight_grams = models.PositiveIntegerField(null=True, blank=True, help_text="Packed weight in grams, for courier labels and rates.")
+    length_cm = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
+    width_cm = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
+    height_cm = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
     approval_status = models.CharField(max_length=20, choices=APPROVAL_CHOICES, default="approved", db_index=True)
+    seo_title = models.CharField("SEO title", max_length=70, blank=True, help_text="Title in Google results (max 70). Empty = product name.")
+    seo_description = models.CharField("SEO description", max_length=170, blank=True, help_text="Snippet in Google results (max 160). Empty = start of the description.")
+    updated_at = models.DateTimeField(auto_now=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
@@ -264,6 +276,8 @@ class StockAlert(models.Model):
 
 class Review(models.Model):
     product = models.ForeignKey(Product, related_name="reviews", on_delete=models.CASCADE)
+    seller_reply = models.TextField(blank=True, max_length=1000)
+    seller_reply_at = models.DateTimeField(null=True, blank=True)
     user = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="reviews")
     username = models.CharField(max_length=100)
     rating = models.PositiveSmallIntegerField(default=5)
@@ -287,6 +301,12 @@ class Order(models.Model):
         ("cancelled", "Cancelled"),
     ]
 
+    language = models.CharField(max_length=8, blank=True, help_text="Site language when ordering; emails use it.")
+    # Automation bookkeeping (see bees.automation): when reminders went out.
+    late_reminded_at = models.DateTimeField(null=True, blank=True, editable=False)
+    late_escalated_at = models.DateTimeField(null=True, blank=True, editable=False)
+    arrival_reminded_at = models.DateTimeField(null=True, blank=True, editable=False)
+
     user = models.ForeignKey("auth.User", related_name="orders", on_delete=models.CASCADE, null=True, blank=True)
     guest_email = models.EmailField(blank=True)
     email = models.EmailField(blank=True)
@@ -299,6 +319,7 @@ class Order(models.Model):
     phone = models.CharField(max_length=30)
     PAYMENT_METHOD_CHOICES = [
         ("card", "Card (Stripe)"),
+        ("paypal", "PayPal"),
         ("cod", "Cash on delivery"),
     ]
     payment_method = models.CharField(max_length=30, choices=PAYMENT_METHOD_CHOICES, default="card")
@@ -316,9 +337,15 @@ class Order(models.Model):
     # instead of being cancelled.
     cod_fallback = models.BooleanField(default=False)
     stripe_payment_intent = models.CharField(max_length=255, blank=True)
+    paypal_order_id = models.CharField(max_length=64, blank=True, db_index=True)
+    paypal_capture_id = models.CharField(max_length=64, blank=True)
     currency = models.CharField(max_length=3, default="usd")
     shipping_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    tax_name = models.CharField(max_length=30, blank=True)
+    tax_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    tax_included = models.BooleanField(default=False, help_text="Prices already included this tax (shown, not added).")
+    customer_tax_id = models.CharField("Customer VAT / tax number", max_length=40, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending", db_index=True)
     coupon_code = models.CharField(max_length=30, blank=True)
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -372,7 +399,18 @@ class Order(models.Model):
     @property
     def grand_total(self):
         """Order value: items - discount + shipping + tax."""
-        return max(self.subtotal - self.discount_amount, 0) + self.shipping_amount + self.tax_amount
+        return max(self.subtotal - self.discount_amount, 0) + self.shipping_amount + self.added_tax
+
+    @property
+    def added_tax(self):
+        """Tax on top of the prices (0 when prices already include it)."""
+        return 0 if self.tax_included else self.tax_amount
+
+    @property
+    def tax_label(self):
+        name = self.tax_name or "Tax"
+        rate = f" {self.tax_rate.normalize():f}%" if self.tax_rate else ""
+        return f"{name}{rate}" + (" (included)" if self.tax_included else "")
 
     @property
     def total(self):
@@ -384,7 +422,7 @@ class Order(models.Model):
     def goods_paid(self):
         """What the items cost after the coupon, including their tax -
         the basis for refunding returned items."""
-        return max(self.subtotal - self.discount_amount, 0) + self.tax_amount
+        return max(self.subtotal - self.discount_amount, 0) + self.added_tax
 
     def refund_value(self, item):
         """Fair refund for one returned item: its share of what was paid
@@ -432,7 +470,16 @@ class Order(models.Model):
         return reverse("track_shipment", args=[self.shipment_number]) if self.shipment_number else ""
 
     @property
+    def items_on_the_way(self):
+        """True when some items have shipped but aren't marked delivered."""
+        if self.status in ("cancelled", "delivered", "pending"):
+            return False
+        return self.status == "shipped" or any(i.fulfillment_status == "handed_to_courier" for i in self.items.all())
+
+    @property
     def card_label(self):
+        if self.payment_method == "paypal":
+            return "PayPal"
         return f"{self.card_brand.title()} •••• {self.card_last4}" if self.card_last4 else ""
 
     @property
@@ -611,10 +658,35 @@ class OrderItem(models.Model):
         ("delivered", "Delivered"),
     ]
     fulfillment_status = models.CharField(max_length=20, choices=FULFILLMENT_CHOICES, default="pending")
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    shipped_at = models.DateTimeField(null=True, blank=True)
 
     @property
     def subtotal(self):
         return self.price * self.quantity
+
+    @property
+    def received_at(self):
+        """When this item reached the customer (its own delivery, or the
+        whole order's), or None."""
+        if self.delivered_at:
+            return self.delivered_at
+        return self.order.delivered_at if self.order.status == "delivered" else None
+
+    def return_deadline(self):
+        from datetime import timedelta
+        received = self.received_at
+        return received + timedelta(days=SiteSettings.load().return_days) if received else None
+
+    @property
+    def can_return(self):
+        from django.utils import timezone
+        deadline = self.return_deadline()
+        return bool(deadline) and self.order.status != "cancelled" and timezone.now() <= deadline
+
+    @property
+    def open_claim(self):
+        return next((c for c in self.claims.all() if c.is_open), None)
 
     @property
     def seller_earning(self):
@@ -638,6 +710,14 @@ class Wishlist(models.Model):
     user = models.ForeignKey("auth.User", related_name="wishlist_items", on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Price-drop alerts compare against the last price the shopper saw.
+    price_seen = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    alerted_at = models.DateTimeField(null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        if self.price_seen is None and self.product_id:
+            self.price_seen = self.product.price
+        super().save(*args, **kwargs)
 
     class Meta:
         unique_together = ("user", "product")
@@ -723,6 +803,8 @@ class Profile(models.Model):
     # delivered (so fake sign-ups earn nothing).
     referral_rewarded = models.BooleanField(default=False)
     loyalty_points = models.PositiveIntegerField(default=0)
+    language = models.CharField(max_length=8, blank=True, help_text="Language for emails (the one picked on the site).")
+    price_drop_alerts = models.BooleanField(default=True, help_text="Email when something in the wishlist gets cheaper.")
     store_credit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     # Stripe customer that holds this person's saved cards. Card numbers
     # never touch our servers - Stripe stores them.
@@ -860,6 +942,8 @@ class SellerAccount(models.Model):
     business_address = models.CharField(max_length=255, blank=True)
     city = models.CharField(max_length=100, blank=True)
     country = models.CharField(max_length=100, blank=True)
+    pickup_state = models.CharField("State / province", max_length=100, blank=True)
+    pickup_postal_code = models.CharField("Postal code", max_length=20, blank=True)
     store_description = models.TextField(blank=True)
     product_categories = models.CharField(max_length=255, blank=True, help_text="Comma-separated categories the store will sell")
     brand_info = models.TextField(blank=True)
@@ -868,6 +952,11 @@ class SellerAccount(models.Model):
 
     business_certificate = models.FileField(upload_to=seller_cert_path, storage=_private_storage, blank=True, null=True)
     id_document = models.FileField(upload_to=seller_id_path, storage=_private_storage, blank=True, null=True)
+    # Seller performance (bees.performance), refreshed daily.
+    performance_score = models.PositiveSmallIntegerField(null=True, blank=True)
+    performance_level = models.CharField(max_length=12, blank=True)
+    performance_data = models.JSONField(default=dict, blank=True)
+    performance_warned_at = models.DateTimeField(null=True, blank=True)
     quick_replies = models.TextField(
         blank=True, default="Thanks for your message! I'll get back to you shortly.\nYes, it's in stock and ready to ship.\nIt usually arrives in 3-7 working days.\nYes, we ship to your country.",
         help_text="Saved replies for Messages, one per line.")
@@ -1201,7 +1290,7 @@ class ReturnRequest(models.Model):
         plan = {"value": value, "card": Decimal("0"), "credit": Decimal("0"), "manual": Decimal("0")}
         if as_credit or self.refund_method == "store_credit":
             plan["credit"] = value
-        elif order.payment_status == "paid" and order.stripe_payment_intent:
+        elif order.payment_status == "paid" and (order.stripe_payment_intent or order.paypal_capture_id):
             already = sum(
                 (r.card_refund_amount for r in ReturnRequest.objects.filter(
                     order_item__order=order, status="refunded").exclude(pk=self.pk)),
@@ -1309,12 +1398,39 @@ class SiteSettings(models.Model):
     twitter_url = models.URLField("X / Twitter URL", blank=True)
     youtube_url = models.URLField(blank=True)
     # --- Commerce ---
-    tax_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0, help_text="Applied to the discounted subtotal at checkout. 0 = no tax line.")
+    tax_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0, help_text="Default tax for countries without their own rate (Store settings > Tax rates). 0 = none.")
+    cookie_banner = models.BooleanField(default=True, help_text="Ask visitors before using analytics/marketing cookies (required in the EU/UK).")
+    ga4_id = models.CharField("Google Analytics 4 ID", max_length=20, blank=True, help_text="e.g. G-ABC123XYZ. Only loads after the visitor accepts cookies.")
+    meta_pixel_id = models.CharField("Meta (Facebook) Pixel ID", max_length=20, blank=True, help_text="Only loads after the visitor accepts cookies.")
+    google_site_verification = models.CharField(max_length=100, blank=True, help_text="Google Search Console verification code (content of the meta tag).")
+    prices_include_tax = models.BooleanField(default=False, help_text="On: product prices already include tax (usual in Europe, UK, Australia) - checkout shows it, doesn't add it. Off: tax is added at checkout (usual in the US).")
+    store_tax_id = models.CharField("Store VAT / tax number", max_length=40, blank=True, help_text="Printed on invoices.")
+    DUTIES = [("customer", "Customer pays import duties on delivery (DAP)"), ("included", "Prices include duties - we pay them (DDP)")]
+    duties_policy = models.CharField(max_length=10, choices=DUTIES, default="customer",
+                                     help_text="What international shoppers see at checkout about customs duties.")
     shipping_flat_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Flat shipping fee per order. 0 = free shipping.")
     free_shipping_threshold = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Orders at or above this subtotal ship free. 0 = disabled.")
     return_days = models.PositiveSmallIntegerField(
         default=14, help_text="How many days after delivery customers can request a return.",
     )
+    SHIPPING_PROVIDERS = [("", "Off - add tracking numbers by hand"), ("easypost", "EasyPost (100+ carriers worldwide)"),
+                          ("shippo", "Shippo (DHL, UPS, FedEx, USPS and more)")]
+    shipping_provider = models.CharField(max_length=20, choices=SHIPPING_PROVIDERS, blank=True,
+                                         help_text="Courier service for booking pickups, printing labels and live tracking. Add its API key under Store settings > Keys & passwords.")
+    ship_from_name = models.CharField("Store's shipping name", max_length=120, blank=True)
+    ship_from_street = models.CharField("Store's street address", max_length=200, blank=True, help_text="Pickup address for the store's own products.")
+    ship_from_city = models.CharField(max_length=100, blank=True)
+    ship_from_state = models.CharField(max_length=100, blank=True)
+    ship_from_postal_code = models.CharField(max_length=20, blank=True)
+    ship_from_country = models.CharField(max_length=2, blank=True, help_text="2-letter code, e.g. PK, AE, GB, US")
+    ship_from_phone = models.CharField(max_length=30, blank=True)
+    default_weight_grams = models.PositiveIntegerField(default=500, help_text="Used when a product has no weight.")
+    auto_deliver_days = models.PositiveSmallIntegerField(
+        default=14, help_text="Items still 'on the way' this many days after shipping are marked delivered automatically (the customer is reminded 2 days before). 0 = off.")
+    auto_cancel_days = models.PositiveSmallIntegerField(
+        default=7, help_text="Paid orders nobody has shipped after this many days are cancelled and refunded automatically. Sellers are reminded after 2 days, the store team after 4. 0 = off.")
+    claim_reply_days = models.PositiveSmallIntegerField(
+        default=3, help_text="Days a seller has to answer a customer's problem report before the store team decides.")
     delivery_days = models.PositiveSmallIntegerField(
         default=5, help_text="Usual delivery time in business days. Used for the 'Arrives by' date customers see and get emailed.",
     )
@@ -1568,3 +1684,108 @@ def _clear_shipping_cache(sender, **kwargs):
 def _clear_seller_flag(sender, instance, **kwargs):
     from django.core.cache import cache
     cache.delete(f"is_seller:{instance.user_id}")
+
+
+class Claim(models.Model):
+    """A customer reports a problem with an item ("didn't arrive", "not as
+    described"...). The seller answers; the store team makes the final call
+    and can refund straight from here."""
+    REASONS = [
+        ("not_received", "It didn't arrive"),
+        ("not_as_described", "Not as described"),
+        ("damaged", "Arrived damaged or broken"),
+        ("wrong_item", "Wrong item sent"),
+        ("other", "Something else"),
+    ]
+    STATUS = [
+        ("open", "Waiting for the seller"),
+        ("seller_replied", "Seller replied"),
+        ("escalated", "With the store team"),
+        ("refunded", "Refunded"),
+        ("rejected", "Closed - no refund"),
+        ("withdrawn", "Withdrawn by customer"),
+    ]
+    OPEN_STATUSES = ("open", "seller_replied", "escalated")
+    order_item = models.ForeignKey("OrderItem", related_name="claims", on_delete=models.CASCADE)
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="claims")
+    reason = models.CharField(max_length=20, choices=REASONS)
+    details = models.TextField(max_length=2000)
+    photo = models.ImageField(upload_to=claim_photo_path, storage=_private_storage, blank=True, null=True)
+    status = models.CharField(max_length=20, choices=STATUS, default="open", db_index=True)
+    seller_reply = models.TextField(blank=True, max_length=2000)
+    seller_offers_refund = models.BooleanField(default=False)
+    seller_replied_at = models.DateTimeField(null=True, blank=True)
+    decision_note = models.CharField(max_length=500, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    return_request = models.ForeignKey("ReturnRequest", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Claim #{self.pk} on {self.order_item.product_name}"
+
+    @property
+    def is_open(self):
+        return self.status in self.OPEN_STATUSES
+
+    @property
+    def seller(self):
+        return self.order_item.seller_account
+
+
+class Shipment(models.Model):
+    """A parcel booked with a courier service (EasyPost, Shippo...) for one
+    seller's items in an order (or the store's own items)."""
+    STATUS = [("rated", "Rates fetched"), ("booked", "Label ready"), ("in_transit", "In transit"),
+              ("out_for_delivery", "Out for delivery"), ("delivered", "Delivered"), ("returned", "Returned to sender"),
+              ("failed", "Delivery problem"), ("cancelled", "Cancelled")]
+    order = models.ForeignKey("Order", related_name="shipments", on_delete=models.CASCADE)
+    seller = models.ForeignKey(SellerAccount, null=True, blank=True, on_delete=models.SET_NULL, related_name="shipments")
+    item_ids = models.JSONField(default=list)
+    provider = models.CharField(max_length=20)
+    external_id = models.CharField(max_length=100, blank=True)
+    transaction_id = models.CharField(max_length=100, blank=True)
+    tracker_id = models.CharField(max_length=100, blank=True)
+    rates = models.JSONField(default=list, blank=True)
+    carrier = models.CharField(max_length=60, blank=True)
+    service = models.CharField(max_length=80, blank=True)
+    tracking_number = models.CharField(max_length=80, blank=True, db_index=True)
+    tracking_url = models.URLField(max_length=500, blank=True)
+    label_url = models.URLField(max_length=500, blank=True)
+    cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    cost_currency = models.CharField(max_length=3, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS, default="rated", db_index=True)
+    carrier_status = models.CharField(max_length=40, blank=True)
+    error = models.CharField(max_length=500, blank=True)
+    created_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    checked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.provider} {self.tracking_number or self.external_id} (order #{self.order_id})"
+
+    @property
+    def active(self):
+        return self.status in ("booked", "in_transit", "out_for_delivery")
+
+
+class TaxRate(models.Model):
+    """Sales tax / VAT / GST for one destination country."""
+    country = models.CharField(max_length=2, unique=True, help_text="2-letter code, e.g. GB, DE, AE")
+    name = models.CharField(max_length=20, default="VAT", help_text="Shown at checkout: VAT, GST, Sales tax...")
+    rate = models.DecimalField(max_digits=5, decimal_places=2)
+    includes_shipping = models.BooleanField(default=True, help_text="Charge it on shipping too (true for VAT in most countries).")
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["country"]
+
+    def __str__(self):
+        return f"{self.country} {self.name} {self.rate}%"

@@ -134,13 +134,20 @@ class Command(BaseCommand):
                 phone="+10000000000", payment_method="card", payment_status="paid", status=status,
                 sellers_notified=True,
             )
+            items_made = []
             for product in rng.sample(products, rng.randint(1, 2)):
                 item = OrderItem(order=order, product=product, product_name=product.name, price=product.price,
                                  quantity=rng.randint(1, 3))
                 item.apply_commission(product.seller_account)
                 item.fulfillment_status = {"delivered": "delivered", "shipped": "handed_to_courier"}.get(status, "pending")
                 item.save()
+                items_made.append(item)
             created = now - timedelta(days=days_ago, hours=rng.randint(0, 10))
+            for item in items_made:
+                if item.fulfillment_status != "pending":
+                    OrderItem.objects.filter(pk=item.pk).update(
+                        shipped_at=created + timedelta(days=1, hours=2),
+                        delivered_at=created + timedelta(days=4) if status == "delivered" else None)
             Order.objects.filter(pk=order.pk).update(
                 created_at=created, delivered_at=created + timedelta(days=4) if status == "delivered" else None,
                 card_brand="visa", card_last4="4242")

@@ -3,6 +3,7 @@ Store admin ("/manage/"): the owner's day-to-day back office, built with the
 same design system as the storefront. The full Django admin stays available
 at /admin/ for anything not covered here.
 """
+import os
 import csv
 from datetime import date, timedelta
 from decimal import Decimal
@@ -27,7 +28,7 @@ from django.views.decorators.http import require_POST
 from . import badges as seller_badges
 from . import payments
 from .models import (
-    AuditLog, ChatMessage, ChatThread, Conversation, Coupon, Currency, Notification, Order, OrderItem,
+    AuditLog, ChatMessage, ChatThread, Claim, Conversation, Coupon, Currency, Notification, Order, OrderItem,
     Payout, Product, Profile, Question, ReturnRequest, Review, SellerAccount, SellerPlan, ShippingZone, SiteSettings,
 )
 from .templatetags.bees_extras import money
@@ -64,9 +65,10 @@ def attention_counts(force=False):
             "questions": Question.objects.filter(answer="").count(),
             "messages": ChatThread.objects.filter(is_resolved=False).filter(Exists(unread_user_msgs)).count(),
             "reported": Conversation.objects.filter(reported=True).count(),
+            "claims": Claim.objects.filter(status="escalated").count(),
         }
         data["messages"] += data["reported"]
-        data["total"] = data["orders"] + data["products"] + data["sellers"] + data["returns"] + data["messages"]
+        data["total"] = data["orders"] + data["products"] + data["sellers"] + data["returns"] + data["messages"] + data["claims"]
         cache.set("manage:attention", data, 30)
     return data
 
@@ -256,11 +258,30 @@ def order_detail(request, pk):
             else:
                 _log(request, f"Cancelled order #{order.id} from store admin")
                 messages.success(request, f"Order #{order.id} cancelled. Stock returned" + (" and payment refunded." if order.payment_status == "refunded" else "."))
+        elif action == "item_status":
+            from . import fulfilment
+            item = get_object_or_404(order.items, pk=request.POST.get("item"))
+            try:
+                changed, moved = fulfilment.set_items_status([item], request.POST.get("fulfillment_status", ""), user=request.user, by_staff=True)
+            except fulfilment.FulfilmentError as exc:
+                messages.error(request, str(exc))
+            else:
+                if changed:
+                    messages.success(request, f"'{item.product_name}' updated." + (f" The order is now {moved[0][1]} and the customer has been told." if moved else ""))
         elif action == "update":
             new_status = request.POST.get("status", order.status)
             if new_status not in dict(Order.STATUS_CHOICES) or new_status == "cancelled":
                 new_status = order.status
             was = order.status
+            if was == "delivered" and new_status != "delivered":
+                messages.error(request, "A delivered order can't go back to an earlier step. Use Returns if the customer sends something back.")
+                return redirect("manage_order", pk=pk)
+            if new_status in ("shipped", "delivered") and new_status != was:
+                from .fulfilment import blocked_reason
+                reason = blocked_reason(order)
+                if reason:
+                    messages.error(request, reason)
+                    return redirect("manage_order", pk=pk)
             order.tracking_number = request.POST.get("tracking_number", "").strip()[:60]
             order.courier_name = request.POST.get("courier_name", "").strip()[:60]
             turl = request.POST.get("tracking_url", "").strip()[:300]
@@ -279,17 +300,33 @@ def order_detail(request, pk):
             if new_status != was:
                 _log(request, f"Order #{order.id}: {was} -> {new_status}")
                 if new_status == "shipped":
-                    order.items.exclude(fulfillment_status="delivered").update(fulfillment_status="handed_to_courier")
+                    order.items.exclude(fulfillment_status="delivered").update(fulfillment_status="handed_to_courier", shipped_at=timezone.now())
                 if new_status == "delivered":
-                    order.items.update(fulfillment_status="delivered")
+                    order.items.filter(shipped_at=None).update(shipped_at=timezone.now())
+                    order.items.exclude(fulfillment_status="delivered").update(fulfillment_status="delivered", delivered_at=timezone.now())
             emailed = new_status != was and new_status in ("confirmed", "shipped", "delivered") and order.contact_email
             messages.success(request, "Order updated." + (" The customer has been emailed." if emailed else ""))
         _refresh_attention()
         return redirect("manage_order", pk=pk)
     items = order.items.select_related("product", "seller_account__user")
+    from . import couriers
+    from .models import Shipment
+    provider = couriers.active()
+    shipments = list(Shipment.objects.filter(order=order))
+    quote = next((s for s in shipments if s.status == "rated" and str(s.id) == request.GET.get("shipment", "")), None)
+    pending = [i for i in items if i.fulfillment_status in ("pending", "packed")]
+    choices = []
+    for i in pending:
+        value = str(i.seller_account_id) if i.seller_account_id else "store"
+        label = i.seller_account.display_name if i.seller_account_id else "Your store's items"
+        if (value, label) not in choices:
+            choices.append((value, label))
     return _render(request, "order_detail.html", {
+        "courier_on": provider is not None, "courier_name": getattr(provider, "name", ""), "shipments": shipments, "quote": quote,
+        "can_book": bool(pending) and order.status != "cancelled", "seller_choices": choices,
         "section": "orders", "order": order, "items": items,
         "status_choices": [c for c in Order.STATUS_CHOICES if c[0] != "cancelled"],
+        "fulfilment_choices": OrderItem.FULFILLMENT_CHOICES,
         "returns": ReturnRequest.objects.filter(order_item__order=order).select_related("order_item"),
         "stripe_test": str(getattr(payments.settings, "STRIPE_SECRET_KEY", "")).startswith("sk_test"),
     })
@@ -546,8 +583,10 @@ def seller_detail(request, pk):
         return redirect("manage_seller", pk=pk)
     products_qs = seller.products.order_by("-id")[:12]
     from .seller_center import balance
+    from .performance import measure
     return _render(request, "seller_detail.html", {
         "section": "sellers", "seller": seller, "products": products_qs,
+        "perf": measure(seller) if seller.status == "approved" else None,
         "product_count": seller.products.count(),
         "payouts": seller.payouts.select_related("recorded_by")[:20],
         "payout_request": seller.payouts.filter(status="requested").first(),
@@ -1078,39 +1117,13 @@ def returns(request):
             rr.save()
             messages.success(request, "Return rejected. The customer has been notified.")
         elif action in ("refund", "refund_credit"):
-            with transaction.atomic():
-                rr = ReturnRequest.objects.select_for_update().select_related("order_item__order").get(pk=rr.pk)
-                if rr.status == "refunded":
-                    messages.error(request, "This return has already been refunded.")
-                    return redirect("manage_returns")
-                if note:
-                    rr.admin_note = note
-                order = rr.order_item.order
-                plan = rr.refund_plan(as_credit=action == "refund_credit")
-                if plan["card"] and not payments.refund_amount(order, plan["card"], f"return-{rr.id}"):
-                    messages.error(request, "Stripe couldn't process the refund. Try again, or refund from the Stripe dashboard and then mark it refunded.")
-                    return redirect("manage_returns")
-                if plan["credit"]:
-                    Profile.objects.get_or_create(user=rr.user)
-                    Profile.objects.filter(user=rr.user).update(store_credit=F("store_credit") + plan["credit"])
-                if plan["manual"] and not rr.admin_note:
-                    rr.admin_note = f"Paid back {money(plan['manual'])} directly (cash on delivery order)."
-                # Take back the reward points this item earned.
-                Profile.objects.filter(user=rr.user, loyalty_points__gte=int(plan["value"])).update(
-                    loyalty_points=F("loyalty_points") - int(plan["value"]))
-                rr.card_refund_amount = plan["card"]
-                rr.credit_refund_amount = plan["credit"]
-                rr.status = "refunded"
-                rr.save()
-                payments.restock_item(rr.order_item, rr.order_item.quantity)
-            parts = []
-            if plan["card"]:
-                parts.append(f"{money(plan['card'])} sent back to the card")
-            if plan["credit"]:
-                parts.append(f"{money(plan['credit'])} added as store credit")
-            if plan["manual"]:
-                parts.append(f"remember to pay the customer {money(plan['manual'])} yourself (cash on delivery order)")
-            messages.success(request, "Refunded: " + ", ".join(parts) + ". Stock returned.")
+            from .refunds import RefundError, describe, refund_return
+            try:
+                plan = refund_return(rr, as_credit=action == "refund_credit", note=note)
+            except RefundError as exc:
+                messages.error(request, str(exc))
+                return redirect("manage_returns")
+            messages.success(request, "Refunded: " + describe(plan) + ". Stock returned.")
         _log(request, f"Return #{rr.id}: {action}")
         _refresh_attention()
         return redirect("manage_returns")
@@ -1123,6 +1136,160 @@ def returns(request):
         if r.status in ("requested", "approved"):
             r.plan = r.refund_plan()
     return _render(request, "returns.html", {"section": "returns", "page_obj": page_obj, "status": status, "status_choices": ReturnRequest.STATUS_CHOICES})
+
+
+# ---------------------------------------------------------------------------
+# Tax rates
+# ---------------------------------------------------------------------------
+
+@staff_required
+def tax_rates(request):
+    from .countries import COUNTRIES
+    from .models import TaxRate
+    from .taxes import PRESETS
+    names = dict(COUNTRIES)
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "presets":
+            added = 0
+            for code, name, rate in PRESETS:
+                _obj, created = TaxRate.objects.get_or_create(country=code, defaults={"name": name, "rate": Decimal(rate)})
+                added += int(created)
+            _log(request, f"Added {added} preset tax rates")
+            messages.success(request, f"Added {added} common rates. Please check them with your accountant - rates change.")
+        elif action == "save":
+            code = request.POST.get("country", "").strip().upper()
+            try:
+                rate = Decimal(request.POST.get("rate", "").strip())
+            except Exception:
+                rate = None
+            if code not in names:
+                messages.error(request, "Choose a country.")
+            elif rate is None or rate < 0 or rate > 50:
+                messages.error(request, "Use a rate between 0 and 50%.")
+            else:
+                TaxRate.objects.update_or_create(country=code, defaults={
+                    "name": (request.POST.get("name", "").strip() or "VAT")[:20], "rate": rate,
+                    "includes_shipping": bool(request.POST.get("includes_shipping")), "active": True})
+                _log(request, f"Tax rate {code} = {rate}%")
+                messages.success(request, f"{names[code]}: {rate}% saved.")
+        elif action in ("toggle", "delete"):
+            obj = get_object_or_404(TaxRate, pk=request.POST.get("id"))
+            if action == "delete":
+                obj.delete()
+            else:
+                obj.active = not obj.active
+                obj.save(update_fields=["active"])
+            _log(request, f"Tax rate {obj.country}: {action}")
+        return redirect("manage_taxes")
+    rates = [(t, names.get(t.country, t.country)) for t in TaxRate.objects.all()]
+    return _render(request, "taxes.html", {"section": "settings", "rates": rates, "countries": COUNTRIES,
+                                           "site": SiteSettings.load()})
+
+
+# ---------------------------------------------------------------------------
+# Keys & passwords (.env editor)
+# ---------------------------------------------------------------------------
+
+@staff_required
+def keys(request):
+    import secrets as _secrets
+    from django.conf import settings as dj
+    from django.urls import reverse as _reverse
+    from . import envfile
+    if not request.user.is_superuser:
+        messages.error(request, "Only the store owner (superuser) can change keys and passwords.")
+        return redirect("manage_settings")
+    if getattr(dj, "DEMO_MODE", False):
+        messages.info(request, "Keys can't be changed on the demo.")
+        return redirect("manage_settings")
+    if request.method == "POST":
+        if not request.user.check_password(request.POST.get("confirm_password", "")):
+            messages.error(request, "Your password wasn't right, so nothing was changed.")
+            return redirect("manage_keys")
+        changes = {}
+        for key in envfile.EDITABLE:
+            if request.POST.get(f"remove_{key}"):
+                changes[key] = None
+                continue
+            value = request.POST.get(key, "").strip()
+            if value:
+                changes[key] = value
+        if request.POST.get("new_webhook_token"):
+            changes["SHIPPING_WEBHOOK_TOKEN"] = _secrets.token_urlsafe(24)
+        if not changes:
+            messages.info(request, "Nothing to change.")
+            return redirect("manage_keys")
+        try:
+            envfile.write(changes)
+        except envfile.EnvError as exc:
+            messages.error(request, str(exc))
+            return redirect("manage_keys")
+        except OSError as exc:
+            messages.error(request, f"Couldn't save the .env file: {exc}")
+            return redirect("manage_keys")
+        _log(request, "Keys changed: " + ", ".join(sorted(changes)))
+        if envfile.reload_app():
+            messages.success(request, f"Saved {len(changes)} setting(s). The site is restarting to use them - refresh in a few seconds.")
+        else:
+            messages.success(request, f"Saved {len(changes)} setting(s). Now press Reload on your hosting's Web tab so the site uses them.")
+        return redirect("manage_keys")
+    current = envfile.read()
+    groups = []
+    for title, hint, rows in envfile.GROUPS:
+        groups.append((title, hint, [{"key": key, "label": label, "secret": secret, "set": bool(current.get(key)),
+                                      "shown": envfile.mask(current.get(key, ""), secret)} for key, label, secret, _p in rows]))
+    paypal_webhook = request.build_absolute_uri(_reverse("paypal_webhook"))
+    token = current.get("SHIPPING_WEBHOOK_TOKEN", "")
+    webhook = request.build_absolute_uri(_reverse("courier_webhook", args=[token])) if token else ""
+    return _render(request, "keys.html", {
+        "section": "keys", "groups": groups, "webhook_url": webhook, "paypal_webhook": paypal_webhook, "env_exists": os.path.exists(envfile.path()),
+        "locked": [(k, bool(current.get(k))) for k in envfile.LOCKED],
+    })
+
+
+# ---------------------------------------------------------------------------
+# Problem reports (claims)
+# ---------------------------------------------------------------------------
+
+@staff_required
+def claims(request):
+    show = request.GET.get("show", "escalated")
+    qs = Claim.objects.select_related("order_item__order", "order_item__seller_account", "user")
+    tabs = [("escalated", "Needs a decision"), ("waiting", "Waiting for seller"), ("closed", "Closed"), ("all", "All")]
+    if show == "escalated":
+        qs = qs.filter(status="escalated")
+    elif show == "waiting":
+        qs = qs.filter(status__in=["open", "seller_replied"])
+    elif show == "closed":
+        qs = qs.exclude(status__in=Claim.OPEN_STATUSES)
+    return _render(request, "claims.html", {"section": "claims", "page_obj": _page(request, qs), "show": show, "tabs": tabs})
+
+
+@staff_required
+def claim_detail(request, pk):
+    claim = get_object_or_404(Claim.objects.select_related("order_item__order", "order_item__seller_account", "user"), pk=pk)
+    if request.method == "POST":
+        from .claims import decide
+        from .refunds import RefundError
+        action = request.POST.get("action")
+        if not claim.is_open:
+            messages.error(request, "This report is already closed.")
+        elif action in ("refund", "reject"):
+            try:
+                result = decide(claim, action, request.user, note=request.POST.get("note", "").strip(),
+                                as_credit=request.POST.get("as_credit") == "1", restock=request.POST.get("restock") == "1")
+            except RefundError as exc:
+                messages.error(request, str(exc))
+            else:
+                messages.success(request, result)
+        _refresh_attention()
+        return redirect("manage_claim", pk=pk)
+    plan = None
+    if claim.is_open:
+        plan = ReturnRequest(order_item=claim.order_item, user=claim.user).refund_plan()
+    return _render(request, "claim_detail.html", {"section": "claims", "claim": claim, "plan": plan,
+                                                  "events": claim.order_item.order.events.all()})
 
 
 # ---------------------------------------------------------------------------
@@ -1196,8 +1363,16 @@ class SiteSettingsForm(forms.ModelForm):
         ("Announcement bar", "A message across the top of every page, e.g. a sale.", ["banner_active", "banner_text", "banner_link"]),
         ("Selling", "Commission taken from each sale. Applies to sellers who join from now on; change an existing seller's rate on their page.",
          ["commission_individual", "commission_organization"]),
-        ("Shipping, tax & payment", "Applied at checkout.", ["shipping_flat_fee", "free_shipping_threshold", "tax_percent", "delivery_days", "return_days", "allow_cash_on_delivery", "allow_guest_checkout"]),
-        ("Contact & social", "Shown in the footer, emails and help page.",
+        ("Shipping & payment", "Applied at checkout.", ["shipping_flat_fee", "free_shipping_threshold", "delivery_days", "return_days", "allow_cash_on_delivery", "allow_guest_checkout"]),
+        ("Privacy, analytics & search", "Analytics and ad pixels only load after a visitor accepts cookies. Verify your site in Google Search Console with its meta-tag code.",
+         ["cookie_banner", "ga4_id", "meta_pixel_id", "google_site_verification"]),
+        ("Taxes & duties", "Set rates per country under Tax rates. The default below is used for every other country.",
+         ["prices_include_tax", "tax_percent", "store_tax_id", "duties_policy"]),
+                ("Shipping labels", "Book couriers and print labels from the order page. Pick a service, then add its API key under Keys & passwords. The address below is used for the store's own products; sellers set theirs in Seller Center.",
+         ["shipping_provider", "ship_from_name", "ship_from_street", "ship_from_city", "ship_from_state", "ship_from_postal_code", "ship_from_country", "ship_from_phone", "default_weight_grams"]),
+                ("Order rules", "Automatic steps that keep orders moving and protect your money. Runs with the daily tasks.",
+         ["auto_cancel_days", "auto_deliver_days", "claim_reply_days"]),
+                ("Contact & social", "Shown in the footer, emails and help page.",
          ["support_email", "support_phone", "company_address", "facebook_url", "instagram_url", "twitter_url", "youtube_url"]),
         ("Referral program", "Customers invite friends with their own link. Discount codes are created automatically.",
          ["referral_enabled", "referral_friend_percent", "referral_reward_percent"]),
@@ -1214,7 +1389,52 @@ class SiteSettingsForm(forms.ModelForm):
             if name in self.fields:
                 self.fields[name].required = False  # left out = keep the current value
 
-    OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent")
+    OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent",
+                "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams", "duties_policy")
+
+    def _clean_id(self, name, pattern, example):
+        import re as _re
+        value = (self.cleaned_data.get(name) or "").strip()
+        if value and not _re.fullmatch(pattern, value):
+            raise ValidationError(f"That doesn't look right - it should look like {example}.")
+        return value
+
+    def clean_ga4_id(self):
+        return self._clean_id("ga4_id", r"G-[A-Z0-9]{4,15}", "G-ABC123XYZ")
+
+    def clean_meta_pixel_id(self):
+        return self._clean_id("meta_pixel_id", r"\d{6,20}", "1234567890")
+
+    def clean_google_site_verification(self):
+        return self._clean_id("google_site_verification", r"[A-Za-z0-9_-]{10,100}", "the code inside content=\"...\"")
+
+    def clean_duties_policy(self):
+        return self.cleaned_data.get("duties_policy") or self.instance.duties_policy or "customer"
+
+    def clean_default_weight_grams(self):
+        return self._keep("default_weight_grams") or 500
+
+    def clean_ship_from_country(self):
+        value = (self.cleaned_data.get("ship_from_country") or "").strip().upper()
+        if value and (len(value) != 2 or not value.isalpha()):
+            raise ValidationError("Use the 2-letter country code, e.g. PK, AE, GB, US.")
+        return value
+
+    def _keep(self, name):
+        value = self.cleaned_data.get(name)
+        return getattr(self.instance, name) if value is None else value
+
+    def clean_auto_cancel_days(self):
+        return self._keep("auto_cancel_days")
+
+    def clean_auto_deliver_days(self):
+        value = self._keep("auto_deliver_days")
+        if value and value < 3:
+            raise ValidationError("Use at least 3 days (or 0 to turn it off).")
+        return value
+
+    def clean_claim_reply_days(self):
+        return self._keep("claim_reply_days") or 1
 
     def _clean_percent(self, name):
         value = self.cleaned_data.get(name)
@@ -1269,7 +1489,8 @@ def store_settings(request):
             messages.success(request, "Settings saved. Your store has been updated.")
             return redirect("manage_settings")
         messages.error(request, "Please fix the highlighted fields.")
-    return _render(request, "settings.html", {"section": "settings", "form": form})
+    from .couriers import status_line
+    return _render(request, "settings.html", {"section": "settings", "form": form, "courier_status": status_line()})
 
 
 # ---------------------------------------------------------------------------
@@ -1710,6 +1931,12 @@ def operations_checks(dj=None):
             f"Still showing in English: {detail}. Usually product or brand names - open Admin > Translations and "
             "type a translation, press 'Translate missing with AI', or press 'Keep the rest in English' for names that shouldn't change.",
             level="warn")
+    from .paypal import status_line as paypal_status
+    p_state, p_text = paypal_status()
+    add("Payments", "PayPal", p_state != "missing", p_text, level="ok" if p_state != "missing" else "warn")
+    from .couriers import status_line
+    c_state, c_text = status_line()
+    add("Shipping", "Courier service", c_state != "missing", c_text, level="ok" if c_state != "missing" else "warn")
     add("Languages & currencies", "AI assistant", True,
         "On: listing writer, buying guides, shopper Q&A and one-click translation use Claude." if getattr(dj, "AI_API_KEY", "")
         else "Off: add ANTHROPIC_API_KEY to .env for AI buying guides, shopper Q&A and one-click translation (built-in writer still works).", level="ok")

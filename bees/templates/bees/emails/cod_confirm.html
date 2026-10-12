@@ -2,7 +2,9 @@
 {% load bees_extras %}
 {% block email_body %}{% site_brand as b %}
     <h1 style="margin:0 0 8px;font-size:24px;">One click to confirm your order</h1>
-    <p style="margin:0 0 16px;color:#56606B;">Hi {{ order.full_name }}, thanks for your cash on delivery order <strong style="color:#141A1F;">#{{ order.id }}</strong> of <strong style="color:#141A1F;">{{ order.total|money }}</strong>. Please confirm it so the seller can pack it. Orders that aren't confirmed within {{ hours }} hours are cancelled automatically.</p>
+    <p style="margin:0 0 6px;color:#56606B;">Hi <span data-no-translate>{{ order.full_name }}</span>,</p>
+    <p style="margin:0 0 16px;color:#56606B;">Thanks for your cash on delivery order #{{ order.id }} of {{ order.total|money }}.</p>
+    <p style="margin:0 0 16px;color:#56606B;">Please confirm it so the seller can pack it. Orders that aren't confirmed within {{ hours }} hours are cancelled automatically.</p>
     <a href="{{ url }}" style="display:inline-block;background:{{ b.primary_color }};color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:8px;font-weight:bold;">Confirm my order</a>
     <p style="margin:20px 0 0;color:#56606B;font-size:13px;">Didn't place this order? Just ignore this email and nothing will be sent.</p>
 {% endblock %}

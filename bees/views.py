@@ -180,12 +180,14 @@ def _can_view_unapproved(user, product):
     return bool(seller and product.seller_account_id == seller.id)
 
 
-def _send_html_email(subject, template, context, recipient):
+def _send_html_email(subject, template, context, recipient, lang=None):
     if not recipient:
         return
     try:
         context = {"brand": _brand(), **context}
         html_body = render_to_string(template, context)
+        from .email_i18n import language_for, localize
+        html_body, subject = localize(html_body, subject, lang if lang is not None else language_for(email=recipient))
         email = EmailMultiAlternatives(subject, strip_tags(html_body), None, [recipient])
         email.attach_alternative(html_body, "text/html")
     except Exception as exc:
@@ -206,6 +208,11 @@ def _deliver_email(email, subject, recipient):
         # the owner (Admin > System check).
         from .alerts import email_failed
         email_failed(subject, recipient, exc)
+
+
+def _order_lang(order):
+    from .email_i18n import language_for
+    return language_for(order=order)
 
 
 def _email_verified(user):
@@ -229,6 +236,7 @@ def _send_order_confirmation(request, order):
         "bees/emails/order_confirmation.html",
         {"order": order, "invoice_url": invoice_url, "track_url": track_url},
         order.contact_email,
+        lang=_order_lang(order),
     )
     from . import seller_center
     seller_center.notify_new_order(order)
@@ -276,7 +284,10 @@ def product_detail(request, pk):
     product = get_object_or_404(Product, pk=pk)
 
     if not product.is_live and not _can_view_unapproved(request.user, product):
-        raise Http404("This product is not available.")
+        bought = (product.approval_status == "archived" and request.user.is_authenticated
+                  and OrderItem.objects.filter(order__user=request.user, product=product).exists())
+        if not bought:  # past buyers can still open it to review it
+            raise Http404("This product is not available.")
 
     if request.method == "POST":
         return _submit_review(request, product)
@@ -317,7 +328,12 @@ def product_detail(request, pk):
         recent_ids = [product.id] + [i for i in recent_ids if i != product.id]
     recently_viewed = with_ratings(Product.objects.live().filter(id__in=recent_ids[1:7]))
 
+    from . import seo
     return render(request, "bees/product_detail.html", {
+        "product_ld": seo.product(request, product, reviews),
+        "breadcrumb_ld": seo.breadcrumbs(request, [(_brand().site_name, reverse("home")),
+                                                   (product.get_category_display(), reverse("category_products", args=[product.category])),
+                                                   (product.name, reverse("product_detail", args=[product.pk]))]),
         "product": product,
         "reviews": reviews,
         "in_wishlist": in_wishlist,
@@ -346,7 +362,9 @@ def _review_block_reason(user, product):
     seller, _ = get_seller_account_for_user(user)
     if seller and product.seller_account_id == seller.id:
         return "You can't review your own product."
-    if not OrderItem.objects.filter(order__user=user, product=product, order__status="delivered").exists():
+    received = OrderItem.objects.filter(order__user=user, product=product).filter(
+        Q(order__status="delivered") | Q(fulfillment_status="delivered")).exclude(order__status="cancelled")
+    if not received.exists():
         return "Only customers who bought this product can review it. You'll be able to once your order is delivered."
     return ""
 
@@ -371,7 +389,7 @@ def _submit_review(request, product):
         messages.error(request, blocked)
         return redirect("product_detail", pk=product.pk)
     verified = True
-    Review.objects.update_or_create(
+    review, created = Review.objects.update_or_create(
         product=product, user=request.user,
         defaults={
             "username": request.user.get_full_name() or request.user.username,
@@ -380,6 +398,13 @@ def _submit_review(request, product):
             "is_verified_purchase": verified,
         },
     )
+    if product.seller_account_id:
+        from .seller_center import _seller_users
+        verb = "New" if created else "Updated"
+        Notification.objects.bulk_create([
+            Notification(user=u, link="/seller/reviews/?tab=reviews",
+                         message=f"{verb} {rating}★ review on '{product.name}': {comment[:60]}"[:255])
+            for u in _seller_users(product.seller_account)])
     messages.success(request, "Thanks - your review has been posted.")
     return redirect("product_detail", pk=product.pk)
 
@@ -470,7 +495,10 @@ def all_products(request):
 def product_quick_view(request, pk):
     product = get_object_or_404(Product, pk=pk)
     if not product.is_live and not _can_view_unapproved(request.user, product):
-        raise Http404("This product is not available.")
+        bought = (product.approval_status == "archived" and request.user.is_authenticated
+                  and OrderItem.objects.filter(order__user=request.user, product=product).exists())
+        if not bought:  # past buyers can still open it to review it
+            raise Http404("This product is not available.")
     return render(request, "bees/partials/quick_view.html", {"product": product})
 
 
@@ -919,6 +947,8 @@ def set_language(request, lang_code):
     from .translations import TRANSLATIONS
     if lang_code in TRANSLATIONS:
         request.session["site_lang"] = lang_code
+        from .email_i18n import remember
+        remember(request.user, lang_code)
     return redirect_back(request, "home")
 
 
@@ -1111,6 +1141,9 @@ def _payment_methods():
     methods = []
     if payments.is_configured():
         methods.append("card")
+    from . import paypal
+    if paypal.is_configured():
+        methods.append("paypal")
     if _brand().allow_cash_on_delivery:
         methods.append("cod")
     return methods
@@ -1130,16 +1163,20 @@ def _price_cart(subtotal, coupon=None, country=None, items=1):
     # actually pays for the goods (after the coupon).
     quote = shipping_rules.quote(country, discounted, items) if subtotal else {"ships": True, "fee": Decimal("0"), "zone": None}
     shipping = quote["fee"]
-    tax = (discounted * Decimal(brand.tax_percent or 0) / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    from . import taxes
+    tax = taxes.compute(discounted, shipping or Decimal("0"), country)
     return {
         "subtotal": subtotal,
         "discount": discount,
         "ships": quote["ships"],
         "shipping_zone": quote["zone"],
         "shipping": shipping,
-        "tax": tax,
-        "total": discounted + (shipping or Decimal("0")) + tax,
-        "tax_percent": brand.tax_percent,
+        "tax": tax["amount"],
+        "tax_name": tax["name"] or "Tax",
+        "tax_rate": tax["rate"],
+        "tax_included": tax["included"],
+        "total": discounted + (shipping or Decimal("0")) + (Decimal("0") if tax["included"] else tax["amount"]),
+        "tax_percent": tax["rate"] if tax["rate"] is not None else brand.tax_percent,
     }
 
 
@@ -1222,6 +1259,15 @@ def checkout_view(request):
                 _restore_cart_from_order(request, order)
                 messages.error(request, str(exc))
                 return redirect("cart")
+        if payment_method == "paypal" and order.total_cents > 0:
+            from . import paypal
+            try:
+                return redirect(paypal.create_order(request, order))
+            except paypal.PayPalError as exc:
+                payments.release_unpaid_order(order.id)
+                _restore_cart_from_order(request, order)
+                messages.error(request, f"PayPal isn't available right now ({exc}). Please try again or choose another way to pay.")
+                return redirect("cart")
 
         if order.total_cents == 0:  # covered by coupon / store credit, nothing to charge
             order.payment_status = "paid"
@@ -1242,6 +1288,11 @@ def _store_credit(user):
     return profile.store_credit if profile else Decimal("0")
 
 
+def taxes_table():
+    from . import taxes
+    return taxes.table()
+
+
 def _checkout_context(request, items, pricing, coupon, methods, form=None):
     signed_in = request.user.is_authenticated
     if form is None:
@@ -1255,7 +1306,8 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
     checkout_data = {
         "subtotal": str(pricing["subtotal"]), "discount": str(pricing["discount"]), "tax": str(pricing["tax"]),
         "credit": str(credit), "currency": settings.STORE_CURRENCY.upper(),
-        "shipping": shipping_rules.table(), "card": "card" in methods, "items": sum(i["qty"] for i in items),
+        "shipping": shipping_rules.table(), "card": "card" in methods or "paypal" in methods, "items": sum(i["qty"] for i in items),
+        "taxes": taxes_table(),
     }
     sellers = []
     for row in items:
@@ -1327,9 +1379,13 @@ def _place_order(request, items, data, payment_method, use_credit=False):
         pricing = _price_cart(subtotal, coupon, data["country"], sum(qty for _p, _v, _price, qty in lines))
         if not pricing["ships"]:
             raise CheckoutError("Sorry, we don't deliver to that country yet.")
-        is_card = payment_method == "card"
+        is_card = payment_method in ("card", "paypal")  # paid online before it ships
         signed_in = request.user.is_authenticated
+        from .email_i18n import remember, request_language
+        shop_lang = request_language(request)
+        remember(request.user, shop_lang)
         order = Order.objects.create(
+            language=shop_lang,
             user=request.user if signed_in else None,
             guest_email="" if signed_in else data["email"],
             email=data["email"],
@@ -1347,6 +1403,10 @@ def _place_order(request, items, data, payment_method, use_credit=False):
             discount_amount=pricing["discount"],
             shipping_amount=pricing["shipping"],
             tax_amount=pricing["tax"],
+            tax_name=pricing["tax_name"][:30] if pricing["tax"] else "",
+            tax_rate=pricing["tax_rate"] if pricing["tax"] else None,
+            tax_included=pricing["tax_included"],
+            customer_tax_id=request.POST.get("customer_tax_id", "").strip()[:40],
             estimated_delivery=order_emails.default_delivery_date(country=data["country"]),
             courier_name=tracking.suggest_courier(data["country"]),
             # Cash orders from accounts with an unconfirmed email need one
@@ -1473,9 +1533,49 @@ def order_track(request, order_id, token):
 @login_required
 def my_orders(request):
     orders = Order.objects.filter(user=request.user).prefetch_related(
-        "items", "items__product", "items__return_requests", "items__seller_account"
+        "items", "items__product", "items__return_requests", "items__seller_account", "items__claims"
     ).order_by("-created_at")
-    return render(request, "bees/my_orders.html", {"orders": orders, "cancel_reasons": CANCEL_REASONS})
+    reviewed = set(Review.objects.filter(user=request.user).values_list("product_id", flat=True))
+    return render(request, "bees/my_orders.html", {"orders": orders, "cancel_reasons": CANCEL_REASONS, "reviewed": reviewed})
+
+
+@login_required
+@require_POST
+def seller_reply_review(request, pk):
+    """A seller answers a review of their product (shown under it)."""
+    seller, role = _approved_seller_or_404(request.user)
+    review = get_object_or_404(Review, pk=pk, product__seller_account=seller)
+    reply = request.POST.get("reply", "").strip()[:1000]
+    review.seller_reply = reply
+    review.seller_reply_at = timezone.now() if reply else None
+    review.save(update_fields=["seller_reply", "seller_reply_at"])
+    if reply and review.user_id:
+        Notification.objects.create(user_id=review.user_id, link=f"/product/{review.product_id}/#reviews",
+                                    message=f"{seller.display_name} replied to your review of '{review.product.name}'."[:255])
+    messages.success(request, "Reply published." if reply else "Reply removed.")
+    return redirect_back(request, "seller_reviews")
+
+
+@login_required
+@require_POST
+def confirm_received(request, pk):
+    """The customer confirms their parcel arrived (items already on their
+    way). Marks them delivered so they can review them right away."""
+    from . import fulfilment
+    order = get_object_or_404(Order, pk=pk, user=request.user)
+    items = list(order.items.filter(fulfillment_status="handed_to_courier"))
+    if not items and order.status == "shipped":
+        items = list(order.items.exclude(fulfillment_status="delivered"))
+    if not items:
+        messages.info(request, "There's nothing on its way in this order.")
+        return redirect("my_orders")
+    try:
+        fulfilment.set_items_status(items, "delivered", user=request.user, by_customer=True)
+    except fulfilment.FulfilmentError as exc:
+        messages.error(request, str(exc))
+        return redirect("my_orders")
+    messages.success(request, "Thanks for confirming! You can now rate your items.")
+    return redirect(f"{reverse('my_orders')}#order-{order.id}")
 
 
 @require_POST
@@ -1515,12 +1615,12 @@ CANCEL_REASONS = [
 
 @login_required
 def request_return(request, item_id):
-    item = get_object_or_404(OrderItem, pk=item_id, order__user=request.user)
-    if item.order.status != "delivered":
-        messages.error(request, "Returns can only be requested for delivered orders.")
+    item = get_object_or_404(OrderItem.objects.select_related("order"), pk=item_id, order__user=request.user)
+    if not item.received_at:
+        messages.error(request, "You can return an item once it has been delivered.")
         return redirect("my_orders")
-    if not item.order.can_return:
-        messages.error(request, f"The {_brand().return_days}-day return window for order #{item.order_id} has closed. Please contact support if something is wrong.")
+    if not item.can_return:
+        messages.error(request, f"The {_brand().return_days}-day return window for '{item.product_name}' has closed. Use 'Report a problem' if something is wrong.")
         return redirect("my_orders")
     if item.return_requests.exclude(status="rejected").exists():
         messages.error(request, "A return request already exists for this item.")
@@ -1537,6 +1637,14 @@ def request_return(request, item_id):
             ReturnRequest.objects.create(
                 order_item=item, user=request.user, reason=reason, refund_method=refund_method,
             )
+            from .alerts import notify_staff
+            notify_staff(f"Return requested for '{item.product_name}' (order #{item.order_id}).", link="/manage/returns/")
+            if item.seller_account_id:
+                from .seller_center import _seller_users
+                Notification.objects.bulk_create([
+                    Notification(user=u, link="/seller/returns/",
+                                 message=f"Return requested for '{item.product_name}' (order #{item.order_id}).")
+                    for u in _seller_users(item.seller_account)])
             messages.success(request, "Return request submitted. We'll review it shortly.")
             return redirect("my_orders")
 
@@ -1545,7 +1653,7 @@ def request_return(request, item_id):
         "item": item,
         "refund_value": order.refund_value(item),
         "card_order": order.payment_status == "paid" and bool(order.stripe_payment_intent),
-        "deadline": order.return_deadline(),
+        "deadline": item.return_deadline(),
     })
 
 
@@ -1616,6 +1724,10 @@ def invoice_pdf(request, order_id):
         f"{order.address}, {order.city} {order.state} {order.postal_code} {order.country}".strip(),
         f"Phone: {order.phone}   Email: {order.contact_email}",
     ]
+    if order.customer_tax_id:
+        lines.append(f"Customer VAT / tax no.: {order.customer_tax_id}")
+    if brand.store_tax_id:
+        lines.append(f"Seller VAT / tax no.: {brand.store_tax_id}")
     y = height - 116
     for line in lines:
         p.drawString(40, y, line[:110])
@@ -1647,7 +1759,7 @@ def invoice_pdf(request, order_id):
         summary.append(("Discount", -order.discount_amount))
     summary.append(("Shipping", order.shipping_amount))
     if order.tax_amount:
-        summary.append(("Tax", order.tax_amount))
+        summary.append((order.tax_label, order.tax_amount))
     if order.credit_used:
         summary.append(("Store credit", -order.credit_used))
     for label, value in summary:
@@ -1658,6 +1770,9 @@ def invoice_pdf(request, order_id):
     p.drawString(370, y - 4, "Total:")
     p.drawString(460, y - 4, money(order.total))
 
+    if order.tax_included and order.tax_amount:
+        p.setFont("Helvetica", 8)
+        p.drawString(370, y - 20, f"Prices include {order.tax_label.replace(' (included)', '')}.")
     if brand.support_email or brand.company_address:
         p.setFont("Helvetica", 8)
         p.setFillColorRGB(0.4, 0.4, 0.4)
@@ -1744,6 +1859,13 @@ def payment_cancel(request, order_id):
 
 def resume_payment(request, order_id):
     order = _order_access(request, order_id, owner_only=True)
+    if order.payment_status == "pending" and order.payment_method == "paypal" and order.status != "cancelled":
+        from . import paypal
+        try:
+            return redirect(paypal.create_order(request, order))
+        except paypal.PayPalError as exc:
+            messages.error(request, f"PayPal isn't available right now ({exc}).")
+            return _orders_page(request, order)
     if order.payment_status != "pending" or not order.stripe_session_id:
         return _orders_page(request, order)
     session = payments.retrieve_session(order.stripe_session_id)
@@ -1893,7 +2015,12 @@ def privacy_page(request):
         "sections": [
             ("What we collect", "Information you give us when you create an account, place an order or apply to sell - such as your name, email, shipping address and phone number. Card details are entered directly with Stripe and never reach our servers."),
             ("How we use it", f"To process and deliver orders, provide support, prevent fraud and improve {name}. We never sell your personal data."),
-            ("Your rights", "You can view and update your details from your profile at any time, or contact us to request a copy or deletion of your data."),
+            ("Who we share it with", "Only the services needed to run the store: the seller who ships your order, payment providers (Stripe, PayPal), couriers, our email provider and hosting. Each receives only what it needs."),
+            ("Cookies", "Essential cookies keep you signed in, remember your cart, language and currency. Analytics or marketing cookies (if the store uses them) are only set after you accept them in the cookie banner - you can change your choice any time from 'Cookie settings' at the bottom of every page."),
+            ("How long we keep it", "Account details while your account is open. Order and invoice records for as long as tax law requires (usually 6-10 years). You can close your account at any time from Account > Privacy."),
+            ("Your rights (GDPR, UK GDPR, CCPA and similar laws)", "You can see, correct, download (Account > Privacy > Download your data) or delete your data, object to marketing, and withdraw consent at any time. You can also complain to your local data-protection authority. We never sell personal data."),
+            ("International transfers", "Our service providers may process data outside your country. When they do, they use recognised safeguards such as standard contractual clauses."),
+            ("Contact", f"Questions or requests: {_brand().support_email or 'use the Help page'}."),
         ],
     })
 
@@ -1940,24 +2067,32 @@ def become_seller(request):
 
 
 @login_required
+@require_POST
 def update_fulfillment_status(request, item_id):
+    """Seller Center: change one item's step (packed, shipped, delivered)."""
+    from . import fulfilment
     seller, role = get_seller_account_for_user(request.user)
-    if not seller:
+    if not seller or seller.status != "approved":
+        messages.error(request, "Only approved sellers can update orders.")
         return redirect_back(request, "seller_orders")
-    item = get_object_or_404(OrderItem.objects.filter(Q(seller_account=seller) | Q(product__seller_account=seller)), pk=item_id)
+    item = get_object_or_404(OrderItem.objects.select_related("order"), pk=item_id, seller_account=seller)
     new_status = request.POST.get("fulfillment_status")
-    if request.method == "POST" and new_status in dict(OrderItem.FULFILLMENT_CHOICES):
-        if item.order.status == "cancelled":
-            messages.error(request, f"Order #{item.order_id} was cancelled - don't ship '{item.product_name}'.")
-            return redirect_back(request, "seller_orders")
-        if item.order.payment_status in ("pending", "failed"):
-            messages.error(request, f"Order #{item.order_id} hasn't been paid yet - wait before shipping.")
-            return redirect_back(request, "seller_orders")
-        item.fulfillment_status = new_status
-        item.save(update_fields=["fulfillment_status"])
-        moved = sync_order_status_from_items(item.order)
-        note = f" Order #{item.order_id} is now {moved} and the customer has been emailed." if moved else ""
-        messages.success(request, f"Marked '{item.product_name}' as {item.get_fulfillment_status_display()}.{note}")
+    if new_status not in dict(OrderItem.FULFILLMENT_CHOICES):
+        messages.error(request, "Please choose a valid status.")
+        return redirect_back(request, "seller_orders")
+    try:
+        changed, moved = fulfilment.set_items_status([item], new_status, user=request.user)
+    except fulfilment.FulfilmentError as exc:
+        messages.error(request, str(exc))
+        return redirect_back(request, "seller_orders")
+    if not changed:
+        messages.info(request, "Nothing to change.")
+    elif moved:
+        messages.success(request, f"Marked '{item.product_name}' as {dict(OrderItem.FULFILLMENT_CHOICES)[new_status].lower()}. "
+                                  f"Order #{item.order_id} is now {moved[0][1]} and the customer has been told.")
+    else:
+        told = " The customer has been told." if new_status in ("handed_to_courier", "delivered") else ""
+        messages.success(request, f"Marked '{item.product_name}' as {dict(OrderItem.FULFILLMENT_CHOICES)[new_status].lower()}.{told}")
     return redirect_back(request, "seller_orders")
 
 
@@ -2033,6 +2168,12 @@ def _product_fields_from_post(request):
         "discount_percent": discount, "stock": stock, "image_url": image_url,
         "description": request.POST.get("description", "").strip()[:10000],
         "bulk_min_qty": bulk_qty or None, "bulk_percent": bulk_pct,
+        "weight_grams": _parse_int(request.POST.get("weight_grams"), "Weight", minimum=1, maximum=100000, default=None),
+        "length_cm": _parse_decimal(request.POST.get("length_cm"), "Length", required=False),
+        "width_cm": _parse_decimal(request.POST.get("width_cm"), "Width", required=False),
+        "height_cm": _parse_decimal(request.POST.get("height_cm"), "Height", required=False),
+        "seo_title": request.POST.get("seo_title", "").strip()[:70],
+        "seo_description": " ".join(request.POST.get("seo_description", "").split())[:170],
         **_guide_fields_from_post(request),
     }
 
@@ -2223,7 +2364,14 @@ def seller_edit_product(request, pk):
 @require_POST
 def seller_delete_product(request, pk):
     seller, role = _approved_seller_or_404(request.user)
-    Product.objects.filter(pk=pk, seller_account=seller).delete()
+    product = get_object_or_404(Product, pk=pk, seller_account=seller)
+    if OrderItem.objects.filter(product=product).exists():
+        # Sold before: keep it for order history, reviews and returns, but
+        # take it off the shop for good.
+        Product.objects.filter(pk=product.pk).update(approval_status="archived", stock=0, is_flash_sale=False)
+    else:
+        product.delete()
+    AuditLog.objects.create(user=request.user, action=f"Seller {seller.display_name} removed product #{pk} ({product.name})"[:255])
     messages.success(request, "Product removed from your store.")
     return redirect_back(request, "seller_products")
 
@@ -2324,6 +2472,77 @@ def seller_document(request, seller_id, field):
         return redirect(file.url)  # short-lived signed URL
     from django.http import FileResponse
     return FileResponse(file.open("rb"), as_attachment=False, filename=file.name.rsplit("/", 1)[-1])
+
+
+def paypal_return(request, order_id):
+    """The shopper approved the payment on PayPal: capture it."""
+    from . import paypal
+    order = _order_access(request, order_id)
+    if request.GET.get("token") and order.paypal_order_id and request.GET["token"] != order.paypal_order_id:
+        raise Http404
+    try:
+        order, newly_paid = paypal.capture(order.id)
+    except paypal.PayPalError as exc:
+        messages.error(request, f"We couldn't confirm the PayPal payment yet ({exc}). If money was taken, the order updates automatically within minutes.")
+        return _orders_page(request, order)
+    if newly_paid:
+        _send_order_confirmation(request, order)
+        if order.user_id:
+            Notification.objects.create(user_id=order.user_id, message=f"Payment received for order #{order.id}.", link="/my-orders/")
+    if order.payment_status != "paid":
+        messages.error(request, "The PayPal payment wasn't completed. You can try again from My orders.")
+        return _orders_page(request, order)
+    return redirect("order_success", order_id=order.id)
+
+
+def paypal_cancel(request, order_id):
+    """The shopper went back from PayPal without paying."""
+    order = _order_access(request, order_id)
+    if order.payment_status == "pending" and order.status != "cancelled":
+        payments.release_unpaid_order(order.id)
+        _restore_cart_from_order(request, order)
+        messages.info(request, "PayPal payment cancelled - your cart is back. Choose how you'd like to pay.")
+        return redirect("cart")
+    return _orders_page(request, order)
+
+
+@csrf_exempt
+@require_POST
+def paypal_webhook(request):
+    """PayPal tells us about approved / completed / refunded payments. The
+    call is verified with PayPal, and the order is then re-checked with the
+    API before anything changes."""
+    import json as _json
+    from . import paypal
+    try:
+        event = _json.loads(request.body or b"{}")
+    except ValueError:
+        return HttpResponse(status=400)
+    if not paypal.verify_webhook(request, event):
+        return HttpResponse(status=400)
+    resource = event.get("resource") or {}
+    kind = event.get("event_type", "")
+    order = None
+    if kind.startswith("CHECKOUT.ORDER"):
+        order = Order.objects.filter(paypal_order_id=resource.get("id", "")).first()
+    elif kind.startswith("PAYMENT.CAPTURE"):
+        related = ((resource.get("supplementary_data") or {}).get("related_ids") or {}).get("order_id", "")
+        order = (Order.objects.filter(paypal_order_id=related).first() if related else None) \
+            or Order.objects.filter(paypal_capture_id=resource.get("id", "")).first()
+    if order and kind in ("CHECKOUT.ORDER.APPROVED", "PAYMENT.CAPTURE.COMPLETED"):
+        try:
+            order, newly_paid = paypal.capture(order.id)
+        except paypal.PayPalError:
+            return HttpResponse(status=503)  # PayPal retries
+        if newly_paid:
+            _send_order_confirmation(request, order)
+    elif order and kind == "PAYMENT.CAPTURE.REFUNDED" and order.payment_status == "paid" and order.status not in ("cancelled", "delivered"):
+        from .alerts import notify_staff
+        notify_staff(f"Order #{order.id} was refunded in PayPal. Cancel it here if it shouldn't ship.", link=f"/manage/orders/{order.id}/")
+    elif order and kind in ("PAYMENT.CAPTURE.DENIED", "PAYMENT.CAPTURE.REVERSED"):
+        from .alerts import notify_staff
+        notify_staff(f"PayPal reports {kind.split('.')[-1].lower()} payment for order #{order.id}. Don't ship until it's sorted.", link=f"/manage/orders/{order.id}/")
+    return HttpResponse(status=200)
 
 
 @login_required
@@ -2499,6 +2718,7 @@ def _send_cod_confirmation(request, order):
         "bees/emails/cod_confirm.html",
         {"order": order, "url": url, "hours": COD_CONFIRM_HOURS},
         order.contact_email,
+        lang=_order_lang(order),
     )
 
 

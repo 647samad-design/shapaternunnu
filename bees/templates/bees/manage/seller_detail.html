@@ -66,6 +66,18 @@
             </form>
             <p class="muted small" style="margin-top:8px;">The rate drops automatically as their lifetime sales grow{% if seller.active_plan.commission_discount %} and their {{ seller.active_plan.name }} plan takes {{ seller.active_plan.commission_discount|floatformat:"-2" }}% off{% endif %}.</p>
         </section>
+        {% if perf %}
+        <section class="panel" id="performance">
+            <div class="ph"><h2>Seller score</h2><span class="pill {% if perf.level == 'excellent' or perf.level == 'good' %}ok{% elif perf.level == 'fair' %}warn{% elif perf.level == 'at_risk' %}bad{% endif %}">{{ perf.score }}/100 · {{ perf.label }}</span></div>
+            <div class="list-row"><span>Orders (90 days)</span><strong>{{ perf.orders }}</strong></div>
+            <div class="list-row"><span>Shipped late</span><strong>{{ perf.late_pct }}% ({{ perf.late }})</strong></div>
+            <div class="list-row"><span>Auto-cancelled (not shipped)</span><strong>{{ perf.cancel_pct }}% ({{ perf.cancelled }})</strong></div>
+            <div class="list-row"><span>Refunded problem reports</span><strong>{{ perf.problem_pct }}% ({{ perf.problems }})</strong></div>
+            <div class="list-row"><span>Typical reply time</span><strong>{% if perf.reply_hours is not None %}{{ perf.reply_hours }} h{% else %}—{% endif %}</strong></div>
+            <div class="list-row"><span>Rating</span><strong>{% if perf.rating %}{{ perf.rating }} ★ ({{ perf.reviews }}){% else %}—{% endif %}</strong></div>
+            {% if perf.level == "at_risk" %}<p class="small" style="margin:10px 0 0;color:var(--sale);">This seller is at risk. Consider a warning, or suspend them above if it doesn't improve.</p>{% endif %}
+        </section>
+        {% endif %}
         <section class="panel" id="badges">
             <h2>Badges</h2>
             <div class="list-row"><span><span class="seller-badge verified">✓ Verified seller</span></span>

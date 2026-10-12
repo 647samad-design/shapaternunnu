@@ -1,0 +1,13 @@
+<details class="ship-fields" {% if p.weight_grams %}open{% endif %}>
+    <summary><strong>Shipping size &amp; weight</strong> <span class="muted small">(for courier labels and exact rates)</span></summary>
+    <div class="ship-grid">
+        <div class="field"><label for="pf_w">Packed weight (grams)</label><input type="number" id="pf_w" name="weight_grams" min="1" max="100000" step="1" value="{{ p.weight_grams|default_if_none:'' }}" placeholder="e.g. 450"></div>
+        <div class="field"><label for="pf_l">Length (cm)</label><input type="number" id="pf_l" name="length_cm" min="0" max="500" step="0.1" value="{{ p.length_cm|default_if_none:'' }}"></div>
+        <div class="field"><label for="pf_wd">Width (cm)</label><input type="number" id="pf_wd" name="width_cm" min="0" max="500" step="0.1" value="{{ p.width_cm|default_if_none:'' }}"></div>
+        <div class="field"><label for="pf_h">Height (cm)</label><input type="number" id="pf_h" name="height_cm" min="0" max="500" step="0.1" value="{{ p.height_cm|default_if_none:'' }}"></div>
+    </div>
+</details>
+<style>
+    .ship-fields summary { cursor: pointer; }
+    .ship-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 10px; }
+</style>

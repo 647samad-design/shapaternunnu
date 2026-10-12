@@ -12,6 +12,8 @@
             <form method="post">{% csrf_token %}<input type="hidden" name="action" value="emails">
                 <label class="pay-option" style="max-width:560px;"><input type="checkbox" name="marketing" value="1" {% if subscribed %}checked{% endif %}><span><strong>Offers and new arrivals</strong><span class="muted">About one email a week. Unsubscribe any time.</span></span></label>
                 <label class="pay-option" style="max-width:560px;"><input type="checkbox" name="cart_reminders" value="1" {% if cart_reminders %}checked{% endif %}><span><strong>Cart reminders</strong><span class="muted">One email if you leave items in your cart for a day.</span></span></label>
+                <label class="pay-option" style="max-width:560px;"><input type="checkbox" name="price_drop_alerts" value="1" {% if price_drop_alerts %}checked{% endif %}><span><strong>Price drops</strong><span class="muted">An email when something in your wishlist gets cheaper.</span></span></label>
+                <div class="field" style="max-width:560px;margin-top:10px;"><label for="email-lang">Email language</label><select id="email-lang" name="language"><option value="">English</option>{% for code, name in language_names.items %}{% if code != "en" %}<option value="{{ code }}" {% if email_language == code %}selected{% endif %}>{{ name }}</option>{% endif %}{% endfor %}</select></div>
                 <button type="submit" class="btn btn-secondary" style="margin-top:12px;">Save preferences</button>
             </form>
         </section>

@@ -1,0 +1,26 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Report a problem — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap"><div class="auth-shell wide"><div class="panel">
+    <h1>Report a problem</h1>
+    <p class="lede">Tell us what happened. The seller has {{ reply_days }} day{{ reply_days|pluralize }} to answer; if you can't agree, our team decides - and refunds you if things went wrong.</p>
+    <div style="display:flex;gap:14px;align-items:center;padding:14px;border-radius:var(--radius);background:var(--surface-2);margin-bottom:22px;">
+        {% if item.product %}<img src="{{ item.product.image_url }}" alt="" style="width:64px;height:64px;border-radius:var(--radius-sm);object-fit:cover;">{% endif %}
+        <div><strong data-no-translate>{{ item.product_name }}</strong><div class="muted small">Order #{{ item.order.id }} · Qty {{ item.quantity }}{% if item.seller_account %} · <span data-no-translate>{{ item.seller_account.display_name }}</span>{% endif %}</div></div>
+    </div>
+    <form method="post" enctype="multipart/form-data" class="stack">
+        {% csrf_token %}
+        <fieldset style="border:0;padding:0;margin:0;display:grid;gap:8px;">
+            <legend class="label" style="margin-bottom:6px;">What went wrong?</legend>
+            {% for value, label in reasons %}
+            <label class="radio-card" style="display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);cursor:pointer;"><input type="radio" name="reason" value="{{ value }}" required {% if forloop.first %}checked{% endif %}> {{ label }}</label>
+            {% endfor %}
+        </fieldset>
+        <div class="field"><label for="details">Details</label><textarea id="details" name="details" rows="5" maxlength="2000" minlength="10" required placeholder="What happened? When did it arrive? What's wrong with it?"></textarea></div>
+        <div class="field"><label for="photo">Photo (optional)</label><input id="photo" type="file" name="photo" accept="image/jpeg,image/png,image/webp"><span class="muted small">A photo of the damage or the wrong item helps us decide faster. Only the seller and our team can see it.</span></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;"><button class="btn btn-primary" type="submit">Send report</button><a class="btn btn-ghost" href="{% url 'my_orders' %}">Cancel</a></div>
+    </form>
+</div></div></div>
+{% endblock %}

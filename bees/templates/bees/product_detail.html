@@ -1,33 +1,21 @@
 {% extends "bees/base.html" %}
 {% load bees_extras %}
-{% block title %}{{ product.name }} — {{ brand.site_name }}{% endblock %}
-{% block meta_description %}{{ product.name }} for {{ product.price|money }} at {{ brand.site_name }}.{% if product.discount_percent %} Save {{ product.discount_percent }}%.{% endif %} {{ product.description|truncatewords:20 }}{% endblock %}
+{% block title %}{% if product.seo_title %}{{ product.seo_title }}{% else %}{{ product.name }} — {{ brand.site_name }}{% endif %}{% endblock %}
+{% block meta_description %}{% if product.seo_description %}{{ product.seo_description }}{% else %}{{ product.name }} for {{ product.price|money }} at {{ brand.site_name }}.{% if product.discount_percent %} Save {{ product.discount_percent }}%.{% endif %} {{ product.description|truncatewords:20 }}{% endif %}{% endblock %}
 {% block og_type %}product{% endblock %}
 {% block og_title %}{{ product.name }} — {{ product.price|money }}{% endblock %}
 {% block og_description %}{{ product.description|truncatewords:25 }}{% endblock %}
 {% block og_image_tag %}<meta property="og:image" content="{{ product.image_url|abs_url }}">{% endblock %}
 {% block structured_data %}
-<script type="application/ld+json">
-{
-    "@context": "https://schema.org",
-    "@type": "Product",
-    "name": "{{ product.name|escapejs }}",
-    "image": "{{ product.image_url|abs_url|escapejs }}",
-    "description": "{{ product.description|truncatewords:40|escapejs }}",
-    "sku": "{{ product.id }}",
-    "brand": {"@type": "Brand", "name": "{{ product.seller_name|escapejs }}"},
-    "offers": {
-        "@type": "Offer",
-        "url": "{{ request.scheme }}://{{ request.get_host }}{{ request.path }}",
-        "priceCurrency": "{{ store_currency }}",
-        "price": "{{ product.price }}",
-        "availability": "{% if product.stock > 0 %}https://schema.org/InStock{% else %}https://schema.org/OutOfStock{% endif %}"
-    }{% if product.rating_count %},
-    "aggregateRating": {"@type": "AggregateRating", "ratingValue": "{{ product.average_rating }}", "reviewCount": "{{ product.rating_count }}"}{% endif %}
-}
-</script>
+<script type="application/ld+json">{{ product_ld|jsonld }}</script>
+<script type="application/ld+json">{{ breadcrumb_ld|jsonld }}</script>
 {% endblock %}
+{% block head_extra %}<link rel="preload" as="image" href="{{ product.image_url }}" fetchpriority="high">{% endblock %}
+{% block og_extra %}<meta property="product:price:amount" content="{{ product.price }}"><meta property="product:price:currency" content="{{ store_currency }}"><meta property="product:availability" content="{% if product.stock > 0 %}in stock{% else %}out of stock{% endif %}">{% endblock %}
+{% block twitter_title %}{{ product.seo_title|default:product.name }}{% endblock %}
 {% block extra_css %}
+    .seller-reply { margin: 8px 0 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); border-inline-start: 3px solid var(--brand); font-size: .93rem; }
+    .seller-reply p { margin: 4px 0 0; }
     .crumbs { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.95rem; color: var(--muted); margin-bottom: 20px; }
     .crumbs a { text-decoration: none; }
     .crumbs a:hover { text-decoration: underline; color: var(--ink); }
@@ -134,7 +122,7 @@
     <div class="pdp">
         <div>
             <div class="gallery-main">
-                <img src="{{ product.image_url }}" alt="{{ product.name }}" id="main-image">
+                <img src="{{ product.image_url }}" alt="{{ product.name }}" id="main-image" fetchpriority="high" decoding="async" width="800" height="800">
             </div>
             {% if gallery|length > 1 %}
             <div class="thumbs" role="group" aria-label="Product images">
@@ -146,7 +134,7 @@
         </div>
 
         <div class="buybox">
-            <h1>{{ product.name }}</h1>
+            <h1>{{ product.name }}</h1>{% if product.approval_status == "archived" %}<div class="callout" style="margin:8px 0;">This product is no longer sold. You can still review it if you bought it.</div>{% endif %}
             {% if product.seller_name %}<p class="seller-line">Sold by <a href="{% url 'store_page' product.seller_name %}" data-no-translate>{{ product.seller_name }}</a>{% if product.seller_account.has_badge %} <span class="pro-badge">★ Pro seller</span>{% endif %}{% if product.seller_account.verified_at %} <span class="seller-badge verified">✓ {{ t.verified_seller }}</span>{% endif %}{% if product.seller_account.top_seller %} <span class="seller-badge top">★ {{ t.top_seller }}</span>{% endif %}</p>{% endif %}
             {% if product.rating_count %}
             <div class="rating-line"><span class="stars" aria-hidden="true">{{ product.average_rating|stars }}</span><strong>{{ product.average_rating }}</strong><a href="#reviews">{{ product.rating_count }} review{{ product.rating_count|pluralize }}</a></div>
@@ -305,7 +293,7 @@
                 </div>
                 {% endif %}
                 {% if can_review %}
-                <form method="post" class="stack">
+                <form method="post" class="stack" id="write-review" style="scroll-margin-top:110px;">
                     {% csrf_token %}
                     <fieldset style="border:0;">
                         <legend class="label" style="margin-bottom:6px;">Your rating</legend>
@@ -337,6 +325,7 @@
                     </div>
                     <span class="muted small">{{ review.created_at|date:"M j, Y" }}</span>
                     <p data-no-translate>{{ review.comment }}</p>
+                    {% if review.seller_reply %}<div class="seller-reply"><strong>Response from {% if product.seller_account %}<span data-no-translate>{{ product.seller_account.display_name }}</span>{% else %}{{ brand.site_name }}{% endif %}</strong><p data-no-translate>{{ review.seller_reply }}</p></div>{% endif %}
                 </article>
                 {% empty %}
                 <p class="muted">{{ t.no_reviews }}</p>

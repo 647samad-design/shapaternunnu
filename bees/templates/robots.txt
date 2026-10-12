@@ -18,5 +18,13 @@ Disallow: /signup/
 Disallow: /seller/
 Disallow: /owner/
 Disallow: /search/
+Disallow: /messages/
+Disallow: /problems/
+Disallow: /live/
+Disallow: /shipping/
+Disallow: /set-language/
+Disallow: /set-currency/
+Disallow: /*?*sort=
+Disallow: /*?*q=
 
 Sitemap: {{ request.scheme }}://{{ request.get_host }}/sitemap.xml

@@ -2,6 +2,8 @@
 {% load bees_extras %}
 {% block page_title %}Earnings & payouts{% endblock %}
 {% block page_css %}
+    .stmt-form { display: flex; gap: 6px; align-items: center; margin: 0; }
+    .stmt-form select { width: auto; min-height: 36px; padding: 4px 8px; }
     .flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
     .flow > div { padding: 16px 18px; border-left: 1px solid var(--line); }
     .flow > div:first-child { border-left: 0; }
@@ -18,7 +20,8 @@
     <div><h1>Earnings &amp; payouts</h1><p>Every sale, the commission taken and what you keep - for the last {{ period.label }}.</p></div>
     <div class="actions">
         <div class="tabs" role="group" aria-label="Period">{% for key, label in ranges %}<a href="?range={{ key }}" class="{% if period.key == key %}on{% endif %}">{{ label }}</a>{% endfor %}</div>
-        <a class="btn btn-secondary btn-sm" href="?range={{ period.key }}&export=csv" data-no-prerender>Download statement</a>
+        <a class="btn btn-secondary btn-sm" href="?range={{ period.key }}&export=csv" data-no-prerender>Download CSV</a>
+        {% if statement_months %}<form method="get" action="{% url 'seller_statement' %}" class="stmt-form"><label class="sr-only" for="stmt-month">Month</label><select id="stmt-month" name="month">{% for m in statement_months %}<option value="{{ m }}">{{ m }}</option>{% endfor %}</select><button class="btn btn-primary btn-sm" type="submit">Monthly statement (PDF)</button></form>{% endif %}
     </div>
 </div>
 
@@ -34,7 +37,7 @@
             <span class="muted small">Available for payout</span>
             <div class="big">{{ balance.available|money }}</div>
             <dl class="kv" style="margin-top:14px;">
-                <dt>On the way</dt><dd>{{ balance.pending|money }} <span class="muted small">from orders not delivered yet</span></dd>
+                <dt>On hold</dt><dd>{{ balance.pending|money }} <span class="muted small">until delivered + {{ brand.return_days }}-day return window</span></dd>
                 <dt>Paid to you</dt><dd>{{ balance.paid|money }}</dd>
                 <dt>Earned all time</dt><dd>{{ balance.earned|money }}</dd>
             </dl>

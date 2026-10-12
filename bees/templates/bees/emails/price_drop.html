@@ -1,0 +1,19 @@
+{% extends "bees/emails/_base_email.html" %}
+{% load bees_extras %}
+{% block email_body %}{% site_brand as b %}
+    <h1 style="margin:0 0 8px;font-size:24px;">Something you saved just got cheaper</h1>
+    <p style="margin:0 0 6px;color:#56606B;">Hi <span data-no-translate>{{ user.first_name|default:user.username }}</span>,</p>
+    <p style="margin:0 0 20px;color:#56606B;">Good news - the price dropped on something in your wishlist.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+        {% for i in items %}
+        <tr>
+            <td style="padding:10px 0;border-bottom:1px solid #DDE2E6;width:64px;">{% if i.product.image_url %}<img src="{{ i.product.image_url|abs_url }}" alt="" width="56" height="56" style="display:block;width:56px;height:56px;object-fit:cover;border-radius:8px;">{% endif %}</td>
+            <td style="padding:10px 12px;border-bottom:1px solid #DDE2E6;"><a href="{{ i.url }}" style="color:#141A1F;font-weight:bold;text-decoration:none;" data-no-translate>{{ i.product.name }}</a><br>
+                <span style="color:#56606B;font-size:14px;">Was</span> <span style="color:#56606B;font-size:14px;text-decoration:line-through;">{{ i.old|money }}</span></td>
+            <td style="padding:10px 0;border-bottom:1px solid #DDE2E6;text-align:right;white-space:nowrap;"><span style="font-size:18px;font-weight:bold;color:#1E7B4F;">{{ i.new|money }}</span><br><span style="font-size:13px;color:#1E7B4F;font-weight:bold;">−{{ i.pct }}%</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    <a href="{{ wishlist_url }}" style="display:inline-block;background:{{ b.primary_color }};color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:8px;font-weight:bold;">Shop now</a>
+    <p style="margin:24px 0 0;color:#56606B;font-size:13px;"><a href="{{ prefs_url }}" style="color:#56606B;">Stop price-drop emails</a></p>
+{% endblock %}

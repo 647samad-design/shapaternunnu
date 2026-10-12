@@ -10,22 +10,27 @@
     {% if brand.favicon_url %}<link rel="icon" href="{{ brand.favicon_url }}">{% elif brand.logo %}<link rel="icon" href="{{ brand.logo }}">{% endif %}
     <title>{% block title %}{{ brand.site_name }} — {{ brand.tagline }}{% endblock %}</title>
     <meta name="description" content="{% block meta_description %}{{ brand.site_name }}: {{ brand.tagline }} Secure checkout, fast shipping and easy returns.{% endblock %}">
-    <link rel="canonical" href="{% block canonical_url %}{{ request.scheme }}://{{ request.get_host }}{{ request.path }}{% endblock %}">
-    <meta name="robots" content="{% block robots_meta %}index, follow{% endblock %}">
+    {% seo_urls as seo %}
+    <link rel="canonical" href="{% block canonical_url %}{{ seo.canonical }}{% endblock %}">
+    {% for tag, href in seo.alternates %}<link rel="alternate" hreflang="{{ tag }}" href="{{ href }}">
+    {% endfor %}<meta name="robots" content="{% block robots_meta %}{% if seo.index %}index, follow, max-image-preview:large{% else %}noindex, follow{% endif %}{% endblock %}">
+    {% if brand.google_site_verification %}<meta name="google-site-verification" content="{{ brand.google_site_verification }}">{% endif %}
 
     <meta property="og:type" content="{% block og_type %}website{% endblock %}">
     <meta property="og:site_name" content="{{ brand.site_name }}">
     <meta property="og:title" content="{% block og_title %}{{ brand.site_name }}{% endblock %}">
     <meta property="og:description" content="{% block og_description %}{{ brand.tagline }}{% endblock %}">
-    <meta property="og:url" content="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}">
+    <meta property="og:url" content="{{ seo.canonical }}">
+    <meta property="og:locale" content="{% if current_lang == 'roman' %}ur_PK{% elif current_lang == 'ur' %}ur_PK{% elif current_lang == 'ar' %}ar_AR{% elif current_lang == 'es' %}es_ES{% elif current_lang == 'fr' %}fr_FR{% else %}en_US{% endif %}">
     {% block og_image_tag %}{% if brand.logo %}<meta property="og:image" content="{{ brand.logo|abs_url }}">{% endif %}{% endblock %}
+    {% block og_extra %}{% endblock %}
     <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{% block twitter_title %}{{ brand.site_name }}{% endblock %}">
 
-    {% block structured_data %}
-    <script type="application/ld+json">
-    {"@context": "https://schema.org", "@type": "Organization", "name": "{{ brand.site_name|escapejs }}", "url": "{{ request.scheme }}://{{ request.get_host }}/"{% if brand.logo %}, "logo": "{{ brand.logo|escapejs }}"{% endif %}}
-    </script>
-    {% endblock %}
+    {% site_jsonld as site_ld %}
+    <script type="application/ld+json">{{ site_ld|jsonld }}</script>
+    {% block structured_data %}{% endblock %}
+    {% block head_extra %}{% endblock %}
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -273,6 +278,11 @@
         .icon-btn .count { position: absolute; top: 3px; left: 18px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 0.75rem; font-weight: 700; display: grid; place-items: center; transition: transform .2s ease; }
         .icon-btn .count.pulse { transform: scale(1.3); }
         [data-live][hidden] { display: none !important; }
+        .cookie-bar { position: fixed; inset-inline: 12px; bottom: 12px; z-index: 900; max-width: 720px; margin-inline: auto; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; padding: 14px 16px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 18px 50px rgba(20,26,31,.22); }
+        .cookie-bar[hidden] { display: none; }
+        .cookie-bar p { margin: 0; flex: 1 1 320px; font-size: .92rem; }
+        .cookie-bar p strong { margin-inline-end: 6px; }
+        .cookie-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .icon-label { font-size: 0.95rem; }
         details.menu { position: relative; }
         details.menu > summary { list-style: none; }
@@ -525,13 +535,14 @@
                     <summary class="icon-btn" aria-label="Account menu">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
                         <span class="icon-label">{{ user.first_name|default:user.username|truncatechars:14 }}</span>
-                        <span class="count" data-live="alerts" {% if not unread_notifications_count and not buyer_unread_messages %}hidden{% endif %}>{{ unread_notifications_count|add:buyer_unread_messages }}</span>
+                        <span class="count" data-live="alerts" {% if not unread_notifications_count and not header_messages %}hidden{% endif %}>{{ unread_notifications_count|add:header_messages }}</span>
                     </summary>
                     <div class="menu-panel">
                         <div class="menu-head" data-no-translate><strong>{{ user.get_full_name|default:user.username }}</strong><span class="muted small">{{ user.email }}</span></div>
                         <a href="{% url 'my_orders' %}">{{ t.my_orders }}</a>
                         <a href="{% url 'notifications_list' %}">Notifications<span data-live-paren="notifications">{% if unread_notifications_count %} ({{ unread_notifications_count }}){% endif %}</span></a>
-                        <a href="{% url 'messages_inbox' %}">{{ t.messages }}<span data-live-paren="messages">{% if buyer_unread_messages %} ({{ buyer_unread_messages }}){% endif %}</span></a>
+                        {% if is_seller %}<a href="{% url 'seller_messages' %}"><strong>Customer messages</strong><span data-live-paren="seller_messages">{% if seller_unread_messages %} ({{ seller_unread_messages }}){% endif %}</span></a>{% endif %}
+                        <a href="{% url 'messages_inbox' %}">{% if is_seller %}My messages to sellers{% else %}{{ t.messages }}{% endif %}<span data-live-paren="messages">{% if buyer_unread_messages %} ({{ buyer_unread_messages }}){% endif %}</span></a>
                         {% if brand.referral_enabled %}<a href="{% url 'referrals' %}">{{ t.invite_friends }}</a>{% endif %}
                         <a href="{% url 'profile' %}">Account &amp; addresses</a>
                         <a href="{% url 'payment_methods' %}">Saved cards</a>
@@ -644,6 +655,7 @@
                         <li><a href="{% url 'sell_on_bees' %}">{{ t.sell_on }}</a></li>
                         <li><a href="{% url 'terms_page' %}">{{ t.terms }}</a></li>
                         <li><a href="{% url 'privacy_page' %}">{{ t.privacy }}</a></li>
+                        {% if brand.cookie_banner %}<li><a href="#" data-cookie-settings>Cookie settings</a></li>{% endif %}
                     </ul>
                 </div>
             </div>
@@ -684,6 +696,15 @@
             </div>
         </div>
     </footer>
+    {% if brand.cookie_banner %}
+    <div class="cookie-bar" id="cookie-bar" role="dialog" aria-live="polite" aria-label="Cookies" hidden>
+        <p><strong>Cookies</strong> We use essential cookies to run the store (sign-in, cart, language). {% if brand.ga4_id or brand.meta_pixel_id %}With your OK we also use analytics{% if brand.meta_pixel_id %} and marketing{% endif %} cookies to improve it. {% endif %}<a href="{% url 'privacy_page' %}">Privacy policy</a></p>
+        <div class="cookie-actions">
+            <button type="button" class="btn btn-ghost btn-sm" data-consent="essential">Only essential</button>
+            <button type="button" class="btn btn-primary btn-sm" data-consent="all">Accept all</button>
+        </div>
+    </div>
+    {% endif %}
     {% endblock %}
 
     <div class="toasts" id="toast-container" aria-live="polite">
@@ -730,13 +751,19 @@
             setTimeout(() => t.classList.add('show'), delay);
             setTimeout(() => hideToast(t), delay + life);
         }
-        function showToast(text, type) {
+        function showToast(text, type, link) {
             const c = document.getElementById('toast-container');
             const t = document.createElement('div');
             t.className = 'toast ' + (type || 'success');
             t.textContent = text;
+            if (link) {
+                t.style.cursor = 'pointer';
+                t.title = 'Open';
+                t.addEventListener('click', () => { location.href = link; });
+                const go = document.createElement('span'); go.className = 'toast-go'; go.textContent = ' →'; go.setAttribute('aria-hidden', 'true'); t.appendChild(go);
+            }
             c.appendChild(t);
-            armToast(t, 20, 3800);
+            armToast(t, 20, link ? 7000 : 3800);
         }
         document.querySelectorAll('#toast-container .toast').forEach(function (t, i) {
             armToast(t, 80 + i * 90, (t.textContent.length > 90 ? 6500 : 4500));
@@ -1056,7 +1083,7 @@
         function W(k) { var el = document.querySelector('#lm-words [data-w="' + k + '"]'); return el ? el.textContent : k; }
         var baseTitle = document.title.replace(/^\(\d+\)\s*/, '');
         function paint(d) {
-            var total = d.notifications + d.messages, all = total + d.seller_messages;
+            var total = d.notifications + d.messages + d.seller_messages, all = total;
             document.querySelectorAll('[data-live]').forEach(function (el) {
                 var key = el.dataset.live, n = key === 'alerts' ? total : (d[key] || 0);
                 if (String(n) !== el.textContent.trim()) { el.classList.add('pulse'); setTimeout(function () { el.classList.remove('pulse'); }, 400); }
@@ -1081,11 +1108,12 @@
                 if (news.length) {
                     var top = news[news.length - 1];
                     Alert.sound();
-                    if (!document.hidden && window.showToast) showToast(top.text + (news.length > 1 ? ' (+' + (news.length - 1) + ' more)' : ''), 'success');
+                    if (!document.hidden && window.showToast) showToast(top.text + (news.length > 1 ? ' (+' + (news.length - 1) + ' more)' : ''), 'success', top.link || '{% url "notifications_list" %}');
                     if (document.hidden) Alert.desktop(top.text, '', top.link);
                 } else if (moreMsgs && !onChat) {
                     Alert.sound();
-                    if (!document.hidden && window.showToast) showToast(W('new_message'), 'success');
+                    var msgLink = d.seller_messages > counts.seller_messages ? '{% url "seller_messages" %}' : '{% url "messages_inbox" %}';
+                    if (!document.hidden && window.showToast) showToast(W('new_message'), 'success', msgLink);
                     if (document.hidden) Alert.desktop(W('new_message'), '', d.seller_messages > counts.seller_messages ? '{% url "seller_messages" %}' : '{% url "messages_inbox" %}');
                 }
                 if (d.messages !== counts.messages || d.seller_messages !== counts.seller_messages) refreshList();
@@ -1110,6 +1138,35 @@
     })();
     </script>
     {% endif %}
+    <script>
+    /* Cookie consent: analytics / ad pixels load only after "Accept all". */
+    (function () {
+        var GA = '{{ brand.ga4_id|escapejs }}', PIXEL = '{{ brand.meta_pixel_id|escapejs }}', BANNER = {{ brand.cookie_banner|yesno:"true,false" }};
+        function get() { var m = document.cookie.match(/(?:^|; )lm_consent=([^;]+)/); return m ? m[1] : ''; }
+        function set(v) { document.cookie = 'lm_consent=' + v + '; Max-Age=' + 60 * 60 * 24 * 180 + '; Path=/; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : ''); }
+        function load() {
+            if (GA && !window.gtag) {
+                var s = document.createElement('script'); s.async = true; s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(GA); document.head.appendChild(s);
+                window.dataLayer = window.dataLayer || []; window.gtag = function () { dataLayer.push(arguments); };
+                gtag('js', new Date()); gtag('config', GA, { anonymize_ip: true });
+            }
+            if (PIXEL && !window.fbq) {
+                !function (f, b, e, v, n, t, s) { if (f.fbq) return; n = f.fbq = function () { n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments); }; if (!f._fbq) f._fbq = n; n.push = n; n.loaded = !0; n.version = '2.0'; n.queue = []; t = b.createElement(e); t.async = !0; t.src = v; s = b.getElementsByTagName(e)[0]; s.parentNode.insertBefore(t, s); }(window, document, 'script', 'https://connect.facebook.net/en_US/fbevents.js');
+                fbq('init', PIXEL); fbq('track', 'PageView');
+            }
+        }
+        var bar = document.getElementById('cookie-bar');
+        var choice = get();
+        if (!BANNER || choice === 'all') load();
+        if (bar && !choice) bar.hidden = false;
+        document.querySelectorAll('[data-consent]').forEach(function (b) {
+            b.addEventListener('click', function () { set(b.dataset.consent); bar.hidden = true; if (b.dataset.consent === 'all') load(); });
+        });
+        document.querySelectorAll('[data-cookie-settings]').forEach(function (a) {
+            a.addEventListener('click', function (e) { e.preventDefault(); if (bar) { bar.hidden = false; bar.querySelector('[data-consent="all"]').focus(); } });
+        });
+    })();
+    </script>
     <script>if ('serviceWorker' in navigator && location.protocol === 'https:') { window.addEventListener('load', function () { navigator.serviceWorker.register('{% url "service_worker" %}').catch(function () {}); }); }</script>
     {% block extra_js %}{% endblock %}
 </body>

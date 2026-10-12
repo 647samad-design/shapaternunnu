@@ -1,0 +1,33 @@
+{% extends "bees/seller/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Problems{% endblock %}
+{% block seller %}
+<div class="adm-head"><div><h1>Problems</h1><p>Customers' reports about an order ("didn't arrive", "damaged"...). Answer within {{ brand.claim_reply_days }} day{{ brand.claim_reply_days|pluralize }} - after that {{ brand.site_name }} decides. Earnings for an item stay on hold while a report is open.</p></div></div>
+<div class="tabs" role="group" aria-label="Filter"><a href="?show=open" class="{% if show == 'open' %}on{% endif %}">Open{% if open_count %} ({{ open_count }}){% endif %}</a><a href="?show=all" class="{% if show == 'all' %}on{% endif %}">All</a></div>
+<div class="col-stack tight">
+    {% for c in claims %}
+    <section class="panel panel-tight">
+        <div class="adm-head" style="align-items:flex-start;">
+            <div><strong>{{ c.order_item.product_name }}</strong> · {{ c.get_reason_display }}
+                <div class="muted small"><a class="link" href="{% url 'seller_order' c.order_item.order_id %}">Order #{{ c.order_item.order_id }}</a> · {{ c.user.first_name|default:c.user.username }} · {{ c.created_at|date:"M j, Y" }}{% if c.status == "open" %} · answer by {{ c.created_at|date_add_days:brand.claim_reply_days|date:"M j" }}{% endif %}</div>
+            </div>
+            <span class="pill {% if c.status == 'open' %}warn{% elif c.status == 'refunded' %}bad{% elif c.is_open %}info{% endif %}">{{ c.get_status_display }}</span>
+        </div>
+        <p style="margin-top:8px;white-space:pre-line;">“{{ c.details }}”</p>
+        {% if c.photo %}<a href="{% url 'claim_photo' c.id %}" target="_blank" rel="noopener" class="link small">View the customer's photo</a>{% endif %}
+        {% if c.seller_reply %}<p class="muted small" style="margin-top:8px;">Your answer: {{ c.seller_reply }}{% if c.seller_offers_refund %} (you offered a refund){% endif %}</p>{% endif %}
+        {% if c.decision_note %}<p class="muted small">Store decision: {{ c.decision_note }}</p>{% endif %}
+        {% if c.is_open and not c.seller_offers_refund %}
+        <form method="post" style="margin-top:12px;display:grid;gap:8px;">{% csrf_token %}<input type="hidden" name="id" value="{{ c.id }}">
+            <label for="r{{ c.id }}" class="sr-only">Your answer</label>
+            <textarea id="r{{ c.id }}" name="reply" rows="3" maxlength="2000" required placeholder="Explain what happened, share tracking proof, or offer a solution">{{ c.seller_reply }}</textarea>
+            <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="offer_refund" value="1"> I agree to refund the customer for this item</label>
+            <div><button class="btn btn-primary btn-sm" type="submit">{% if c.seller_reply %}Update answer{% else %}Send answer{% endif %}</button></div>
+        </form>
+        {% endif %}
+    </section>
+    {% empty %}
+    <section class="panel empty"><h2>No problems</h2><p>{% if show == 'open' %}Nothing to answer right now. 🎉{% else %}No reports yet.{% endif %}</p></section>
+    {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,31 @@
+<details class="seo-fields" {% if p.seo_title or p.seo_description %}open{% endif %}>
+    <summary><strong>Google search listing</strong> <span class="muted small">(optional - we fill it in automatically)</span></summary>
+    <div class="seo-grid">
+        <div class="field"><label for="pf_seot">SEO title <span class="muted small" data-count-for="pf_seot"></span></label><input id="pf_seot" name="seo_title" maxlength="70" value="{{ p.seo_title|default:'' }}" placeholder="e.g. Handmade Ceramic Mug, 350 ml - Dishwasher Safe"></div>
+        <div class="field"><label for="pf_seod">SEO description <span class="muted small" data-count-for="pf_seod"></span></label><textarea id="pf_seod" name="seo_description" maxlength="170" rows="2" placeholder="One or two sentences shoppers see under the title in Google.">{{ p.seo_description|default:'' }}</textarea></div>
+        <div class="serp" aria-hidden="true"><span class="serp-url">{{ request.get_host }} › product</span><span class="serp-title" data-serp-title>{{ p.seo_title|default:"Your product title" }}</span><span class="serp-desc" data-serp-desc>{{ p.seo_description|default:"Your product description appears here." }}</span></div>
+    </div>
+</details>
+<style>
+    .seo-fields summary { cursor: pointer; }
+    .seo-grid { display: grid; gap: 10px; margin-top: 10px; }
+    .serp { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; font-family: Arial, sans-serif; max-width: 600px; }
+    .serp-url { font-size: 12px; color: #202124; }
+    .serp-title { font-size: 19px; color: #1a0dab; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .serp-desc { font-size: 13px; color: #4d5156; }
+</style>
+<script>
+(function () {
+    var t = document.getElementById('pf_seot'), d = document.getElementById('pf_seod');
+    if (!t || !d) return;
+    var name = document.querySelector('[name=name]');
+    function sync() {
+        document.querySelector('[data-serp-title]').textContent = t.value || (name && name.value) || 'Your product title';
+        var desc = document.querySelector('[name=description]');
+        document.querySelector('[data-serp-desc]').textContent = (d.value || (desc && desc.value) || 'Your product description appears here.').slice(0, 160);
+        document.querySelectorAll('[data-count-for]').forEach(function (c) { var el = document.getElementById(c.dataset.countFor); c.textContent = el.value.length + '/' + el.maxLength; });
+    }
+    [t, d, name].forEach(function (el) { if (el) el.addEventListener('input', sync); });
+    sync();
+})();
+</script>

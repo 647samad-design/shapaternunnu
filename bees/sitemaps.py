@@ -8,10 +8,13 @@ class ProductSitemap(Sitemap):
     priority = 0.8
 
     def items(self):
-        return Product.objects.live()
+        return Product.objects.live().order_by("-id")
 
     def location(self, obj):
         return reverse("product_detail", args=[obj.id])
+
+    def lastmod(self, obj):
+        return obj.updated_at or obj.created_at
 
 
 class CategorySitemap(Sitemap):
@@ -36,3 +39,15 @@ class StaticViewSitemap(Sitemap):
 
     def location(self, item):
         return reverse(item)
+
+
+class SellerSitemap(Sitemap):
+    changefreq = "weekly"
+    priority = 0.6
+
+    def items(self):
+        from .models import SellerAccount
+        return [s for s in SellerAccount.objects.filter(status="approved", vacation_mode=False) if s.display_name]
+
+    def location(self, obj):
+        return reverse("store_page", args=[obj.display_name])

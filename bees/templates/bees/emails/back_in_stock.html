@@ -2,7 +2,8 @@
 {% load bees_extras %}
 {% block email_body %}{% site_brand as b %}
     <h1 style="margin:0 0 8px;font-size:24px;">It's back!</h1>
-    <p style="margin:0 0 20px;color:#56606B;">You asked us to let you know: <strong style="color:#141A1F;">{{ name }}</strong> is back in stock. Popular items can sell out again quickly.</p>
+    <p style="margin:0 0 20px;color:#56606B;">You asked us to let you know - this is back in stock. Popular items can sell out again quickly.</p>
+    <p style="margin:0 0 16px;font-weight:bold;" data-no-translate>{{ name }}</p>
     {% if product.image_url %}<img src="{{ product.image_url|abs_url }}" alt="" width="160" style="display:block;width:160px;height:160px;object-fit:cover;border-radius:10px;margin-bottom:20px;">{% endif %}
     <p style="margin:0 0 24px;font-size:18px;font-weight:bold;">{{ product.price|money }}</p>
     <a href="{{ url }}" style="display:inline-block;background:{{ b.primary_color }};color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:8px;font-weight:bold;">Shop now</a>

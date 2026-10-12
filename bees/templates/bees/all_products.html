@@ -1,4 +1,6 @@
 {% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block structured_data %}{% listing_jsonld products t.all_products as list_ld %}<script type="application/ld+json">{{ list_ld|jsonld }}</script>{% endblock %}
 {% block title %}All products — {{ brand.site_name }}{% endblock %}
 {% block meta_description %}Browse every product at {{ brand.site_name }}: beauty, electronics, fashion, home and more from trusted sellers.{% endblock %}
 {% block content %}

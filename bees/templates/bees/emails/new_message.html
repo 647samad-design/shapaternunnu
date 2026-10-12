@@ -1,8 +1,8 @@
 {% extends "bees/emails/_base_email.html" %}
 {% block email_body %}{% load bees_extras %}{% site_brand as b %}
-    <h1 style="margin:0 0 8px;font-size:24px;">New message from {{ sender_name }}</h1>
-    {% if product %}<p style="margin:0 0 12px;color:#56606B;">About: <strong style="color:#141A1F;">{{ product.name }}</strong></p>{% endif %}
-    <div style="margin:0 0 20px;padding:14px 16px;border-left:3px solid {{ b.primary_color }};background:#F4F6F7;color:#141A1F;white-space:pre-line;">{{ body|truncatechars:600 }}</div>
+    <h1 style="margin:0 0 8px;font-size:24px;">New message from <span data-no-translate>{{ sender_name }}</span></h1>
+    {% if product %}<p style="margin:0 0 12px;color:#56606B;">About: <strong style="color:#141A1F;" data-no-translate>{{ product.name }}</strong></p>{% endif %}
+    <div style="margin:0 0 20px;padding:14px 16px;border-left:3px solid {{ b.primary_color }};background:#F4F6F7;color:#141A1F;white-space:pre-line;" data-no-translate>{{ body|truncatechars:600 }}</div>
     <a href="{{ url }}" style="display:inline-block;background:{{ b.primary_color }};color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:8px;font-weight:bold;">Reply</a>
     <p style="margin:20px 0 0;color:#56606B;font-size:13px;">For your safety, keep payments and conversations on {{ b.site_name }}.</p>
 {% endblock %}

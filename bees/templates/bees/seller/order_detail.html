@@ -64,6 +64,8 @@
         </section>
 
         {% if can_ship and seller.status == "approved" %}
+        {% url 'seller_courier_rates' order.id as rates_url %}
+        {% include "bees/partials/courier_panel.html" with buy_url_name="seller_courier_buy" label_url_name="seller_courier_label" is_admin=False %}
         <section class="panel no-print">
             <h2>Ship it</h2>
             <form method="post" action="{% url 'seller_ship_order' order.id %}" class="stack-sm">
@@ -77,6 +79,7 @@
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <button class="btn btn-secondary btn-sm" type="submit" name="status" value="packed">Mark all packed</button>
                     <button class="btn btn-primary btn-sm" type="submit" name="status" value="handed_to_courier">Mark all handed to courier</button>
+                    <button class="btn btn-ghost btn-sm" type="submit" name="status" value="delivered" onclick="return confirm('Mark all your items in this order as delivered? The customer will be told and can review them.')">Mark all delivered</button>
                 </div>
             </form>
         </section>

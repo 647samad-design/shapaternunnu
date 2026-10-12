@@ -28,8 +28,9 @@ from django.views.decorators.http import require_POST
 from . import badges as seller_badges
 from . import seller_center as sc
 from .messaging import unread_for_seller
+from . import performance, statements
 from .models import (
-    AuditLog, Notification, Order, OrderItem, Payout, Product, ProductImage, Question, ReturnRequest, Review,
+    AuditLog, Claim, Notification, Order, OrderItem, Payout, Product, ProductImage, Question, ReturnRequest, Review,
     SellerReview,
 )
 from .security import safe_next_url
@@ -74,7 +75,14 @@ def _nav_counts(seller):
         "returns": ReturnRequest.objects.filter(order_item__seller_account=seller, status="requested").count(),
         "questions": Question.objects.filter(product__seller_account=seller, answer="").count(),
         "messages": unread_for_seller(seller),
+        "claims": Claim.objects.filter(order_item__seller_account=seller, status="open").count(),
     }
+
+
+@seller_required()
+def claims(request):
+    from .claims import seller_claims
+    return seller_claims(request)
 
 
 def _render(request, template, context):
@@ -168,6 +176,7 @@ def overview(request):
         "balance": sc.balance(seller) if request.seller_role in MONEY_ROLES else None,
         "tier": tier_progress(seller),
         "badge": seller_badges.progress(seller),
+        "perf": performance.measure(seller),
         "setup": sc.setup_steps(seller),
         "recent": recent,
         "live_count": products.live().count(),
@@ -293,7 +302,14 @@ def order_detail(request, order_id):
         ("Shipped", all(i.fulfillment_status in ("handed_to_courier", "delivered") for i in my_items), None),
         ("Delivered", all(i.fulfillment_status == "delivered" for i in my_items), order.delivered_at),
     ]
+    from . import couriers
+    from .models import Shipment
+    provider = couriers.active()
+    shipments = list(Shipment.objects.filter(order=order, seller=seller))
+    quote = next((s for s in shipments if s.status == "rated" and str(s.id) == request.GET.get("shipment", "")), None)
     return _render(request, "order_detail.html", {
+        "courier_on": provider is not None, "courier_name": getattr(provider, "name", ""), "shipments": shipments, "quote": quote,
+        "can_book": can_ship and any(i.fulfillment_status in ("pending", "packed") for i in my_items),
         "section": "orders", "order": order, "items": my_items, "totals": totals, "steps": steps,
         "only_seller": only_seller, "can_ship": can_ship, "fulfilment_choices": OrderItem.FULFILLMENT_CHOICES,
         "other_sellers": not only_seller,
@@ -301,34 +317,15 @@ def order_detail(request, order_id):
 
 
 def _set_items_status(request, items, new_status):
-    """Moves the given items to ``new_status``. Returns how many changed and
-    the orders that moved forward as a result."""
-    from .views import sync_order_status_from_items
-    rank = {key: i for i, (key, _) in enumerate(OrderItem.FULFILLMENT_CHOICES)}
-    changed, moved, orders_seen = 0, [], {}
-    for item in items:
-        order = item.order
-        if order.status == "cancelled" or order.payment_status in ("pending", "failed", "refunded"):
-            continue
-        if order.payment_method == "cod" and not order.cod_confirmed:
-            continue  # unconfirmed cash order: don't pack or ship yet
-        # Bulk actions only move items forward (a delivered item is never
-        # sent back to "packed" by a mass update).
-        if rank[new_status] > rank[item.fulfillment_status]:
-            item.fulfillment_status = new_status
-            item.save(update_fields=["fulfillment_status"])
-            changed += 1
-            orders_seen[order.pk] = order
-    from .models import OrderEvent
-    for order in orders_seen.values():
-        result = sync_order_status_from_items(order)
-        if result:
-            moved.append((order.pk, result))
-        elif new_status == "packed":
-            OrderEvent.objects.create(order=order, kind="packed", text="Packed and ready for the courier")
-        elif new_status == "handed_to_courier":
-            OrderEvent.objects.create(order=order, kind="shipped", text="Part of the order was handed to the courier")
-    return changed, moved
+    """Moves the given items forward to ``new_status`` (bulk actions never
+    move an item back). Returns how many changed and the orders that moved
+    forward as a result."""
+    from . import fulfilment
+    try:
+        changed, moved = fulfilment.set_items_status(items, new_status, user=request.user, forward_only=True)
+    except fulfilment.FulfilmentError:
+        return 0, []
+    return len(changed), moved
 
 
 @seller_required(approved=True)
@@ -363,14 +360,14 @@ def ship_order(request, order_id):
         )
     changed, moved = _set_items_status(request, items, new_status)
     label = dict(OrderItem.FULFILLMENT_CHOICES)[new_status].lower()
-    note = f" The order is now {moved[0][1]} and the customer has been emailed." if moved else ""
+    note = (f" The order is now {moved[0][1]} and the customer has been told." if moved
+            else " The customer has been told." if changed and new_status in ("handed_to_courier", "delivered") else "")
     if changed:
         messages.success(request, f"Marked {changed} item{'s' if changed != 1 else ''} as {label}.{note}")
     elif courier or tracking:
         messages.success(request, "Tracking details saved.")
     else:
         messages.info(request, "Nothing to change.")
-    AuditLog.objects.create(user=request.user, action=f"Seller {seller.display_name}: order #{order.id} items -> {new_status}")
     return redirect("seller_order", order_id=order.id)
 
 
@@ -414,7 +411,7 @@ PRODUCT_TABS = [
 @seller_required()
 def products(request):
     seller = request.seller
-    base = seller.products.all()
+    base = seller.products.exclude(approval_status="archived")
     filters = {
         "all": base, "live": base.live(), "review": base.filter(approval_status="pending"),
         "rejected": base.filter(approval_status="rejected"), "low": base.filter(stock__gt=0, stock__lte=5),
@@ -529,6 +526,17 @@ def _decorate(items):
 
 
 @seller_required(roles=MONEY_ROLES)
+def monthly_statement(request):
+    from django.http import HttpResponse
+    from . import statements
+    content, month = statements.pdf(request.seller, request.GET.get("month", ""))
+    response = HttpResponse(content, content_type="application/pdf")
+    slug = "".join(c for c in request.seller.display_name if c.isalnum())[:30] or "store"
+    response["Content-Disposition"] = f'attachment; filename="{slug}-statement-{month:%Y-%m}.pdf"'
+    return response
+
+
+@seller_required(roles=MONEY_ROLES)
 def earnings(request):
     seller = request.seller
     period = sc.Period(request.GET.get("range", "30"))
@@ -544,6 +552,7 @@ def earnings(request):
         "section": "earnings", "period": period, "ranges": sc.RANGES.items(),
         "stats": stats, "page_obj": page_obj, "balance": balance, "tier": tier_progress(seller),
         "payouts": seller.payouts.all()[:50], "min_payout": min_payout,
+        "statement_months": statements.months_with_sales(seller),
         "open_request": seller.payouts.filter(status="requested").first(),
         "lifetime": {"sales": seller.lifetime_sales, "commission": seller.commission_total, "net": seller.net_earnings},
     })
@@ -599,7 +608,7 @@ def request_payout(request):
             messages.error(request, f"The minimum payout is {money(min_payout)}.")
             return redirect("seller_earnings")
         if amount > available:
-            messages.error(request, f"You can request up to {money(available)} (earnings from delivered orders).")
+            messages.error(request, f"You can request up to {money(available)}. Earnings become available once an item is delivered and its return window has passed.")
             return redirect("seller_earnings")
         payout = Payout.objects.create(seller=seller, amount=amount, status="requested", requested_by=request.user)
     from .alerts import notify_staff

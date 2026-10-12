@@ -7,23 +7,26 @@ from django.contrib.sitemaps.views import sitemap
 from django.views.generic import TemplateView
 from bees import views
 from bees import live
+from bees import courier_views as cv
+from bees import claims as claims_views
 from bees import pwa
 from bees import messaging as msgs
 from bees import account_views
 from bees import manage_views as mv
 from bees import seller_views as sv
-from bees.sitemaps import ProductSitemap, CategorySitemap, StaticViewSitemap
+from bees.sitemaps import ProductSitemap, CategorySitemap, SellerSitemap, StaticViewSitemap
 from bees.ratelimit import ratelimit
 
 sitemaps = {
     "products": ProductSitemap,
     "categories": CategorySitemap,
     "static": StaticViewSitemap,
+    "stores": SellerSitemap,
 }
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('sitemap.xml', sitemap, {'sitemaps': sitemaps}, name='sitemap'),
+    path('sitemap.xml', sitemap, {'sitemaps': sitemaps, 'template_name': 'sitemap_i18n.xml'}, name='sitemap'),
     path('manifest.webmanifest', pwa.manifest, name='pwa_manifest'),
     path('app-icon-<int:size>.png', pwa.icon, name='pwa_icon'),
     path('sw.js', pwa.service_worker, name='service_worker'),
@@ -147,23 +150,42 @@ urlpatterns = [
     path('seller/orders/bulk/', sv.bulk_fulfilment, name='seller_bulk_fulfilment'),
     path('seller/orders/<int:order_id>/', sv.order_detail, name='seller_order'),
     path('seller/orders/<int:order_id>/ship/', sv.ship_order, name='seller_ship_order'),
+    path('seller/orders/<int:order_id>/courier/', cv.seller_rates, name='seller_courier_rates'),
+    path('seller/courier/<int:pk>/buy/', cv.seller_buy, name='seller_courier_buy'),
+    path('seller/courier/<int:pk>/label/', cv.seller_label, name='seller_courier_label'),
+    path('manage/orders/<int:order_id>/courier/', cv.admin_rates, name='manage_courier_rates'),
+    path('manage/courier/<int:pk>/buy/', cv.admin_buy, name='manage_courier_buy'),
+    path('manage/courier/<int:pk>/label/', cv.admin_label, name='manage_courier_label'),
+    path('manage/courier/<int:pk>/refresh/', cv.admin_refresh, name='manage_courier_refresh'),
+    path('shipping/webhook/<str:token>/', cv.webhook, name='courier_webhook'),
     path('seller/orders/<int:order_id>/packing-slip/', sv.packing_slip, name='seller_packing_slip'),
     path('seller/products/', sv.products, name='seller_products'),
     path('seller/products/<int:pk>/quick-update/', sv.quick_update, name='seller_quick_update'),
     path('seller/products/<int:pk>/duplicate/', sv.duplicate_product, name='seller_duplicate_product'),
     path('seller/earnings/', sv.earnings, name='seller_earnings'),
+    path('seller/earnings/statement/', sv.monthly_statement, name='seller_statement'),
     path('seller/payouts/request/', sv.request_payout, name='seller_request_payout'),
     path('seller/payouts/<int:pk>/cancel/', sv.cancel_payout_request, name='seller_cancel_payout'),
     path('seller/returns/', sv.returns, name='seller_returns'),
+    path('seller/problems/', sv.claims, name='seller_claims'),
+    path('my-orders/item/<int:item_id>/problem/', claims_views.open_claim, name='open_claim'),
+    path('problems/<int:pk>/', claims_views.claim_detail, name='claim_detail'),
+    path('problems/<int:pk>/photo/', claims_views.claim_photo, name='claim_photo'),
+    path('manage/problems/', mv.claims, name='manage_claims'),
+    path('manage/keys/', mv.keys, name='manage_keys'),
+    path('manage/taxes/', mv.tax_rates, name='manage_taxes'),
+    path('manage/problems/<int:pk>/', mv.claim_detail, name='manage_claim'),
     path('seller/reviews/', sv.reviews, name='seller_reviews'),
     path('seller/team/', sv.team, name='seller_team'),
     path('seller/holiday/', sv.vacation, name='seller_vacation'),
     path('seller/plan/', sv.plan, name='seller_plan'),
     path('seller/plan/<int:pk>/choose/', sv.buy_plan, name='seller_buy_plan'),
     path('seller/plan/done/', sv.plan_done, name='seller_plan_done'),
+    path('my-orders/<int:pk>/received/', views.confirm_received, name='confirm_received'),
     path('seller/order-item/<int:item_id>/status/', views.update_fulfillment_status, name='update_fulfillment_status'),
     path('seller/product/add/', views.seller_add_product, name='seller_add_product'),
     path('seller/question/<int:pk>/answer/', views.seller_answer_question, name='seller_answer_question'),
+    path('seller/review/<int:pk>/reply/', views.seller_reply_review, name='seller_reply_review'),
     path('seller/team/add/', views.add_team_member, name='add_team_member'),
     path('seller/team/<int:member_id>/remove/', views.remove_team_member, name='remove_team_member'),
     path('seller/product/<int:pk>/edit/', views.seller_edit_product, name='seller_edit_product'),
@@ -201,6 +223,9 @@ urlpatterns = [
     path('payment/resume/<int:order_id>/', views.resume_payment, name='resume_payment'),
     path('payment/pay-online/<int:order_id>/', views.pay_online, name='pay_online'),
     path('payment/stripe/webhook/', views.stripe_webhook, name='stripe_webhook'),
+    path('payment/paypal/<int:order_id>/return/', views.paypal_return, name='paypal_return'),
+    path('payment/paypal/<int:order_id>/cancel/', views.paypal_cancel, name='paypal_cancel'),
+    path('payment/paypal/webhook/', views.paypal_webhook, name='paypal_webhook'),
     path('staff/seller-document/<int:seller_id>/<str:field>/', views.seller_document, name='seller_document'),
 ]
 

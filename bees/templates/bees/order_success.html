@@ -39,7 +39,7 @@
             {% endfor %}
             {% if order.discount_amount %}<div class="row" style="color:var(--ok);"><span>Discount{% if order.coupon_code %} ({{ order.coupon_code }}){% endif %}</span><span>−{{ order.discount_amount|money }}</span></div>{% endif %}
             <div class="row"><span>Shipping</span><span>{% if order.shipping_amount %}{{ order.shipping_amount|money }}{% else %}Free{% endif %}</span></div>
-            {% if order.tax_amount %}<div class="row"><span>Tax</span><span>{{ order.tax_amount|money }}</span></div>{% endif %}
+            {% if order.tax_amount %}<div class="row"><span>{{ order.tax_label }}</span><span>{{ order.tax_amount|money }}</span></div>{% endif %}
             {% if order.credit_used %}<div class="row" style="color:var(--ok);"><span>Store credit</span><span>−{{ order.credit_used|money }}</span></div>{% endif %}
             <div class="row total"><span>{{ t.total }}</span><span>{{ order.total|money }}</span></div>
 

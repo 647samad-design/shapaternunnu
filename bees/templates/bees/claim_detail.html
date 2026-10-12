@@ -1,0 +1,39 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Problem report #{{ claim.id }} — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:760px;">
+    <div class="page-head"><div><a class="link small" href="{% url 'my_orders' %}">← {{ t.my_orders }}</a><h1 style="margin-top:6px;">Problem report #{{ claim.id }}</h1></div></div>
+    <section class="panel">
+        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;">
+            <div><strong data-no-translate>{{ claim.order_item.product_name }}</strong><div class="muted small">Order #{{ claim.order_item.order_id }}{% if claim.order_item.seller_account %} · <span data-no-translate>{{ claim.order_item.seller_account.display_name }}</span>{% endif %}</div></div>
+            <span class="pill {% if claim.status == 'refunded' %}ok{% elif claim.status == 'rejected' or claim.status == 'withdrawn' %}{% else %}warn{% endif %}">{{ claim.get_status_display }}</span>
+        </div>
+        <ol class="claim-steps">
+            <li class="done"><strong>You reported: {{ claim.get_reason_display }}</strong><span class="muted small">{{ claim.created_at|date:"M j, H:i" }}</span><p data-no-translate>{{ claim.details }}</p>{% if claim.photo %}<a href="{% url 'claim_photo' claim.id %}" target="_blank" rel="noopener"><img src="{% url 'claim_photo' claim.id %}" alt="Your photo" class="claim-img"></a>{% endif %}</li>
+            {% if claim.seller_reply %}<li class="done"><strong>Seller's answer{% if claim.seller_offers_refund %} - offered a refund{% endif %}</strong><span class="muted small">{{ claim.seller_replied_at|date:"M j, H:i" }}</span><p data-no-translate>{{ claim.seller_reply }}</p></li>
+            {% elif claim.is_open and claim.status != "escalated" %}<li><strong>Waiting for the seller</strong><span class="muted small">If they don't answer in {{ brand.claim_reply_days }} day{{ brand.claim_reply_days|pluralize }}, our team takes over.</span></li>{% endif %}
+            {% if claim.status == "escalated" %}<li><strong>Our team is reviewing it</strong><span class="muted small">We'll let you know the decision.</span></li>{% endif %}
+            {% if claim.decided_at %}<li class="done"><strong>{% if claim.status == "refunded" %}Refunded{% else %}Closed without a refund{% endif %}</strong><span class="muted small">{{ claim.decided_at|date:"M j, H:i" }}</span>{% if claim.decision_note %}<p>{{ claim.decision_note }}</p>{% endif %}{% if claim.return_request %}<p class="small">{% if claim.return_request.card_refund_amount %}{{ claim.return_request.card_refund_amount|money }} back to your card. {% endif %}{% if claim.return_request.credit_refund_amount %}{{ claim.return_request.credit_refund_amount|money }} added as store credit.{% endif %}</p>{% endif %}</li>{% endif %}
+        </ol>
+        {% if claim.is_open %}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+            {% if claim.order_item.seller_account %}<a class="btn btn-secondary btn-sm" href="{% url 'message_store' claim.order_item.seller_account.id %}">💬 {{ t.message_seller }}</a>{% endif %}
+            {% if claim.status == "seller_replied" %}<form method="post">{% csrf_token %}<button class="btn btn-primary btn-sm" name="action" value="escalate">Not solved - ask {{ brand.site_name }} to decide</button></form>{% endif %}
+            <form method="post">{% csrf_token %}<button class="btn btn-ghost btn-sm" name="action" value="withdraw">Problem solved - close report</button></form>
+        </div>
+        {% endif %}
+    </section>
+</div>
+<style>
+    .claim-steps { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 14px; border-left: 3px solid var(--line); padding-left: 18px; }
+    .claim-steps li { position: relative; display: grid; gap: 2px; }
+    .claim-steps li::before { content: ""; position: absolute; left: -26px; top: 4px; width: 13px; height: 13px; border-radius: 50%; background: var(--surface); border: 3px solid var(--line); }
+    .claim-steps li.done::before { background: var(--brand); border-color: var(--brand); }
+    .claim-steps p { margin: 4px 0 0; white-space: pre-line; overflow-wrap: anywhere; }
+    .claim-img { margin-top: 8px; max-width: 220px; max-height: 220px; border-radius: var(--radius-sm); object-fit: cover; }
+    html[dir="rtl"] .claim-steps { border-left: 0; border-right: 3px solid var(--line); padding-left: 0; padding-right: 18px; }
+    html[dir="rtl"] .claim-steps li::before { left: auto; right: -26px; }
+</style>
+{% endblock %}
