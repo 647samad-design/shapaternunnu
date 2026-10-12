@@ -1571,6 +1571,22 @@ def translations(request):
                 if done:
                     _log(request, f"AI-translated {done} shop texts into {lang}")
                     messages.success(request, f"{done} text{'s' if done != 1 else ''} translated. Check a few, then press again for more.")
+        elif action == "keep":
+            row = get_object_or_404(UIText, pk=request.POST.get("id"))
+            setattr(row, lang, row.source)
+            row.by_ai = False
+            row.save()
+            messages.success(request, "Kept in English for this language.")
+        elif action == "keep_all":
+            rows = [r for r in UIText.objects.filter(**{lang: ""}) if r.source not in PACK]
+            for row in rows:
+                setattr(row, lang, row.source)
+                row.by_ai = False
+            UIText.objects.bulk_update(rows, [lang, "by_ai"])
+            i18n.clear_cache()
+            cache.delete("manage:health")
+            _log(request, f"Kept {len(rows)} shop texts in English for {lang}")
+            messages.success(request, f"{len(rows)} text{'s' if len(rows) != 1 else ''} kept in English.")
         elif action == "delete":
             UIText.objects.filter(pk=request.POST.get("id")).delete()
             i18n.clear_cache()
@@ -1677,10 +1693,23 @@ def operations_checks(dj=None):
         add("Languages & currencies", "Currency rates", not stale,
             "Up to date." if not stale else f"Not updated for 3+ days: {', '.join(stale)}. Press 'Update rates now' in Currencies or type them in.",
             level=None if not stale else "warn")
-    missing = UIText.objects.filter(Q(ar="") | Q(es="") | Q(fr="") | Q(ur="")).count()
-    add("Languages & currencies", "Untranslated shop text", True,
-        "Everything shoppers have seen is translated." if not missing else f"{missing} piece(s) of text (mostly product names) still in English. Admin > Translations.",
-        level="ok" if not missing else "warn")
+    # Built-in texts are translated by the pack even when their row is blank.
+    from .i18n_pack import PACK
+    gaps = {}
+    for row in UIText.objects.all():
+        if row.source in PACK:
+            continue
+        for code, name in TRANSLATION_LANGS:
+            if not getattr(row, code):
+                gaps[name] = gaps.get(name, 0) + 1
+    if not gaps:
+        add("Languages & currencies", "Untranslated shop text", True, "Everything shoppers have seen is translated.", level="ok")
+    else:
+        detail = ", ".join(f"{name} {count}" for name, count in gaps.items())
+        add("Languages & currencies", "Untranslated shop text", True,
+            f"Still showing in English: {detail}. Usually product or brand names - open Admin > Translations and "
+            "type a translation, press 'Translate missing with AI', or press 'Keep the rest in English' for names that shouldn't change.",
+            level="warn")
     add("Languages & currencies", "AI assistant", True,
         "On: listing writer, buying guides, shopper Q&A and one-click translation use Claude." if getattr(dj, "AI_API_KEY", "")
         else "Off: add ANTHROPIC_API_KEY to .env for AI buying guides, shopper Q&A and one-click translation (built-in writer still works).", level="ok")

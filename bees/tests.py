@@ -3833,6 +3833,30 @@ class WholePageTranslationTests(TestCase):
             self.client.post(reverse("manage_translations"), {"action": "ai", "lang": "fr"})
         self.assertEqual(UIText.objects.get(source="Brand new text").fr, "Texte tout neuf")
 
+    def test_keep_english_clears_the_system_check_warning(self):
+        from .manage_views import operations_checks
+        from .i18n_pack import PACK
+        builtin = next(iter(PACK))
+        UIText.objects.create(source=builtin)  # built-in texts never count as missing
+        UIText.objects.create(source="Zuma Lamp")
+        UIText.objects.create(source="Kora Vase", fr="Vase Kora")
+
+        def check():
+            return next(c for c in operations_checks() if c["name"] == "Untranslated shop text")
+        self.assertEqual(check()["level"], "warn")
+        self.assertIn("French 1", check()["detail"])
+        self.assertNotIn(builtin, str(check()))
+        admin = User.objects.create_superuser("kp", "kp@example.com", "pass12345")
+        self.client.force_login(admin)
+        row = UIText.objects.get(source="Zuma Lamp")
+        self.client.post(reverse("manage_translations"), {"action": "keep", "id": row.id, "lang": "fr"})
+        row.refresh_from_db()
+        self.assertEqual(row.fr, "Zuma Lamp")
+        for code in ("ur", "roman", "ar", "es"):
+            self.client.post(reverse("manage_translations"), {"action": "keep_all", "lang": code})
+        self.assertEqual(UIText.objects.get(source=builtin).ar, "")
+        self.assertEqual(check()["level"], "ok")
+
     def test_placeholders_dates_and_store_name(self):
         from .i18n import translate_html
         out = translate_html("<p>Placed Oct 8, 2026</p><p>6 items</p><h2>Sell on Acme</h2>", "es", "Acme")

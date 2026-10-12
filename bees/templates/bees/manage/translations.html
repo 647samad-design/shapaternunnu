@@ -14,7 +14,8 @@
         <p>The shop is translated automatically: {{ builtin_count }} texts come built in. Anything new (your own pages, product names, messages you add) appears here to translate.</p></div>
     <div class="actions">
         <form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="lang" value="{{ lang }}"><input type="hidden" name="show" value="{{ show }}">
-            <button class="btn btn-primary btn-sm" name="action" value="ai" {% if not ai_ready %}disabled title="Add ANTHROPIC_API_KEY to .env to use AI"{% endif %}>✨ Translate missing with AI</button></form>
+            <button class="btn btn-primary btn-sm" name="action" value="ai" {% if not ai_ready %}disabled title="Add ANTHROPIC_API_KEY to .env to use AI"{% endif %}>✨ Translate missing with AI</button>
+            {% if missing_count %}<button class="btn btn-secondary btn-sm" name="action" value="keep_all" title="For product and brand names that should stay the same in every language">Keep the rest in English</button>{% endif %}</form>
     </div>
 </div>
 <div class="tabs">{% for code, name in langs %}<a href="?lang={{ code }}&show={{ show }}" class="{% if code == lang %}on{% endif %}">{{ name }}</a>{% endfor %}</div>
@@ -31,7 +32,7 @@
         <div class="src"><span class="muted small">English</span><br>{{ r.source }}{% if r.by_ai %} <span class="pill info small">AI</span>{% endif %}</div>
         <form method="post">{% csrf_token %}<input type="hidden" name="lang" value="{{ lang }}"><input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="id" value="{{ r.id }}">
             <textarea name="text" rows="2" {% if lang == "ar" or lang == "ur" %}dir="rtl"{% endif %} placeholder="Translation">{{ r.current }}</textarea>
-            <div style="display:flex;gap:6px;"><button class="btn btn-secondary btn-sm" name="action" value="save">Save</button><button class="btn btn-ghost btn-sm" name="action" value="delete" title="Remove this text" style="color:var(--sale);">×</button></div>
+            <div style="display:flex;gap:6px;"><button class="btn btn-secondary btn-sm" name="action" value="save">Save</button>{% if not r.current %}<button class="btn btn-ghost btn-sm" name="action" value="keep" title="Show the English text as it is">Keep English</button>{% endif %}<button class="btn btn-ghost btn-sm" name="action" value="delete" title="Remove this text" style="color:var(--sale);">×</button></div>
         </form>
     </div>
     {% empty %}<p class="muted" style="text-align:center;padding:28px 0;">{% if show == "missing" %}Nothing left to translate. 🎉{% else %}No texts yet. They appear here when shoppers view pages in another language.{% endif %}</p>{% endfor %}
