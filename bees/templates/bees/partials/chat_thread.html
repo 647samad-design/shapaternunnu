@@ -1,24 +1,32 @@
 {# One buyer-seller conversation with a live-updating composer. Needs: conv, thread (list), side ("buyer"/"seller"), title, subtitle, about (product or None), back_url. #}
-<section class="chat-box" data-chat {% if not readonly %}data-poll="{% url 'message_poll' conv.id %}" data-send="{% url 'message_send' conv.id %}"{% endif %}>
+<section class="chat-box" data-chat {% if not readonly %}data-poll="{% url 'message_poll' conv.id %}" data-send="{% url 'message_send' conv.id %}" data-typing="{% url 'message_typing' conv.id %}"{% endif %}>
     <div class="cv-head">
         {% if back_url %}<a class="cv-back" href="{{ back_url }}" aria-label="All conversations">←</a>{% endif %}
-        <div style="min-width:0;flex:1;"><strong>{{ title }}</strong>{% if subtitle %}<span class="muted small">{{ subtitle }}</span>{% endif %}</div>
+        <div style="min-width:0;flex:1;"><strong data-no-translate>{{ title }}</strong><span class="muted small">{% if subtitle %}{{ subtitle }}{% endif %}<span class="cv-presence" data-presence hidden></span></span></div>
         {% if not readonly %}<form method="post" action="{% url 'message_report' conv.id %}" style="margin:0;">{% csrf_token %}<button class="btn btn-ghost btn-sm" type="submit" title="Report this conversation to the store team">Report</button></form>{% endif %}
     </div>
     <div class="chat-log" data-log aria-live="polite" data-no-translate>
         {% for m in thread %}
         <div class="bubble {% if m.mine %}mine{% endif %}" data-id="{{ m.id }}">
             {% if m.product %}<a class="bubble-about" href="{{ m.product.url }}">About: {{ m.product.name }}</a>{% endif %}
-            <p>{{ m.body }}</p><time>{{ m.time }}</time>
+            {% if m.image %}<a href="{{ m.image }}" target="_blank" rel="noopener" class="bubble-img"><img src="{{ m.image }}" alt="Photo" loading="lazy"></a>{% endif %}
+            {% if m.body %}<p>{{ m.body }}</p>{% endif %}<time>{{ m.time }}</time>
         </div>
         {% empty %}<p class="chat-empty muted" data-empty>{% if side == "buyer" %}Ask about sizes, delivery, custom orders… The seller usually replies within a day.{% else %}No messages yet.{% endif %}</p>{% endfor %}
     </div>
+    <div hidden data-words><span data-w="online">Online</span><span data-w="last_seen">Last seen</span><span data-w="seen">Seen</span><span data-w="sent">Sent</span><span data-w="sending">Sending…</span><span data-w="retry">Not sent - tap to retry</span><span data-w="about">About:</span><span data-w="new_message">New message</span></div>
+    <div class="chat-typing" data-typing-note hidden><span></span><span></span><span></span> typing…</div>
     {% if not readonly %}
-    <form class="chat-compose" method="post" action="{% url 'message_send' conv.id %}" data-compose>
+    <form class="chat-compose" method="post" enctype="multipart/form-data" action="{% url 'message_send' conv.id %}" data-compose>
         {% csrf_token %}
         {% if about %}<input type="hidden" name="about" value="{{ about.id }}"><div class="chat-about" data-about><img src="{{ about.image_url }}" alt=""><span>About <strong>{{ about.name }}</strong></span><button type="button" aria-label="Not about this product" data-about-clear>×</button></div>{% endif %}
-        <label class="sr-only" for="cv-text">Message</label>
-        <textarea id="cv-text" name="body" rows="2" maxlength="2000" placeholder="Write a message…" required></textarea>
+        {% if side == "seller" and conv.seller.quick_replies %}<div class="chat-quick" data-quick>{% for line in conv.seller.quick_replies.splitlines %}{% if line.strip %}<button type="button" class="chip" data-no-translate>{{ line }}</button>{% endif %}{% endfor %}</div>{% endif %}
+        <div class="chat-photo" data-photo-preview hidden><img alt=""><span class="small muted">Photo ready to send</span><button type="button" aria-label="Remove photo" data-photo-clear>×</button></div>
+        <div class="chat-input">
+            <label class="chat-attach" title="Send a photo"><input type="file" name="photo" accept="image/jpeg,image/png,image/webp,image/gif" data-photo hidden><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5-8 8"/></svg><span class="sr-only">Send a photo</span></label>
+            <label class="sr-only" for="cv-text">Message</label>
+            <textarea id="cv-text" name="body" rows="2" maxlength="2000" placeholder="Write a message…"></textarea>
+        </div>
         <button class="btn btn-primary" type="submit">Send</button>
     </form>
     <p class="muted small chat-safe">For your safety, keep payments and conversations on {{ brand.site_name }}.</p>
@@ -43,6 +51,28 @@
     .chat-about img { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; }
     .chat-about button { margin-left: auto; border: 0; background: none; font-size: 1.2rem; cursor: pointer; color: var(--muted); }
     .chat-safe { padding: 0 14px 10px; margin: 0; }
+    .chat-input { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
+    .chat-input textarea { flex: 1; min-width: 0; }
+    .chat-attach { display: grid; place-items: center; width: 44px; height: 48px; flex-shrink: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; color: var(--muted); }
+    .chat-attach:hover, .chat-attach:focus-within { color: var(--brand); border-color: var(--brand); }
+    .chat-photo { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--surface-2); }
+    .chat-photo[hidden] { display: none; }
+    .chat-photo img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; }
+    .chat-photo button { margin-left: auto; border: 0; background: none; font-size: 1.2rem; cursor: pointer; color: var(--muted); }
+    .chat-quick { grid-column: 1 / -1; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+    .chat-quick .chip { flex-shrink: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: inherit; font-size: .85rem; cursor: pointer; }
+    .chat-quick .chip:hover { border-color: var(--brand); }
+    .bubble-img { display: block; margin: -2px -6px 6px; }
+    .bubble-img img { display: block; max-width: min(260px, 100%); max-height: 320px; border-radius: 12px; object-fit: cover; background: var(--surface-2); }
+    .cv-presence::before { content: " · "; }
+    .cv-presence.online { color: var(--success, #1f8a4c); font-weight: 700; }
+    .chat-typing { padding: 4px 18px 6px; font-size: .85rem; color: var(--muted); background: var(--paper); display: flex; align-items: center; gap: 3px; }
+    .chat-typing[hidden] { display: none; }
+    .chat-typing span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: cv-dot 1.2s infinite ease-in-out; }
+    .chat-typing span:nth-child(2) { animation-delay: .15s; } .chat-typing span:nth-child(3) { animation-delay: .3s; margin-right: 4px; }
+    @keyframes cv-dot { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+    .bubble .seen { display: block; text-align: right; font-size: .72rem; opacity: .8; margin-top: 2px; }
+    .bubble.sending { opacity: .6; }
     html[data-theme="dark"] .bubble.mine { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 </style>
 <script>
@@ -50,41 +80,127 @@
     var box = document.querySelector('[data-chat]');
     if (!box) return;
     var log = box.querySelector('[data-log]'), form = box.querySelector('[data-compose]');
-    function lastId() { var b = log.querySelectorAll('.bubble'); return b.length ? b[b.length - 1].dataset.id : 0; }
+    var typingNote = box.querySelector('[data-typing-note]'), presence = box.querySelector('[data-presence]');
+    var busy = false, fails = 0, timer = null;
+    function W(k) { var el = box.querySelector('[data-words] [data-w="' + k + '"]'); return el ? el.textContent : k; }
+    function lastId() {
+        var b = log.querySelectorAll('.bubble[data-id]'), max = 0;
+        b.forEach(function (x) { var n = parseInt(x.dataset.id, 10); if (n > max) max = n; });
+        return max;
+    }
+    function nearBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 120; }
+    function bubble(m) {
+        var d = document.createElement('div'); d.className = 'bubble' + (m.mine ? ' mine' : ''); if (m.id) d.dataset.id = m.id;
+        if (m.product) { var a = document.createElement('a'); a.className = 'bubble-about'; a.href = m.product.url; a.textContent = W('about') + ' ' + m.product.name; d.appendChild(a); }
+        if (m.image) { var ia = document.createElement('a'); ia.className = 'bubble-img'; ia.href = m.image; ia.target = '_blank'; ia.rel = 'noopener'; var im = document.createElement('img'); im.src = m.image; im.alt = ''; im.loading = 'lazy'; im.addEventListener('load', function () { if (m.mine || nearBottom()) log.scrollTop = log.scrollHeight; }); ia.appendChild(im); d.appendChild(ia); }
+        if (m.body) { var p = document.createElement('p'); p.textContent = m.body; d.appendChild(p); }
+        var t = document.createElement('time'); t.textContent = m.time || ''; d.appendChild(t);
+        return d;
+    }
     function add(m) {
-        if (log.querySelector('.bubble[data-id="' + m.id + '"]')) return;
+        if (log.querySelector('.bubble[data-id="' + m.id + '"]')) return false;
         var empty = log.querySelector('[data-empty]'); if (empty) empty.remove();
-        var d = document.createElement('div'); d.className = 'bubble' + (m.mine ? ' mine' : ''); d.dataset.id = m.id;
-        if (m.product) { var a = document.createElement('a'); a.className = 'bubble-about'; a.href = m.product.url; a.textContent = 'About: ' + m.product.name; d.appendChild(a); }
-        var p = document.createElement('p'); p.textContent = m.body; d.appendChild(p);
-        var t = document.createElement('time'); t.textContent = m.time; d.appendChild(t);
-        log.appendChild(d); log.scrollTop = log.scrollHeight;
+        var stick = m.mine || nearBottom();
+        log.appendChild(bubble(m));
+        if (stick) log.scrollTop = log.scrollHeight;
+        return true;
+    }
+    function markSeen(seen) {
+        log.querySelectorAll('.seen').forEach(function (s) { s.remove(); });
+        var mine = log.querySelectorAll('.bubble.mine[data-id]'), all = log.querySelectorAll('.bubble[data-id]');
+        if (!mine.length || all[all.length - 1] !== mine[mine.length - 1]) return;
+        var s = document.createElement('span'); s.className = 'seen'; s.textContent = seen ? '✓✓ ' + W('seen') : '✓ ' + W('sent');
+        mine[mine.length - 1].appendChild(s);
     }
     log.scrollTop = log.scrollHeight;
-    function poll() {
-        if (document.hidden) return;
-        fetch(box.dataset.poll + '?after=' + lastId(), { credentials: 'same-origin' }).then(function (r) { return r.json(); })
-            .then(function (d) { (d.messages || []).forEach(add); }).catch(function () {});
+    function schedule() {
+        clearTimeout(timer);
+        var wait = document.hidden ? 15000 : 2500;
+        if (fails) wait = Math.min(60000, wait * (fails + 1));
+        timer = setTimeout(poll, wait);
     }
-    if (box.dataset.poll) setInterval(poll, 6000);
+    function poll() {
+        if (busy || !box.dataset.poll) return schedule();
+        busy = true;
+        fetch(box.dataset.poll + '?after=' + lastId() + '&visible=' + (document.hidden ? 0 : 1), { credentials: 'same-origin', cache: 'no-store' })
+            .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+            .then(function (d) {
+                fails = 0;
+                var incoming = 0;
+                (d.messages || []).forEach(function (m) { if (add(m) && !m.mine) incoming++; });
+                if (incoming && window.LumenAlert) LumenAlert.sound(); 
+                if (incoming && document.hidden && window.LumenAlert) LumenAlert.desktop(W('new_message'), (d.messages[d.messages.length - 1] || {}).body || '');
+                if (typingNote) typingNote.hidden = !d.typing;
+                if (presence) {
+                    presence.hidden = !d.presence;
+                    presence.className = 'cv-presence' + (d.presence === 'online' ? ' online' : '');
+                    presence.textContent = d.presence === 'online' ? W('online') : (d.ago ? W('last_seen') + ' ' + d.ago : '');
+                }
+                markSeen(!!d.seen);
+            })
+            .catch(function () { fails++; })
+            .then(function () { busy = false; schedule(); });
+    }
+    if (box.dataset.poll) { poll(); document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(); }); window.addEventListener('online', poll); }
     if (!form) return;
     var clear = form.querySelector('[data-about-clear]');
-    if (clear) clear.addEventListener('click', function () { var a = form.querySelector('[data-about]'); a.remove(); var h = form.querySelector('[name=about]'); if (h) h.remove(); });
-    var ta = form.querySelector('textarea');
+    function dropAbout() { var a = form.querySelector('[data-about]'); if (a) a.remove(); var h = form.querySelector('[name=about]'); if (h) h.remove(); }
+    if (clear) clear.addEventListener('click', dropAbout);
+    var ta = form.querySelector('textarea'), lastTyping = 0;
+    var photo = form.querySelector('[data-photo]'), prev = form.querySelector('[data-photo-preview]'), prevUrl = null;
+    function showPhoto() {
+        if (prevUrl) { URL.revokeObjectURL(prevUrl); prevUrl = null; }
+        var f = photo && photo.files[0];
+        if (!f) { prev.hidden = true; return; }
+        if (f.size > 8 * 1024 * 1024) { photo.value = ''; prev.hidden = true; if (window.showToast) showToast('Photos must be 8 MB or smaller.', 'warning'); return; }
+        prevUrl = URL.createObjectURL(f); prev.querySelector('img').src = prevUrl; prev.hidden = false;
+    }
+    function clearPhoto() { if (photo) photo.value = ''; showPhoto(); }
+    if (photo) {
+        photo.addEventListener('change', showPhoto);
+        prev.querySelector('[data-photo-clear]').addEventListener('click', clearPhoto);
+        ta.addEventListener('paste', function (e) {
+            var items = (e.clipboardData || {}).files;
+            if (items && items.length && /^image\//.test(items[0].type)) { var dt = new DataTransfer(); dt.items.add(items[0]); photo.files = dt.files; showPhoto(); e.preventDefault(); }
+        });
+    }
+    form.querySelectorAll('[data-quick] .chip').forEach(function (c) {
+        c.addEventListener('click', function () { ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + c.textContent.trim(); ta.focus(); });
+    });
     ta.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); } });
+    ta.addEventListener('input', function () {
+        var now = Date.now();
+        if (!box.dataset.typing || !ta.value.trim() || now - lastTyping < 3000) return;
+        lastTyping = now;
+        fetch(box.dataset.typing, { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value, 'X-Requested-With': 'fetch' } }).catch(function () {});
+    });
     form.addEventListener('submit', function (e) {
         e.preventDefault();
-        if (!ta.value.trim()) return;
-        var btn = form.querySelector('button[type=submit]'); btn.disabled = true;
-        fetch(box.dataset.send, { method: 'POST', body: new FormData(form), credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' } })
-            .then(function (r) { return r.json(); })
-            .then(function (d) {
-                if (d.error) { if (window.showToast) showToast(d.error, 'warning'); else alert(d.error); return; }
-                add(d.message); ta.value = '';
-                var a = form.querySelector('[data-about]'); if (a) { a.remove(); var h = form.querySelector('[name=about]'); if (h) h.remove(); }
+        var text = ta.value.trim(), file = photo && photo.files[0];
+        if (!text && !file) { ta.focus(); return; }
+        var data = new FormData(form);
+        // Show it straight away; the server confirms a moment later.
+        var temp = bubble({ body: text, mine: true, time: W('sending'), image: file ? URL.createObjectURL(file) : null }); temp.classList.add('sending');
+        var empty = log.querySelector('[data-empty]'); if (empty) empty.remove();
+        log.appendChild(temp); log.scrollTop = log.scrollHeight;
+        ta.value = ''; lastTyping = 0; dropAbout(); if (photo) { photo.value = ''; prev.hidden = true; } ta.focus();
+        fetch(box.dataset.send, { method: 'POST', body: data, credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' } })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+            .then(function (res) {
+                if (!res.ok || res.d.error) throw new Error(res.d.error || 'Message not sent');
+                temp.remove(); add(res.d.message); markSeen(false);
             })
-            .catch(function () { form.submit(); })
-            .then(function () { btn.disabled = false; ta.focus(); });
+            .catch(function (err) {
+                temp.classList.remove('sending');
+                temp.querySelector('time').textContent = W('retry');
+                temp.style.cursor = 'pointer';
+                temp.addEventListener('click', function () {
+                    temp.remove(); ta.value = text;
+                    if (file && photo) { var dt = new DataTransfer(); dt.items.add(file); photo.files = dt.files; showPhoto(); }
+                    form.requestSubmit();
+                }, { once: true });
+                if (window.showToast) showToast(err.message && err.message.length < 140 ? err.message : 'Message not sent. Check your connection.', 'warning');
+            });
     });
 })();
 </script>

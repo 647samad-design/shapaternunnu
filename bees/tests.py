@@ -24,6 +24,8 @@ class TestCase(DjangoTestCase):
     def _pre_setup(self):
         super()._pre_setup()
         cache.clear()
+        from django.core.cache import caches
+        caches["live"].clear()
         # Never call the real Stripe API from tests.
         from unittest import mock as _mock
         self._stripe_customer = _mock.patch("stripe.Customer.create", return_value=_mock.MagicMock(id="cus_test"))
@@ -3464,6 +3466,148 @@ class BuyerSellerMessageTests(TestCase):
         r = self.client.get(reverse("message_seller", args=[self.product.id]))
         self.assertRedirects(r, reverse("seller_messages"), fetch_redirect_response=False)
         self.assertFalse(Conversation.objects.exists())
+
+
+class LiveUpdatesTests(TestCase):
+    def setUp(self):
+        from django.core.cache import caches
+        caches["live"].clear()
+        owner = User.objects.create_user("livemaker", "lm@example.com", "pass12345")
+        self.seller = SellerAccount.objects.create(user=owner, business_name="Live Co")
+        self.seller.status = "approved"
+        self.seller.save()
+        self.buyer = User.objects.create_user("livebuyer", "lb@example.com", "pass12345")
+        self.conv = Conversation.objects.create(buyer=self.buyer, seller=self.seller)
+
+    def _send(self, user, body):
+        self.client.force_login(user)
+        return self.client.post(reverse("message_send", args=[self.conv.id]), {"body": body}, HTTP_X_REQUESTED_WITH="fetch")
+
+    def test_live_counts_and_new_alerts(self):
+        self._send(self.buyer, "Hello there")
+        self.client.force_login(self.seller.user)
+        first = self.client.get(reverse("live")).json()
+        self.assertEqual(first["seller_messages"], 1)
+        self.assertEqual(first["notifications"], 1)
+        self.assertEqual(first["new"], [])
+        Notification.objects.create(user=self.seller.user, message="New order #9", link="/seller/orders/")
+        nxt = self.client.get(reverse("live") + f"?since={first['latest']}").json()
+        self.assertEqual([n["text"] for n in nxt["new"]], ["New order #9"])
+        self.assertIn("no-store", self.client.get(reverse("live")).headers["Cache-Control"])
+        self.client.logout()
+        self.assertEqual(self.client.get(reverse("live")).status_code, 302)
+
+    def test_typing_presence_and_seen(self):
+        self._send(self.buyer, "Is it in stock?")
+        self.client.post(reverse("message_typing", args=[self.conv.id]))  # buyer is typing again
+        self.client.force_login(self.seller.user)
+        data = self.client.get(reverse("message_poll", args=[self.conv.id]) + "?after=0").json()
+        self.assertTrue(data["typing"])
+        self.assertEqual(data["presence"], "online")
+        self.assertTrue(data["seen"])  # buyer has nothing unread
+        self._send(self.seller.user, "Yes!")
+        self.client.force_login(self.seller.user)
+        self.assertFalse(self.client.get(reverse("message_poll", args=[self.conv.id]) + "?after=0").json()["seen"])
+        self.client.force_login(self.buyer)
+        self.client.get(reverse("message_poll", args=[self.conv.id]) + "?after=0")
+        self.client.force_login(self.seller.user)
+        self.assertTrue(self.client.get(reverse("message_poll", args=[self.conv.id]) + "?after=0").json()["seen"])
+
+    def test_hidden_tab_does_not_mark_read(self):
+        self._send(self.buyer, "Hi")
+        self.client.force_login(self.seller.user)
+        self.client.get(reverse("message_poll", args=[self.conv.id]) + "?after=0&visible=0")
+        self.conv.refresh_from_db()
+        self.assertEqual(self.conv.seller_unread, 1)
+
+    def test_no_alert_when_chat_is_open(self):
+        from django.core import mail
+        self.client.force_login(self.seller.user)
+        self.client.get(reverse("message_poll", args=[self.conv.id]) + "?after=0")  # seller has the chat open
+        mail.outbox.clear()
+        self._send(self.buyer, "Quick question")
+        self.assertFalse(Notification.objects.filter(user=self.seller.user).exists())
+        self.assertEqual(mail.outbox, [])
+
+    def test_email_is_sent_after_the_reply(self):
+        from django.core import mail
+        from bees import background
+        calls = []
+        real = background._run
+        with mock.patch("bees.background._run", side_effect=lambda fn, a, k: (calls.append(fn.__name__), real(fn, a, k))):
+            self._send(self.buyer, "Hello")
+        self.assertIn("_deliver_email", calls)
+        self.assertTrue(any("lm@example.com" in m.to for m in mail.outbox))
+
+    def _photo(self, name="p.jpg", fmt="JPEG"):
+        import io as _io
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        buf = _io.BytesIO()
+        img = Image.new("RGB", (2400, 1200), "red")
+        exif = Image.Exif()
+        exif[0x010F] = "SecretCam"  # camera maker - must be stripped
+        img.save(buf, fmt, exif=exif) if fmt == "JPEG" else img.save(buf, fmt)
+        return SimpleUploadedFile(name, buf.getvalue(), content_type="image/jpeg")
+
+    def test_photo_message_is_private_and_cleaned(self):
+        from PIL import Image
+        self.addCleanup(lambda: [m.image.delete(save=False) for m in Message.objects.exclude(image="")])
+        if True:
+            self.client.force_login(self.buyer)
+            r = self.client.post(reverse("message_send", args=[self.conv.id]), {"body": "", "photo": self._photo()}, HTTP_X_REQUESTED_WITH="fetch")
+            self.assertEqual(r.status_code, 200, r.content)
+            url = r.json()["message"]["image"]
+            msg = Message.objects.get()
+            with msg.image.open("rb") as fh:
+                img = Image.open(fh)
+                self.assertLessEqual(max(img.size), 1600)
+                self.assertNotIn(0x010F, img.getexif())
+            self.assertEqual(self.client.get(url).status_code, 200)
+            self.client.force_login(self.seller.user)
+            self.assertEqual(self.client.get(url).status_code, 200)
+            outsider = User.objects.create_user("peek", "peek@example.com", "pass12345")
+            self.client.force_login(outsider)
+            self.assertEqual(self.client.get(url).status_code, 404)
+            self.client.force_login(self.seller.user)
+            self.assertContains(self.client.get(reverse("seller_messages")), "Photo")
+
+    def test_bad_photo_is_refused(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.client.force_login(self.buyer)
+        r = self.client.post(reverse("message_send", args=[self.conv.id]),
+                             {"photo": SimpleUploadedFile("x.jpg", b"not an image", content_type="image/jpeg")}, HTTP_X_REQUESTED_WITH="fetch")
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(Message.objects.exists())
+
+    def test_saved_replies(self):
+        self.client.force_login(self.seller.user)
+        self.client.post(reverse("seller_quick_replies"), {"quick_replies": "Hi there!\n\nShips tomorrow", "next": "https://evil.example/"})
+        self.seller.refresh_from_db()
+        self.assertEqual(self.seller.quick_replies, "Hi there!\nShips tomorrow")
+        r = self.client.get(reverse("seller_conversation", args=[self.conv.id]))
+        self.assertContains(r, "Ships tomorrow")
+        r = self.client.post(reverse("seller_quick_replies"), {"quick_replies": "x", "next": "https://evil.example/"})
+        self.assertNotIn("evil.example", r.url)
+        self.client.force_login(self.buyer)
+        self.assertEqual(self.client.post(reverse("seller_quick_replies"), {"quick_replies": "x"}).status_code, 404)
+
+    def test_installable_app_files(self):
+        m = self.client.get(reverse("pwa_manifest")).json()
+        self.assertEqual(m["display"], "standalone")
+        icon = self.client.get(m["icons"][0]["src"])
+        self.assertEqual(icon["Content-Type"], "image/png")
+        self.assertEqual(self.client.get("/app-icon-64.png").status_code, 404)
+        sw = self.client.get(reverse("service_worker"))
+        self.assertIn("navigate", sw.content.decode())
+        self.assertContains(self.client.get(reverse("offline")), "offline")
+
+    def test_inbox_shows_last_message_preview(self):
+        self._send(self.buyer, "Do you ship to Dubai?")
+        self.client.force_login(self.seller.user)
+        self.assertContains(self.client.get(reverse("seller_messages")), "Do you ship to Dubai?")
+        self.client.force_login(self.buyer)
+        self.assertContains(self.client.get(reverse("messages_inbox")), "You: ")
 
 
 class DealsAndOffersTests(TestCase):

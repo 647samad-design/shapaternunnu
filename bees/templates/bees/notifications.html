@@ -10,6 +10,7 @@
 {% block content %}
 <div class="wrap page" style="max-width:820px;">
     <div class="page-head"><div><h1>Notifications</h1><p>Order updates, offers and messages from sellers.</p></div></div>
+    {% include "bees/partials/alert_settings.html" %}
     <div class="panel">
         {% for n in notifications %}
         <{% if n.link %}a href="{{ n.link }}"{% else %}div{% endif %} class="note {% if not n.is_read %}unread{% endif %}">

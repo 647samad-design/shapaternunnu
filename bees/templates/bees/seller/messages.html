@@ -2,6 +2,7 @@
 {% block page_title %}Messages{% endblock %}
 {% block seller %}
 <div class="adm-head"><div><h1>Messages</h1><p>Questions from shoppers. Quick, friendly answers win more sales.</p></div></div>
+{% include "bees/partials/alert_settings.html" %}
 <div class="msg-layout {% if conv %}has-conv{% endif %}">
     {% include "bees/partials/chat_list.html" with side="seller" url_name="seller_conversation" %}
     {% if conv %}
@@ -16,4 +17,15 @@
     <div class="panel msg-empty" style="display:grid;place-items:center;min-height:320px;text-align:center;"><p class="muted">Choose a conversation.</p></div>
     {% endif %}
 </div>
+<details class="panel quick-edit">
+    <summary><strong>Saved replies</strong> <span class="muted small">Tap one in a chat to use it.</span></summary>
+    <form method="post" action="{% url 'seller_quick_replies' %}" class="form-grid" style="margin-top:12px;">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <label for="qr" class="sr-only">Saved replies</label>
+        <textarea id="qr" name="quick_replies" rows="5" placeholder="One reply per line">{{ seller.quick_replies }}</textarea>
+        <p class="muted small" style="margin:0;">One reply per line, up to 12.</p>
+        <div><button class="btn btn-primary btn-sm" type="submit">Save replies</button></div>
+    </form>
+</details>
+<style>.quick-edit > summary { cursor: pointer; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }</style>
 {% endblock %}

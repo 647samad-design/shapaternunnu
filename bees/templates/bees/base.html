@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="{{ brand.primary_color }}">
+    <link rel="manifest" href="{% url 'pwa_manifest' %}">
+    <link rel="apple-touch-icon" href="{% url 'pwa_icon' 192 %}">
     {% if brand.favicon_url %}<link rel="icon" href="{{ brand.favicon_url }}">{% elif brand.logo %}<link rel="icon" href="{{ brand.logo }}">{% endif %}
     <title>{% block title %}{{ brand.site_name }} — {{ brand.tagline }}{% endblock %}</title>
     <meta name="description" content="{% block meta_description %}{{ brand.site_name }}: {{ brand.tagline }} Secure checkout, fast shipping and easy returns.{% endblock %}">
@@ -71,6 +73,8 @@
         .demo-ribbon { background: #111827; color: #F9FAFB; text-align: center; font-size: .86rem; padding: 6px 12px; }
         .demo-ribbon a { color: #FCD34D; font-weight: 700; }
         .locale-menu .menu-label { display: block; padding: 8px 14px 2px; font-size: .75rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+        details:not([open]) > :not(summary) { display: none; }
+        @media (min-width: 721px) { html[dir="rtl"] .menu-panel { right: auto; left: 0; } }
         .locale-menu[open] .menu-panel { display: grid; }
         .locale-menu .menu-panel { max-height: min(75vh, 600px); overflow-y: auto; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 6px; min-width: min(340px, 92vw); }
         .locale-menu .menu-panel a { gap: 6px; }
@@ -268,6 +272,7 @@
         .icon-btn svg { width: 24px; height: 24px; flex-shrink: 0; }
         .icon-btn .count { position: absolute; top: 3px; left: 18px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 0.75rem; font-weight: 700; display: grid; place-items: center; transition: transform .2s ease; }
         .icon-btn .count.pulse { transform: scale(1.3); }
+        [data-live][hidden] { display: none !important; }
         .icon-label { font-size: 0.95rem; }
         details.menu { position: relative; }
         details.menu > summary { list-style: none; }
@@ -520,13 +525,13 @@
                     <summary class="icon-btn" aria-label="Account menu">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
                         <span class="icon-label">{{ user.first_name|default:user.username|truncatechars:14 }}</span>
-                        {% if unread_notifications_count %}<span class="count">{{ unread_notifications_count }}</span>{% endif %}
+                        <span class="count" data-live="alerts" {% if not unread_notifications_count and not buyer_unread_messages %}hidden{% endif %}>{{ unread_notifications_count|add:buyer_unread_messages }}</span>
                     </summary>
                     <div class="menu-panel">
                         <div class="menu-head" data-no-translate><strong>{{ user.get_full_name|default:user.username }}</strong><span class="muted small">{{ user.email }}</span></div>
                         <a href="{% url 'my_orders' %}">{{ t.my_orders }}</a>
-                        <a href="{% url 'notifications_list' %}">Notifications{% if unread_notifications_count %} ({{ unread_notifications_count }}){% endif %}</a>
-                        <a href="{% url 'messages_inbox' %}">{{ t.messages }}{% if buyer_unread_messages %} ({{ buyer_unread_messages }}){% endif %}</a>
+                        <a href="{% url 'notifications_list' %}">Notifications<span data-live-paren="notifications">{% if unread_notifications_count %} ({{ unread_notifications_count }}){% endif %}</span></a>
+                        <a href="{% url 'messages_inbox' %}">{{ t.messages }}<span data-live-paren="messages">{% if buyer_unread_messages %} ({{ buyer_unread_messages }}){% endif %}</span></a>
                         {% if brand.referral_enabled %}<a href="{% url 'referrals' %}">{{ t.invite_friends }}</a>{% endif %}
                         <a href="{% url 'profile' %}">Account &amp; addresses</a>
                         <a href="{% url 'payment_methods' %}">Saved cards</a>
@@ -1006,6 +1011,106 @@
         tick(); setInterval(tick, 1000);
     })();
     </script>
+    {% if user.is_authenticated %}
+    <div hidden id="lm-words"><span data-w="new_message">You have a new message</span></div>
+    <script>
+    /* Live alerts: badges update, a soft chime plays and a toast pops up
+       when something new arrives - no refresh needed. */
+    (function () {
+        var URL = '{% url "live" %}', latest = null, counts = null, fails = 0, timer = null, ctx = null;
+        function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+        function audio() {
+            var A = window.AudioContext || window.webkitAudioContext;
+            if (!A) return null;
+            if (!ctx) { try { ctx = new A(); } catch (e) { return null; } }
+            if (ctx.state === 'suspended') ctx.resume();
+            return ctx;
+        }
+        ['pointerdown', 'keydown', 'touchstart'].forEach(function (ev) { window.addEventListener(ev, function () { audio(); }, { once: true, passive: true }); });
+        var Alert = window.LumenAlert = {
+            soundOn: function () { return store('lm-sound') !== 'off'; },
+            setSound: function (on) { store('lm-sound', on ? 'on' : 'off'); },
+            sound: function () {
+                if (!Alert.soundOn()) return;
+                var last = parseInt(store('lm-chime') || '0', 10), now = Date.now();
+                if (now - last < 2500) return;  // another tab just chimed
+                store('lm-chime', String(now));
+                var c = audio(); if (!c || c.state !== 'running') return;
+                [[880, 0], [1320, 0.12]].forEach(function (n) {
+                    var o = c.createOscillator(), g = c.createGain(), t = c.currentTime + n[1];
+                    o.type = 'sine'; o.frequency.value = n[0];
+                    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.18, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+                    o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + 0.4);
+                });
+                if (navigator.vibrate) { try { navigator.vibrate(60); } catch (e) {} }
+            },
+            desktop: function (title, body, link) {
+                if (!('Notification' in window) || Notification.permission !== 'granted') return;
+                try {
+                    var n = new Notification(title, { body: body || '', tag: 'lumen-' + (link || title), icon: '{% if brand.favicon_url %}{{ brand.favicon_url|escapejs }}{% elif brand.logo %}{{ brand.logo|escapejs }}{% endif %}' });
+                    n.onclick = function () { window.focus(); if (link) location.href = link; n.close(); };
+                } catch (e) {}
+            },
+            check: function () { clearTimeout(timer); poll(); }
+        };
+        function W(k) { var el = document.querySelector('#lm-words [data-w="' + k + '"]'); return el ? el.textContent : k; }
+        var baseTitle = document.title.replace(/^\(\d+\)\s*/, '');
+        function paint(d) {
+            var total = d.notifications + d.messages, all = total + d.seller_messages;
+            document.querySelectorAll('[data-live]').forEach(function (el) {
+                var key = el.dataset.live, n = key === 'alerts' ? total : (d[key] || 0);
+                if (String(n) !== el.textContent.trim()) { el.classList.add('pulse'); setTimeout(function () { el.classList.remove('pulse'); }, 400); }
+                el.textContent = n; el.hidden = !n;
+            });
+            document.querySelectorAll('[data-live-paren]').forEach(function (el) { var n = d[el.dataset.liveParen] || 0; el.textContent = n ? ' (' + n + ')' : ''; });
+            document.title = (all ? '(' + all + ') ' : '') + baseTitle;
+        }
+        function refreshList() {
+            var list = document.querySelector('[data-conv-list]');
+            if (!list) return;
+            fetch(location.href, { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.text(); }).then(function (html) {
+                var doc = new DOMParser().parseFromString(html, 'text/html'), fresh = doc.querySelector('[data-conv-list]');
+                if (fresh) list.innerHTML = fresh.innerHTML;
+            }).catch(function () {});
+        }
+        function handle(d) {
+            var onChat = !!document.querySelector('[data-chat]');
+            if (counts) {
+                var news = (d.new || []).filter(function (n) { return !(onChat && n.link === location.pathname); });
+                var moreMsgs = d.messages > counts.messages || d.seller_messages > counts.seller_messages;
+                if (news.length) {
+                    var top = news[news.length - 1];
+                    Alert.sound();
+                    if (!document.hidden && window.showToast) showToast(top.text + (news.length > 1 ? ' (+' + (news.length - 1) + ' more)' : ''), 'success');
+                    if (document.hidden) Alert.desktop(top.text, '', top.link);
+                } else if (moreMsgs && !onChat) {
+                    Alert.sound();
+                    if (!document.hidden && window.showToast) showToast(W('new_message'), 'success');
+                    if (document.hidden) Alert.desktop(W('new_message'), '', d.seller_messages > counts.seller_messages ? '{% url "seller_messages" %}' : '{% url "messages_inbox" %}');
+                }
+                if (d.messages !== counts.messages || d.seller_messages !== counts.seller_messages) refreshList();
+            }
+            counts = d; latest = d.latest;
+            paint(d);
+        }
+        function schedule() {
+            var wait = document.hidden ? 30000 : (document.querySelector('[data-conv-list]') ? 3000 : 6000);
+            if (fails) wait = Math.min(120000, wait * (fails + 1));
+            clearTimeout(timer); timer = setTimeout(poll, wait);
+        }
+        function poll() {
+            fetch(URL + (latest !== null ? '?since=' + latest : ''), { credentials: 'same-origin', cache: 'no-store', headers: { 'Accept': 'application/json' } })
+                .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+                .then(function (d) { fails = 0; handle(d); })
+                .catch(function () { fails++; })
+                .then(schedule);
+        }
+        timer = setTimeout(poll, 1200);
+        document.addEventListener('visibilitychange', function () { if (!document.hidden) Alert.check(); });
+    })();
+    </script>
+    {% endif %}
+    <script>if ('serviceWorker' in navigator && location.protocol === 'https:') { window.addEventListener('load', function () { navigator.serviceWorker.register('{% url "service_worker" %}').catch(function () {}); }); }</script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

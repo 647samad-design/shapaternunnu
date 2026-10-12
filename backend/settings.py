@@ -103,6 +103,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'bees.background.AfterResponseMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.locale.LocaleMiddleware',
@@ -355,6 +356,15 @@ if os.environ.get('EMAIL_HOST'):
 # running more than one app process (e.g. several gunicorn workers).
 if os.environ.get('REDIS_URL'):
     CACHES = {'default': {'BACKEND': 'django.core.cache.backends.redis.RedisCache', 'LOCATION': os.environ['REDIS_URL']}}
+    CACHES['live'] = CACHES['default']
+else:
+    CACHES = {
+        'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'},
+        # Who is online / typing: shared by every web worker on this server.
+        'live': ({'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'live'} if 'test' in sys.argv else
+                 {'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
+                  'LOCATION': str(BASE_DIR / '.live-cache'), 'OPTIONS': {'MAX_ENTRIES': 5000}}),
+    }
 
 # Error monitoring (Sentry). Only activates if SENTRY_DSN is set as an
 # environment variable - without it, this is a no-op, so nothing breaks
