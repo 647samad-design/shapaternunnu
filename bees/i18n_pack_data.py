@@ -497,3 +497,8 @@ ENTRIES.update({
     "Paid with": ("ادائیگی بذریعہ", "Payment ki", "تم الدفع بواسطة", "Pagado con", "Payé avec"),
     "Track package": ("پارسل ٹریک کریں", "Parcel track karein", "تتبّع الشحنة", "Seguir paquete", "Suivre le colis"),
 })
+
+ENTRIES.update({
+    "{0} reviews": ("{0} جائزے", "{0} reviews", "{0} تقييمات", "{0} reseñas", "{0} avis"),
+    "{0} questions": ("{0} سوالات", "{0} sawalat", "{0} أسئلة", "{0} preguntas", "{0} questions"),
+})
