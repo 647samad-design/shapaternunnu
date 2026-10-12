@@ -45,7 +45,7 @@
         <ol class="track-steps">{% for s in steps %}<li class="{% if s.done %}done{% endif %}">{{ s.label }}</li>{% endfor %}</ol>
         {% endif %}
         <div class="track-facts">
-            <div><span>Going to</span><strong>{{ order.city }}{% if order.country %}, {{ order.country|country_name }}{% endif %}</strong></div>
+            <div><span>Going to</span><strong data-no-translate>{{ order.city }}{% if order.country %}, {{ order.country|country_name }}{% endif %}</strong></div>
             {% if order.courier_name %}<div><span>Courier</span><strong>{{ order.courier_name }}</strong></div>{% endif %}
             {% if order.estimated_delivery and order.status != "cancelled" %}<div><span>{% if order.status == "delivered" %}Delivered{% else %}Expected by{% endif %}</span><strong>{% if order.status == "delivered" and order.delivered_at %}{{ order.delivered_at|date:"M j, Y" }}{% else %}{{ order.estimated_delivery|date:"M j, Y" }}{% endif %}</strong></div>{% endif %}
             {% if order.payment_method == "cod" and order.status != "cancelled" %}<div><span>Payment</span><strong>{% if order.cod_collected_at %}Paid in cash{% else %}Cash on delivery{% endif %}</strong></div>{% endif %}

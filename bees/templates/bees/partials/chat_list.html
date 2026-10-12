@@ -3,7 +3,7 @@
     {% for c in conversations %}
     <a href="{% url url_name c.id %}" class="conv {% if conv and conv.id == c.id %}on{% endif %}">
         <span class="conv-avatar" aria-hidden="true">{% if side == "buyer" %}{{ c.seller.display_name|first|upper }}{% else %}{{ c.buyer.first_name|default:c.buyer.username|first|upper }}{% endif %}</span>
-        <span class="conv-main"><strong>{% if side == "buyer" %}{{ c.seller.display_name }}{% else %}{{ c.buyer.get_full_name|default:c.buyer.username }}{% endif %}</strong>
+        <span class="conv-main"><strong data-no-translate>{% if side == "buyer" %}{{ c.seller.display_name }}{% else %}{{ c.buyer.get_full_name|default:c.buyer.username }}{% endif %}</strong>
             <span class="muted small">{% if c.last_message_at %}{{ c.last_message_at|timesince }} ago{% else %}New{% endif %}{% if c.reported %} · reported{% endif %}</span></span>
         {% if side == "buyer" and c.buyer_unread %}<span class="n">{{ c.buyer_unread }}</span>{% elif side == "seller" and c.seller_unread %}<span class="n">{{ c.seller_unread }}</span>{% endif %}
     </a>

@@ -383,3 +383,43 @@ def singular(word):
     if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
         return word[:-1]
     return word
+
+
+# ---------------------------------------------------------------------------
+# Translating shop text (Admin > Translations)
+# ---------------------------------------------------------------------------
+
+LANG_NAMES = {"ur": "Urdu (Urdu script)", "roman": "Roman Urdu (Urdu written in English letters)", "ar": "Arabic",
+              "es": "Spanish", "fr": "French"}
+
+TRANSLATE_PROMPT = """Translate these online-shop interface texts from English into {language}.
+
+Rules:
+- Keep every placeholder exactly as written: {{0}}, {{1}}, {{store}}.
+- Keep brand names, emoji and symbols. Keep it short and natural, like a professional e-commerce site.
+- Return JSON only: a list of strings in the same order, one translation per input.
+
+Texts:
+{items}"""
+
+
+def translate_texts(texts, lang):
+    """Translates a batch of shop texts with Claude. Returns a list the same
+    length as ``texts`` ("" where a translation couldn't be made), or None
+    when AI isn't set up / reachable."""
+    if not getattr(settings, "AI_API_KEY", "") or lang not in LANG_NAMES or not texts:
+        return None
+    try:
+        reply = _call_claude(TRANSLATE_PROMPT.format(language=LANG_NAMES[lang], items=json.dumps(texts, ensure_ascii=False)),
+                             max_tokens=4000)
+        match = re.search(r"\[.*\]", reply, re.S)
+        data = json.loads(match.group(0)) if match else []
+    except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
+        logger.warning("AI translation unavailable: %s", exc)
+        return None
+    out = []
+    for i, source in enumerate(texts):
+        tr = str(data[i]).strip() if i < len(data) else ""
+        wanted = sorted(re.findall(r"\{\d+\}|\{store\}", source))
+        out.append(tr if tr and sorted(re.findall(r"\{\d+\}|\{store\}", tr)) == wanted else "")
+    return out

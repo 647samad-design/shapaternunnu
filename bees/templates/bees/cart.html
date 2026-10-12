@@ -53,7 +53,7 @@
                 <div>
                     <a class="line-name" href="{% url 'product_detail' row.product.id %}">{{ row.product.name }}</a>
                     {% if row.label %}<div class="small" style="font-weight:700;">{{ row.label }}</div>{% endif %}
-                    <div class="muted small">{% if row.bundle %}<s>{{ row.base_price|money }}</s> {% endif %}{{ row.unit_price|money }} each · {{ row.product.seller_name }}{% if row.qty > row.stock %} · <span style="color:var(--sale);">only {{ row.stock }} left</span>{% endif %}</div>
+                    <div class="muted small">{% if row.bundle %}<s>{{ row.base_price|money }}</s> {% endif %}{{ row.unit_price|money }} each · <span data-no-translate>{{ row.product.seller_name }}</span>{% if row.qty > row.stock %} · <span style="color:var(--sale);">only {{ row.stock }} left</span>{% endif %}</div>
                     {% if row.product.seller_account_id %}<a class="small link" href="{% url 'message_seller' row.product.id %}" rel="nofollow">💬 Ask the seller</a>{% endif %}
                     {% if row.bundle %}<div class="small" style="color:var(--ok);font-weight:700;">✓ {{ t.bulk_applied }} (−{{ row.product.bulk_percent }}%)</div>{% elif row.product.has_bulk_offer %}<div class="small muted">{{ t.bulk_offer|fill:row.product }}</div>{% endif %}
                     <div class="line-tools">

@@ -340,6 +340,10 @@
         .footer-news input { flex: 1 1 200px; min-width: 0; min-height: 48px; padding: 0 16px; border-radius: var(--radius-sm); border: 1.5px solid transparent; background: color-mix(in srgb, var(--on-brand) 12%, transparent); color: var(--on-brand); }
         .footer-news input::placeholder { color: color-mix(in srgb, var(--on-brand) 65%, transparent); }
         .footer-news input:focus { outline: none; border-color: var(--accent); }
+        .footer-locale { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 18px 0; border-top: 1px solid color-mix(in srgb, var(--on-brand) 18%, transparent); font-size: .95rem; }
+        .footer-locale label { font-weight: 700; }
+        .footer-locale select { min-height: 40px; padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid color-mix(in srgb, var(--on-brand) 30%, transparent); background: color-mix(in srgb, var(--on-brand) 8%, transparent); color: var(--on-brand); width: auto; }
+        .footer-locale select option { color: #141A1F; }
         .footer-bottom { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 0 28px; border-top: 1px solid color-mix(in srgb, var(--on-brand) 18%, transparent); font-size: 0.925rem; }
         .pay-row { display: flex; flex-wrap: wrap; gap: 8px; }
         .pay-chip { padding: 5px 10px; border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 0.8rem; font-weight: 700; }
@@ -516,7 +520,7 @@
                         {% if unread_notifications_count %}<span class="count">{{ unread_notifications_count }}</span>{% endif %}
                     </summary>
                     <div class="menu-panel">
-                        <div class="menu-head"><strong>{{ user.get_full_name|default:user.username }}</strong><span class="muted small">{{ user.email }}</span></div>
+                        <div class="menu-head" data-no-translate><strong>{{ user.get_full_name|default:user.username }}</strong><span class="muted small">{{ user.email }}</span></div>
                         <a href="{% url 'my_orders' %}">{{ t.my_orders }}</a>
                         <a href="{% url 'notifications_list' %}">Notifications{% if unread_notifications_count %} ({{ unread_notifications_count }}){% endif %}</a>
                         <a href="{% url 'messages_inbox' %}">{{ t.messages }}{% if buyer_unread_messages %} ({{ buyer_unread_messages }}){% endif %}</a>
@@ -646,6 +650,23 @@
                 </form>
             </div>
 
+            {% if brand.show_language_menu or currencies %}
+            <div class="footer-locale">
+                {% if brand.show_language_menu %}
+                <label for="foot-lang">{{ t.language }}</label>
+                <select id="foot-lang" data-no-translate onchange="location.href=this.value">
+                    {% for code, name in language_names.items %}<option value="{% url 'set_language' code %}" {% if code == current_lang %}selected{% endif %}>{{ name }}</option>{% endfor %}
+                </select>
+                {% endif %}
+                {% if currencies %}
+                <label for="foot-cur">{{ t.currency }}</label>
+                <select id="foot-cur" data-no-translate onchange="location.href=this.value">
+                    <option value="{% url 'set_currency' store_currency_code %}" {% if current_currency == store_currency_code %}selected{% endif %}>{{ store_currency_code }}</option>
+                    {% for c in currencies %}<option value="{% url 'set_currency' c.code %}" {% if current_currency == c.code %}selected{% endif %}>{{ c.code }}</option>{% endfor %}
+                </select>
+                {% endif %}
+            </div>
+            {% endif %}
             <div class="footer-bottom">
                 <span>&copy; {% now "Y" %} {{ brand.site_name }}{% if brand.company_address %}. {{ brand.company_address }}{% endif %}</span>
                 <div class="pay-row" aria-label="Accepted payment methods">

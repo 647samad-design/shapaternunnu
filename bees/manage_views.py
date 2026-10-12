@@ -1505,3 +1505,77 @@ def referrals(request):
         "welcome_used": welcome.filter(code__in=used).count(),
     }
     return _render(request, "referrals.html", {"section": "customers", "top": top, "stats": stats, "brand": SiteSettings.load()})
+
+
+# ---------------------------------------------------------------------------
+# Translations of the shop's own text
+# ---------------------------------------------------------------------------
+
+TRANSLATION_LANGS = [("ur", "Urdu"), ("roman", "Roman Urdu"), ("ar", "Arabic"), ("es", "Spanish"), ("fr", "French")]
+
+
+@staff_required
+def translations(request):
+    from django.conf import settings as dj
+    from . import ai, i18n
+    from .i18n_pack import PACK
+    from .models import UIText
+    lang = request.GET.get("lang") or request.POST.get("lang") or "ar"
+    if lang not in dict(TRANSLATION_LANGS):
+        lang = "ar"
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "save":
+            row = get_object_or_404(UIText, pk=request.POST.get("id"))
+            setattr(row, lang, request.POST.get("text", "").strip()[:2000])
+            row.by_ai = False
+            row.save()
+            messages.success(request, "Translation saved.")
+        elif action == "add":
+            source = i18n.normalize(request.POST.get("source", ""))[:400]
+            if source:
+                row, _ = UIText.objects.get_or_create(source=source)
+                setattr(row, lang, request.POST.get("text", "").strip()[:2000])
+                row.save()
+                messages.success(request, "Translation added.")
+        elif action == "ai":
+            todo = [r for r in UIText.objects.filter(**{lang: ""}) if r.source not in PACK][:60]
+            if not todo:
+                messages.info(request, "Everything is already translated.")
+            else:
+                done = 0
+                for start in range(0, len(todo), 30):
+                    batch = todo[start:start + 30]
+                    result = ai.translate_texts([r.source for r in batch], lang)
+                    if result is None:
+                        messages.error(request, "AI translation isn't available. Add ANTHROPIC_API_KEY to .env, or type translations by hand.")
+                        break
+                    for row, text in zip(batch, result):
+                        if text:
+                            setattr(row, lang, text)
+                            row.by_ai = True
+                            row.save()
+                            done += 1
+                if done:
+                    _log(request, f"AI-translated {done} shop texts into {lang}")
+                    messages.success(request, f"{done} text{'s' if done != 1 else ''} translated. Check a few, then press again for more.")
+        elif action == "delete":
+            UIText.objects.filter(pk=request.POST.get("id")).delete()
+            i18n.clear_cache()
+        return redirect(f"{reverse('manage_translations')}?lang={lang}&show={request.POST.get('show', 'missing')}")
+
+    show = request.GET.get("show", "missing")
+    q = request.GET.get("q", "").strip()
+    rows = UIText.objects.all()
+    if q:
+        rows = rows.filter(Q(source__icontains=q) | Q(**{f"{lang}__icontains": q}))
+    rows = [r for r in rows if r.source not in PACK]
+    missing = [r for r in rows if not getattr(r, lang)]
+    listing = missing if show == "missing" else rows
+    for r in listing:
+        r.current = getattr(r, lang)
+    return _render(request, "translations.html", {
+        "section": "settings", "langs": TRANSLATION_LANGS, "lang": lang, "show": show, "q": q,
+        "page_obj": _page(request, listing, 30), "missing_count": len(missing), "builtin_count": len(PACK),
+        "custom_count": len(rows), "ai_ready": bool(dj.AI_API_KEY),
+    })

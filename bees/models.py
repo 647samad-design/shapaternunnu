@@ -1331,7 +1331,7 @@ class SiteSettings(models.Model):
         "Allow checkout without an account", default=False,
         help_text="Off (recommended): shoppers sign in or create an account before ordering, so every order has a verified customer, order history and support chat.")
     allow_cash_on_delivery = models.BooleanField(default=True, help_text="Show 'Cash on delivery' at checkout. Card payments appear automatically once Stripe keys are set.")
-    show_language_menu = models.BooleanField(default=False, help_text="Show the English / Urdu / Roman Urdu language switcher.")
+    show_language_menu = models.BooleanField(default=True, help_text="Let shoppers choose the shop language (English, Arabic, Spanish, French, Urdu, Roman Urdu) in the header and footer.")
     banner_text = models.CharField(
         max_length=200, blank=True,
         help_text="Shown as a site-wide announcement bar at the top of every page, e.g. 'Summer sale: 20% off everything'. Leave blank to hide it.",
@@ -1404,6 +1404,33 @@ class Currency(models.Model):
         super().save(*args, **kwargs)
         from django.core.cache import cache
         cache.delete("currencies:v1")
+
+
+class UIText(models.Model):
+    """One piece of shop text and its translations (Admin > Translations).
+    New text is added automatically the first time a page shows it in
+    another language."""
+    source = models.CharField(max_length=400, unique=True)
+    ur = models.TextField("Urdu", blank=True)
+    roman = models.TextField("Roman Urdu", blank=True)
+    ar = models.TextField("Arabic", blank=True)
+    es = models.TextField("Spanish", blank=True)
+    fr = models.TextField("French", blank=True)
+    by_ai = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["source"]
+        verbose_name = "Shop text"
+
+    def __str__(self):
+        return self.source[:60]
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        from .i18n import clear_cache
+        clear_cache()
 
 
 class Conversation(models.Model):

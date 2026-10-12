@@ -148,7 +148,7 @@
 
         <div class="buybox">
             <h1>{{ product.name }}</h1>
-            {% if product.seller_name %}<p class="seller-line">Sold by <a href="{% url 'store_page' product.seller_name %}">{{ product.seller_name }}</a>{% if product.seller_account.has_badge %} <span class="pro-badge">★ Pro seller</span>{% endif %}{% if product.seller_account.verified_at %} <span class="seller-badge verified">✓ {{ t.verified_seller }}</span>{% endif %}{% if product.seller_account.top_seller %} <span class="seller-badge top">★ {{ t.top_seller }}</span>{% endif %}</p>{% endif %}
+            {% if product.seller_name %}<p class="seller-line">Sold by <a href="{% url 'store_page' product.seller_name %}" data-no-translate>{{ product.seller_name }}</a>{% if product.seller_account.has_badge %} <span class="pro-badge">★ Pro seller</span>{% endif %}{% if product.seller_account.verified_at %} <span class="seller-badge verified">✓ {{ t.verified_seller }}</span>{% endif %}{% if product.seller_account.top_seller %} <span class="seller-badge top">★ {{ t.top_seller }}</span>{% endif %}</p>{% endif %}
             {% if product.rating_count %}
             <div class="rating-line"><span class="stars" aria-hidden="true">{{ product.average_rating|stars }}</span><strong>{{ product.average_rating }}</strong><a href="#reviews">{{ product.rating_count }} review{{ product.rating_count|pluralize }}</a></div>
             {% endif %}
@@ -210,7 +210,7 @@
             {% if product.seller_account and product.seller_account.status == "approved" %}{% with sa=product.seller_account %}
             <div class="seller-box">
                 <span class="av" aria-hidden="true">{% if sa.store_logo %}<img src="{{ sa.store_logo.url }}" alt="">{% else %}{{ sa.display_name|first|upper }}{% endif %}</span>
-                <span class="who"><strong><a href="{% url 'store_page' sa.display_name %}">{{ sa.display_name }}</a></strong>
+                <span class="who"><strong><a href="{% url 'store_page' sa.display_name %}" data-no-translate>{{ sa.display_name }}</a></strong>
                     <span class="muted small">{% if seller_reply %}Usually replies {{ seller_reply }}{% else %}Ask about sizes, delivery or custom orders{% endif %}</span></span>
                 <a class="btn btn-secondary btn-sm" href="{% url 'message_seller' product.id %}" rel="nofollow">💬 {{ t.message_seller }}</a>
             </div>
@@ -235,7 +235,7 @@
     <div class="detail-grid">
         <section class="panel">
             <h2>{{ t.product_details }}</h2>
-            <div class="description" style="margin-top:14px;">{{ product.description|default:"The seller hasn't added a description yet." }}</div>
+            <div class="description" style="margin-top:14px;" data-no-translate>{{ product.description|default:"The seller hasn't added a description yet." }}</div>
         </section>
 
         <section class="panel guide-panel" id="guide" data-guide-panel {% if not product.guide %}data-empty{% endif %}>
@@ -258,8 +258,8 @@
                 <h3>What buyers say <span class="muted small">({{ review_summary.count }} reviews)</span></h3>
                 <div class="meter" aria-hidden="true"><i style="width:{{ review_summary.happy_pct }}%"></i></div>
                 <p class="small"><strong>{{ review_summary.happy_pct }}%</strong> of buyers rated it 4★ or more.</p>
-                {% if review_summary.best %}<blockquote class="good">“{{ review_summary.best }}”</blockquote>{% endif %}
-                {% if review_summary.worst %}<blockquote class="bad">“{{ review_summary.worst }}”</blockquote>{% endif %}
+                {% if review_summary.best %}<blockquote class="good" data-no-translate>“{{ review_summary.best }}”</blockquote>{% endif %}
+                {% if review_summary.worst %}<blockquote class="bad" data-no-translate>“{{ review_summary.worst }}”</blockquote>{% endif %}
             </div>
             {% endif %}
             {% if ai_enabled %}
@@ -285,9 +285,9 @@
             {% endif %}
             {% for q in questions %}
             <div class="qa">
-                <strong>{{ q.question }}</strong>
+                <strong data-no-translate>{{ q.question }}</strong>
                 <div class="muted small">Asked by {{ q.username }} · {{ q.created_at|date:"M j, Y" }}</div>
-                {% if q.answer %}<div class="answer">{{ q.answer }}</div>{% endif %}
+                {% if q.answer %}<div class="answer" data-no-translate>{{ q.answer }}</div>{% endif %}
             </div>
             {% empty %}
             <p class="muted" style="margin-top:10px;">No questions yet.</p>
@@ -333,11 +333,11 @@
                 <article class="review">
                     <div class="review-top">
                         <span class="stars" aria-label="{{ review.rating }} out of 5">{{ review.rating|stars }}</span>
-                        <strong>{{ review.username }}</strong>
+                        <strong data-no-translate>{{ review.username }}</strong>
                         {% if review.is_verified_purchase %}<span class="badge badge-ok">Verified purchase</span>{% endif %}
                     </div>
                     <span class="muted small">{{ review.created_at|date:"M j, Y" }}</span>
-                    <p>{{ review.comment }}</p>
+                    <p data-no-translate>{{ review.comment }}</p>
                 </article>
                 {% empty %}
                 <p class="muted">{{ t.no_reviews }}</p>

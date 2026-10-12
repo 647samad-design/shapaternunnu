@@ -1,4 +1,4 @@
-<select name="{{ name }}" id="{{ field_id }}" autocomplete="country" {% if required %}required{% endif %}>
+<select data-no-translate name="{{ name }}" id="{{ field_id }}" autocomplete="country" {% if required %}required{% endif %}>
     <option value="">Choose a country</option>
     {% for code, label in countries %}<option value="{{ code }}" {% if code == selected %}selected{% endif %}>{{ label }}</option>{% endfor %}
 </select>

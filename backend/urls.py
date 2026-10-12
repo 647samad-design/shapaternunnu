@@ -80,6 +80,7 @@ urlpatterns = [
     path('manage/messages/', mv.conversations, name='manage_conversations'),
     path('manage/messages/<int:pk>/', mv.conversation_detail, name='manage_conversation'),
     path('manage/currencies/', mv.currencies, name='manage_currencies'),
+    path('manage/translations/', mv.translations, name='manage_translations'),
     path('manage/referrals/', mv.referrals, name='manage_referrals'),
     path('account/referrals/', account_views.referrals, name='referrals'),
     path('wishlist/toggle/<int:pk>/', views.toggle_wishlist, name='toggle_wishlist'),

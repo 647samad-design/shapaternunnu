@@ -5,7 +5,7 @@
         <div style="min-width:0;flex:1;"><strong>{{ title }}</strong>{% if subtitle %}<span class="muted small">{{ subtitle }}</span>{% endif %}</div>
         {% if not readonly %}<form method="post" action="{% url 'message_report' conv.id %}" style="margin:0;">{% csrf_token %}<button class="btn btn-ghost btn-sm" type="submit" title="Report this conversation to the store team">Report</button></form>{% endif %}
     </div>
-    <div class="chat-log" data-log aria-live="polite">
+    <div class="chat-log" data-log aria-live="polite" data-no-translate>
         {% for m in thread %}
         <div class="bubble {% if m.mine %}mine{% endif %}" data-id="{{ m.id }}">
             {% if m.product %}<a class="bubble-about" href="{{ m.product.url }}">About: {{ m.product.name }}</a>{% endif %}
