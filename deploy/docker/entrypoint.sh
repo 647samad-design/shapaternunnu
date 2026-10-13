@@ -24,6 +24,20 @@ sys.exit(1)
 PY
 }
 
+wait_for_migrations() {
+    # The web container applies database updates; jobs wait until it's done.
+    tries=0
+    until python manage.py migrate --check >/dev/null 2>&1; do
+        tries=$((tries + 1))
+        if [ "$tries" -ge 100 ]; then
+            echo "Database updates still missing after 5 minutes - is the web container running?" >&2
+            return 1
+        fi
+        echo "Waiting for the web container to apply database updates..."
+        sleep 3
+    done
+}
+
 case "${1:-web}" in
     web)
         wait_for_database
@@ -38,6 +52,7 @@ case "${1:-web}" in
         ;;
     scheduler)
         wait_for_database
+        wait_for_migrations
         exec python deploy/docker/scheduler.py
         ;;
     *)

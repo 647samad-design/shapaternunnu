@@ -91,9 +91,15 @@ jobs:
           done
       - name: Scheduler runs its jobs
         run: |
-          sleep 10
+          for i in $(seq 1 30); do
+            if docker compose logs scheduler | grep -q "run_promotions ok"; then
+              docker compose logs scheduler
+              exit 0
+            fi
+            sleep 3
+          done
           docker compose logs scheduler
-          docker compose logs scheduler | grep -q "run_promotions ok"
+          exit 1
       - name: Admin account can be created
         run: |
           docker compose exec -T -e DJANGO_SUPERUSER_PASSWORD=ci-Admin-pass-123 web \
