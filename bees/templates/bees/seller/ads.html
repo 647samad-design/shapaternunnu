@@ -1,0 +1,46 @@
+{% extends "bees/seller/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Sponsored products{% endblock %}
+{% block seller %}
+<div class="adm-head"><div><h1>Sponsored products</h1><p>Show a product at the top of search results, its category page and the homepage. You only pay when a shopper clicks, and never more than your daily budget.</p></div></div>
+{% if not site.ads_enabled %}<div class="callout warn" style="margin:0;">Sponsored products are turned off on this store right now.</div>{% endif %}
+<div class="callout" style="margin:0;">Clicks are paid from your earnings. Earnings you can use: <strong>{{ owed|money }}</strong>. Ads pause by themselves when it runs out. Repeat clicks from the same shopper on the same day, your own clicks and bots are free.</div>
+{% if site.ads_enabled %}
+<section class="panel">
+    <h2>Promote a product</h2>
+    {% if products %}
+    <form method="post" class="ad-form">{% csrf_token %}<input type="hidden" name="action" value="create">
+        <div class="field"><label for="ad-p">Product</label><select id="ad-p" name="product" required>{% for p in products %}<option value="{{ p.id }}">{{ p.name|truncatechars:50 }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="ad-b">Cost per click</label><input id="ad-b" name="bid" type="number" step="0.01" min="{{ site.ads_min_bid }}" value="{{ site.ads_min_bid|add:0.15|floatformat:2 }}" required><span class="hint">Higher = shown before others. Min {{ site.ads_min_bid|money }}.</span></div>
+        <div class="field"><label for="ad-d">Daily budget</label><input id="ad-d" name="daily_budget" type="number" step="0.01" min="1" value="5.00" required></div>
+        <button class="btn btn-primary btn-sm" type="submit">Start ad</button>
+    </form>
+    {% else %}<p class="muted">All your live products are already sponsored, or you have no live products yet.</p>{% endif %}
+</section>
+{% endif %}
+<section class="panel" style="padding:8px 20px;">
+    <div class="table-scroll"><table class="table">
+        <thead><tr><th>Product</th><th class="num">Shown</th><th class="num">Clicks</th><th class="num">Spent</th><th class="num">Sales</th><th>Bid / budget</th><th></th></tr></thead>
+        <tbody>
+        {% for c in campaigns %}
+        <tr><td data-no-translate><strong>{{ c.product.name|truncatechars:36 }}</strong><br>{% if c.status == "active" %}<span class="pill ok">Running</span>{% elif c.status == "paused" %}<span class="pill warn">Paused{% if c.paused_by_staff %} by store{% endif %}</span>{% else %}<span class="pill">Ended</span>{% endif %}</td>
+            <td class="num">{{ c.impressions }}</td><td class="num">{{ c.clicks }} <span class="muted small">({{ c.ctr }}%)</span></td>
+            <td class="num">{{ c.spend_total|money }}<br><span class="muted small">today {{ c.today|money }}</span></td>
+            <td class="num">{{ c.sales|money }}{% if c.roas is not None %}<br><span class="muted small">{{ c.roas }}× spend</span>{% endif %}</td>
+            <td>{% if c.status != "ended" %}<form method="post" class="ad-edit">{% csrf_token %}<input type="hidden" name="id" value="{{ c.id }}"><input type="hidden" name="action" value="update">
+                <label class="sr-only" for="b{{ c.id }}">Cost per click</label><input class="input" id="b{{ c.id }}" name="bid" type="number" step="0.01" value="{{ c.bid }}">
+                <label class="sr-only" for="d{{ c.id }}">Daily budget</label><input class="input" id="d{{ c.id }}" name="daily_budget" type="number" step="0.01" value="{{ c.daily_budget }}">
+                <button class="btn btn-ghost btn-sm">Save</button></form>{% else %}{{ c.bid|money }} / {{ c.daily_budget|money }}{% endif %}</td>
+            <td>{% if c.status != "ended" %}<form method="post" style="display:flex;gap:4px;margin:0;">{% csrf_token %}<input type="hidden" name="id" value="{{ c.id }}">
+                {% if c.status == "active" %}<button class="btn btn-ghost btn-sm" name="action" value="pause">Pause</button>{% else %}<button class="btn btn-ghost btn-sm" name="action" value="resume">Resume</button>{% endif %}
+                <button class="btn btn-ghost btn-sm" name="action" value="end" style="color:var(--sale);" onclick="return confirm('End this ad?');">End</button></form>{% endif %}</td></tr>
+        {% empty %}<tr><td colspan="7" class="muted" style="text-align:center;padding:24px;">No ads yet.</td></tr>{% endfor %}
+        </tbody>
+    </table></div>
+</section>
+<style>
+.ad-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; align-items: end; }
+.ad-edit { display: flex; gap: 4px; margin: 0; }
+.ad-edit input { width: 84px; min-height: 34px; }
+</style>
+{% endblock %}

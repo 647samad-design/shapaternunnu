@@ -1,0 +1,12 @@
+{% extends "bees/emails/_base_email.html" %}
+{% block email_body %}{% load bees_extras %}{% site_brand as b %}
+    <h1 style="margin:0 0 8px;font-size:24px;">Your return label is ready</h1>
+    <p style="margin:0 0 16px;color:#56606B;">For <strong>{{ item.product_name }}</strong> from order #{{ order.id }}. Postage is already paid.</p>
+    <ol style="margin:0 0 18px;padding-left:20px;color:#2B333A;">
+        <li>Print the label and stick it on the parcel (cover any old labels).</li>
+        <li>Drop it off with {{ shipment.carrier|default:"the courier" }} or book a pickup.</li>
+        <li>We refund you as soon as it arrives - you can follow it with tracking number {{ shipment.tracking_number }}.</li>
+    </ol>
+    <a href="{{ shipment.label_url }}" style="display:inline-block;background:{{ b.primary_color }};color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:8px;font-weight:bold;">Download the label</a>
+    <p style="margin:16px 0 0;"><a href="{{ orders_url }}" style="color:#56606B;">See it in My orders</a></p>
+{% endblock %}

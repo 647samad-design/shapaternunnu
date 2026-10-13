@@ -1,0 +1,18 @@
+{% extends "bees/base.html" %}
+{% block title %}Email preferences — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:560px;">
+    <div class="panel">
+        {% if done %}
+        <h1>You're unsubscribed</h1>
+        <p class="muted" style="margin-top:8px;"><span>We won't send news and offers to</span> <strong data-no-translate>{{ email }}</strong> <span>any more. Order emails still arrive as usual.</span></p>
+        <a class="btn btn-secondary" style="margin-top:14px;" href="{% url 'home' %}">Back to the shop</a>
+        {% else %}
+        <h1>Stop news and offers?</h1>
+        <p class="muted" style="margin-top:8px;"><span>For</span> <strong data-no-translate>{{ email }}</strong><span>. Order and delivery emails aren't affected.</span></p>
+        <form method="post" style="margin-top:14px;"><input type="hidden" name="e" value="{{ email }}"><input type="hidden" name="t" value="{{ token }}"><button class="btn btn-primary" type="submit">Unsubscribe</button></form>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,6 @@
+{% extends "bees/seller/base.html" %}
+{% block page_title %}Promotions{% endblock %}
+{% block seller %}
+<div class="adm-head"><div><h1>Promotions</h1><p>Discount codes and timed sales for your products. Want more views? Try <a class="link" href="{% url 'seller_ads' %}">Sponsored products</a>.</p></div></div>
+{% include "bees/partials/promotions_body.html" with store=False %}
+{% endblock %}

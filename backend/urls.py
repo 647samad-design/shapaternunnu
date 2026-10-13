@@ -16,6 +16,10 @@ from bees import manage_views as mv
 from bees import seller_views as sv
 from bees import bulk_views as bv
 from bees import giftcards as gc
+from bees import promo_views as pv
+from bees import ads as ads_views
+from bees import campaigns as camp
+from bees import webpush
 from bees.sitemaps import ProductSitemap, CategorySitemap, SellerSitemap, StaticViewSitemap
 from bees.ratelimit import ratelimit
 
@@ -166,6 +170,18 @@ urlpatterns = [
     path('seller/orders/<int:order_id>/packing-slip/', sv.packing_slip, name='seller_packing_slip'),
     path('seller/products/', sv.products, name='seller_products'),
     path('seller/products/bulk/', bv.seller_bulk, name='seller_bulk'),
+    path('seller/promotions/', pv.seller_promotions, name='seller_promotions'),
+    path('seller/ads/', pv.seller_ads, name='seller_ads'),
+    path('manage/ads/', mv.staff_required(pv.manage_ads), name='manage_ads'),
+    path('manage/promotions/', mv.staff_required(pv.manage_promotions), name='manage_promotions'),
+    path('ad/<int:campaign_id>/click/', ads_views.click, name='ad_click'),
+    path('manage/campaigns/', mv.staff_required(camp.admin_page), name='manage_campaigns'),
+    path('manage/campaigns/<int:pk>/', mv.staff_required(camp.admin_page), name='manage_campaign'),
+    path('unsubscribe/', camp.unsubscribe, name='unsubscribe'),
+    path('push/subscribe/', webpush.subscribe_view, name='push_subscribe'),
+    path('push/test/', webpush.test_view, name='push_test'),
+    path('e/<int:campaign_id>/o.gif', camp.track_open, name='campaign_open'),
+    path('e/<int:campaign_id>/c/', camp.track_click, name='campaign_click'),
     path('seller/products/<int:pk>/quick-update/', sv.quick_update, name='seller_quick_update'),
     path('seller/products/<int:pk>/duplicate/', sv.duplicate_product, name='seller_duplicate_product'),
     path('seller/earnings/', sv.earnings, name='seller_earnings'),
@@ -187,6 +203,7 @@ urlpatterns = [
     path('manage/cash-on-delivery/', mv.cod_protection, name='manage_cod'),
     path('manage/gift-cards/', mv.staff_required(gc.admin_page), name='manage_gift_cards'),
     path('manage/reports/', mv.reports, name='manage_reports'),
+    path('manage/team/', mv.team, name='manage_team'),
     path('gift-cards/', gc.buy, name='gift_cards'),
     path('gift-cards/<int:card_id>/done/', gc.done, name='gift_card_done'),
     path('gift-cards/<int:card_id>/paypal/', gc.paypal_return, name='gift_card_paypal_return'),

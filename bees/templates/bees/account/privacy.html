@@ -17,6 +17,7 @@
                 <div class="field" style="max-width:560px;margin-top:10px;"><label for="email-lang">Email language</label><select id="email-lang" name="language"><option value="">English</option>{% for code, name in language_names.items %}{% if code != "en" %}<option value="{{ code }}" {% if email_language == code %}selected{% endif %}>{{ name }}</option>{% endif %}{% endfor %}</select></div>
                 <button type="submit" class="btn btn-secondary" style="margin-top:12px;">Save preferences</button>
             </form>
+            {% if push_public_key %}<div style="margin-top:14px;"><h3 style="font-size:1rem;margin:0 0 6px;">Notifications on this device</h3>{% include "bees/partials/alert_settings.html" %}</div>{% endif %}
         </section>
         <section class="panel">
             <h2>Download your data</h2>

@@ -88,7 +88,7 @@
                 {% if item.received_at %}
                 <div style="margin-top:6px;">
                 {% with latest_return=item.return_requests.first %}
-                {% if latest_return and latest_return.status != "rejected" %}<span class="badge">Return {{ latest_return.get_status_display|lower }}</span>
+                {% if latest_return and latest_return.status != "rejected" %}<span class="badge">Return {{ latest_return.get_status_display|lower }}</span>{% if latest_return.status == "approved" %}{% for lb in latest_return.labels.all %}{% if lb.label_url %} <a class="link small" href="{{ lb.label_url }}" target="_blank" rel="noopener">Print return label</a>{% if lb.tracking_number %} <span class="muted small" data-no-translate>{{ lb.carrier }} {{ lb.tracking_number }}</span>{% endif %}{% endif %}{% endfor %}{% endif %}
                 {% elif item.can_return and guest %}<span class="muted small">To return an item, <a class="link" href="{% url 'signup' %}">create an account</a> with {{ order.contact_email }} or contact us.</span>
                 {% elif item.can_return %}<a href="{% url 'request_return' item.id %}" class="link small">Request a return</a> <span class="muted small">by {{ item.return_deadline|date:"M j" }}</span>
                 {% else %}<span class="muted small">Return window closed</span>{% endif %}

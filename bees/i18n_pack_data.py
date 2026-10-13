@@ -728,3 +728,32 @@ ENTRIES.update({
     'Paid with Visa •••• {0}': ('Visa •••• {0} سے ادا کیا', 'Visa •••• {0} se pay kiya', 'دُفع ببطاقة Visa •••• {0}', 'Pagado con Visa •••• {0}', 'Payé avec Visa •••• {0}'),
     '✓ Delivered {0}': ('✓ ڈیلیور ہو گیا {0}', '✓ Deliver ho gaya {0}', '✓ تم التسليم {0}', '✓ Entregado {0}', '✓ Livré {0}'),
 })
+
+# --- Recommendations, search help, sponsored, unsubscribe, push, return labels ---
+ENTRIES.update({
+    'Customers also bought': ('خریداروں نے یہ بھی خریدا', 'Customers ne yeh bhi khareeda', 'اشترى العملاء أيضاً', 'Los clientes también compraron', 'Les clients ont aussi acheté'),
+    'Goes well with your cart': ('آپ کے کارٹ کے ساتھ اچھا لگے گا', 'Aap ke cart ke saath acha lagega', 'يناسب سلتك', 'Combina con tu carrito', 'Va bien avec votre panier'),
+    'Did you mean': ('کیا آپ کا مطلب تھا', 'Kya aap ka matlab tha', 'هل تقصد', 'Quizás quisiste decir', 'Vouliez-vous dire'),
+    'Popular searches': ('مقبول تلاشیں', 'Mashhoor searches', 'عمليات البحث الشائعة', 'Búsquedas populares', 'Recherches populaires'),
+    'Products': ('مصنوعات', 'Products', 'المنتجات', 'Productos', 'Produits'),
+    'Suggestions': ('تجاویز', 'Tajaweez', 'اقتراحات', 'Sugerencias', 'Suggestions'),
+    'Showing results for': ('نتائج دکھائے جا رہے ہیں:', 'Natayej dikhaye ja rahe hain:', 'عرض النتائج لـ', 'Mostrando resultados de', 'Résultats pour'),
+    'Search instead for': ('اس کی بجائے تلاش کریں:', 'Is ki bajaye search karein:', 'ابحث بدلاً من ذلك عن', 'Buscar en su lugar', 'Rechercher plutôt'),
+    'Sponsored': ('اسپانسرڈ', 'Sponsored', 'إعلان', 'Patrocinado', 'Sponsorisé'),
+    'Sponsored picks': ('اسپانسرڈ انتخاب', 'Sponsored picks', 'اختيارات مُموَّلة', 'Selección patrocinada', 'Sélection sponsorisée'),
+    'Email preferences': ('ای میل ترجیحات', 'Email preferences', 'تفضيلات البريد', 'Preferencias de correo', 'Préférences e-mail'),
+    'Stop news and offers?': ('خبریں اور آفرز بند کریں؟', 'News aur offers band karein?', 'إيقاف الأخبار والعروض؟', '¿Dejar de recibir novedades y ofertas?', 'Arrêter les actualités et offres ?'),
+    'For': ('برائے', 'Baraye', 'لـ', 'Para', 'Pour'),
+    ". Order and delivery emails aren't affected.": ('۔ آرڈر اور ڈیلیوری کی ای میلز پر اثر نہیں پڑے گا۔', '. Order aur delivery ki emails par asar nahi parega.', '. لن تتأثر رسائل الطلبات والتوصيل.', '. Los correos de pedidos y entregas no cambian.', '. Les e-mails de commande et de livraison ne changent pas.'),
+    'Unsubscribe': ('ان سبسکرائب کریں', 'Unsubscribe karein', 'إلغاء الاشتراك', 'Darse de baja', 'Se désabonner'),
+    "You're unsubscribed": ('آپ ان سبسکرائب ہو گئے', 'Aap unsubscribe ho gaye', 'تم إلغاء اشتراكك', 'Te has dado de baja', 'Vous êtes désabonné'),
+    "We won't send news and offers to": ('ہم خبریں اور آفرز اس پتے پر نہیں بھیجیں گے:', 'Hum news aur offers is pate par nahi bhejenge:', 'لن نرسل الأخبار والعروض إلى', 'No enviaremos novedades ni ofertas a', 'Nous n’enverrons plus d’actualités ni d’offres à'),
+    'any more. Order emails still arrive as usual.': ('۔ آرڈر کی ای میلز پہلے کی طرح آتی رہیں گی۔', '. Order ki emails pehle ki tarah aati rahengi.', 'بعد الآن. ستصلك رسائل الطلبات كالمعتاد.', 'nunca más. Los correos de pedidos seguirán llegando.', 'désormais. Les e-mails de commande arrivent toujours.'),
+    'Back to the shop': ('دکان پر واپس', 'Dukaan par wapas', 'العودة إلى المتجر', 'Volver a la tienda', 'Retour à la boutique'),
+    'Notifications on this device': ('اس ڈیوائس پر نوٹیفکیشنز', 'Is device par notifications', 'الإشعارات على هذا الجهاز', 'Notificaciones en este dispositivo', 'Notifications sur cet appareil'),
+    'Notify me on this device, even when the site is closed': ('اس ڈیوائس پر اطلاع دیں، چاہے سائٹ بند ہو', 'Is device par ittila dein, chahe site band ho', 'أعلمني على هذا الجهاز حتى عندما يكون الموقع مغلقاً', 'Avisarme en este dispositivo, aunque la web esté cerrada', 'M’avertir sur cet appareil, même site fermé'),
+    'Stop notifications on this device': ('اس ڈیوائس پر نوٹیفکیشنز بند کریں', 'Is device par notifications band karein', 'إيقاف الإشعارات على هذا الجهاز', 'Desactivar notificaciones en este dispositivo', 'Arrêter les notifications sur cet appareil'),
+    'Notifications are on for this device.': ('اس ڈیوائس کے لیے نوٹیفکیشنز آن ہیں۔', 'Is device ke liye notifications on hain.', 'الإشعارات مفعّلة على هذا الجهاز.', 'Las notificaciones están activadas en este dispositivo.', 'Les notifications sont activées sur cet appareil.'),
+    "Couldn't turn notifications on. Check your browser settings.": ('نوٹیفکیشنز آن نہیں ہو سکیں۔ براؤزر سیٹنگز چیک کریں۔', 'Notifications on nahi ho sakin. Browser settings check karein.', 'تعذّر تفعيل الإشعارات. تحقّق من إعدادات المتصفح.', 'No se pudieron activar. Revisa los ajustes del navegador.', 'Impossible d’activer les notifications. Vérifiez les réglages du navigateur.'),
+    'Print return label': ('واپسی کا لیبل پرنٹ کریں', 'Wapsi ka label print karein', 'اطبع ملصق الإرجاع', 'Imprimir etiqueta de devolución', 'Imprimer l’étiquette de retour'),
+})

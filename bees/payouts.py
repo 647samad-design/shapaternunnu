@@ -74,6 +74,8 @@ def send(seller, amount=None, user=None, request_payout=None):
     with their automatic method. Returns the Payout. Raises PayoutError."""
     from . import seller_center as sc
     from .models import Payout, SellerAccount
+    if getattr(settings, "STAGING", False):
+        raise PayoutError("Payouts are switched off on the test site.")
     if not method_ready(seller):
         raise PayoutError("This seller hasn't set up PayPal or Stripe payouts yet.")
     with transaction.atomic():

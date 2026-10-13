@@ -78,8 +78,30 @@ Then in Store settings: *Text messages (SMS)* (order updates, seller alerts) and
 ## 11. After updating
 ```
 git pull
-pip install -r requirements.txt     # adds PyJWT[crypto] and openpyxl
+pip install -r requirements.txt     # PyJWT[crypto] and openpyxl (added in the pro pack)
 python manage.py migrate
 python manage.py collectstatic --noinput
 ```
 Then press **Reload** on the Web tab. The daily task (`manage.py daily_tasks`) now also sends automatic payouts.
+
+## 12. Store team
+Admin > **Team**: add staff by email and give each a role (Manager, Orders & shipping, Customer support, Products & sellers, Finance, Marketing). They only see their part of the admin; only the owner (superuser) can open Keys & passwords and Team. Turn on "Staff must use two-step sign-in" in Store settings > Security.
+
+## 13. Phone notifications (web push)
+Keys & passwords > *Phone notifications*: tick **Create push keys**, enter a contact email and save. Customers and sellers then get a "Notify me on this device" button (Notifications page, Privacy page, messages). Every site notification (orders, messages, payouts) is also sent to their phone/computer. Free; works in Chrome, Edge, Firefox, Samsung Internet and Safari (iPhone: after "Add to Home Screen").
+
+## 14. Automatic tests on GitHub
+`.github/workflows/tests.yml` runs all tests on every pull request and on main. In GitHub: Settings > Branches > add a rule for `main` with "Require status checks to pass" (pick *Tests*) so nothing broken can be merged.
+
+## 15. Test site (staging)
+A second copy of the store to try changes before they go live:
+1. PythonAnywhere > Web > *Add a new web app* (e.g. `yourname-test.pythonanywhere.com` or `test.yourdomain.com`), pointing at a second folder: `git clone ... ~/Lumen-Market-test`.
+2. Its own `.env` with: `STAGING=True`, `STAGING_PASSWORD=<a password>`, `STAGING_EMAIL_TO=<your inbox>`, Stripe **test** keys (`sk_test_...`), `PAYPAL_MODE=sandbox`, and a separate database (its own `db.sqlite3` or a second Postgres database). Never reuse the live database URL.
+3. To test with real-looking data: copy the live database into the test one, then run `python manage.py anonymize_data --yes` there (it refuses to run unless `STAGING=True`).
+4. Deploy a branch there first (`git checkout <branch> && git pull && python manage.py migrate`), check it, then merge the PR and update the live site.
+On the test site every email goes to `STAGING_EMAIL_TO` only, SMS and seller payouts are off, search engines are blocked and a yellow "TEST SITE" bar is shown.
+
+## 16. Marketing tools
+- **Email campaigns** (Admin > Email campaigns): to newsletter subscribers only, with unsubscribe links, test send, preview, opens and clicks.
+- **Sponsored products**: sellers pay per click from their earnings (Seller Center > Sponsored). Store settings > *Sponsored products* sets the lowest bid and how many places show.
+- **Promotions**: sellers create their own discount codes and timed sales (Seller Center > Promotions); the store runs sales for its own products in Admin > Coupons > Timed sales.

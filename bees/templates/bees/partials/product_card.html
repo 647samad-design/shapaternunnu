@@ -1,6 +1,6 @@
 {% load bees_extras %}
-<article class="pcard">
-    <a class="pcard-media" href="{% url 'product_detail' product.id %}" onclick="return openQuickView(event, {{ product.id }})" aria-label="{{ product.name }}">
+<article class="pcard{% if product.ad_url %} pcard-ad{% endif %}">
+    <a class="pcard-media" href="{% if product.ad_url %}{{ product.ad_url }}{% else %}{% url 'product_detail' product.id %}{% endif %}"{% if not product.ad_url %} onclick="return openQuickView(event, {{ product.id }})"{% else %} rel="sponsored nofollow"{% endif %} aria-label="{{ product.name }}">
         <img src="{{ product.image_url }}" alt="{{ product.name }}" loading="lazy" decoding="async" width="400" height="400">
         {% if product.stock <= 0 %}<span class="pcard-flag badge">{{ t.out_of_stock }}</span>
         {% elif product.discount_percent %}<span class="pcard-flag badge badge-accent">Save {{ product.discount_percent }}%</span>{% endif %}
@@ -16,7 +16,8 @@
     {% endif %}
     <div class="pcard-body">
         <span class="pcard-seller"><span data-no-translate>{{ product.seller_name }}</span>{% with sa=product.seller_account %}{% if sa.top_seller %} <span class="seller-badge top" title="{{ t.top_seller }}">★</span>{% elif sa.verified_at %} <span class="seller-badge verified" title="{{ t.verified_seller }}">✓</span>{% endif %}{% endwith %}</span>
-        <a class="pcard-name" href="{% url 'product_detail' product.id %}">{{ product.name }}</a>
+        {% if product.ad_url %}<span class="pcard-sponsored">Sponsored</span>{% endif %}
+        <a class="pcard-name" href="{% if product.ad_url %}{{ product.ad_url }}{% else %}{% url 'product_detail' product.id %}{% endif %}"{% if product.ad_url %} rel="sponsored nofollow"{% endif %}>{{ product.name }}</a>
         {% if product.rating_count %}
         <span class="pcard-meta"><span class="stars" aria-hidden="true">{{ product.average_rating|stars }}</span><span>{{ product.average_rating }} ({{ product.rating_count }})</span></span>
         {% endif %}

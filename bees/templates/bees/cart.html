@@ -92,6 +92,12 @@
         <a href="{% url 'all_products' %}" class="btn btn-primary">Start shopping</a>
     </div>
     {% endif %}
+    {% if recommended %}
+    <section class="section">
+        <div class="section-head"><h2>Goes well with your cart</h2></div>
+        <div class="grid-products">{% for product in recommended %}{% include "bees/partials/product_card.html" %}{% endfor %}</div>
+    </section>
+    {% endif %}
 </div>
 {% endblock %}
 {% block extra_js %}

@@ -48,6 +48,11 @@ GROUPS = [
         ("TWILIO_AUTH_TOKEN", "Auth token", True, r"^[0-9a-fA-F]{32}$"),
         ("TWILIO_FROM", "Send from (number or MG... service SID)", False, r"^(\+[1-9]\d{6,14}|MG[0-9a-fA-F]{32}|[A-Za-z0-9 ]{3,11})$"),
     ]),
+    ("Phone notifications (web push)", "Free - no account needed. Tick 'Create push keys' below and save; keep them once created (changing them turns off notifications people already allowed).", [
+        ("VAPID_PUBLIC_KEY", "Public key", False, r"^[A-Za-z0-9_-]{80,90}$"),
+        ("VAPID_PRIVATE_KEY", "Private key", True, r"^[A-Za-z0-9_-]{40,45}$"),
+        ("VAPID_EMAIL", "Contact email for push services", False, r"^\S+@\S+$"),
+    ]),
     ("Email", "Gmail: your address + an App Password (Google Account > Security > App passwords). Any other provider: also set the server and port.", [
         ("EMAIL_HOST_USER", "Email address / user name", False, r"^\S+$"),
         ("EMAIL_HOST_PASSWORD", "Email password / App Password", True, None),

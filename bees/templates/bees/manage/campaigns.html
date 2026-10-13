@@ -1,0 +1,20 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Email campaigns{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Email campaigns</h1><p>Send news, sales and new products to the {{ subscribers }} people who subscribed. Every email has an unsubscribe link, as the law requires.</p></div>
+    <div class="actions"><a class="btn btn-primary btn-sm" href="?new=1">New campaign</a></div></div>
+<section class="panel" style="padding:8px 20px;">
+    <div class="table-scroll"><table class="table">
+        <thead><tr><th>Subject</th><th>To</th><th>Status</th><th class="num">Sent</th><th class="num">Opened</th><th class="num">Clicks</th></tr></thead>
+        <tbody>
+        {% for c in campaigns %}
+        <tr><td><a class="link" href="{% url 'manage_campaign' c.id %}">{{ c.subject|truncatechars:60 }}</a><br><span class="muted small">{{ c.created_at|date:"M j, Y" }}</span></td>
+            <td class="small">{{ c.get_audience_display }}</td>
+            <td>{% if c.status == "sent" %}<span class="pill ok">Sent</span>{% elif c.status == "sending" %}<span class="pill warn">Sending</span>{% else %}<span class="pill">Draft</span>{% endif %}</td>
+            <td class="num">{{ c.sent_count }}{% if c.status == "sending" %}/{{ c.recipients|length }}{% endif %}{% if c.failed_count %} <span class="muted small">({{ c.failed_count }} failed)</span>{% endif %}</td>
+            <td class="num">{{ c.opens }}</td><td class="num">{{ c.clicks }}</td></tr>
+        {% empty %}<tr><td colspan="6" class="muted" style="text-align:center;padding:24px;">No campaigns yet. Shoppers subscribe in the footer and on their Privacy page.</td></tr>{% endfor %}
+        </tbody>
+    </table></div>
+</section>
+{% endblock %}

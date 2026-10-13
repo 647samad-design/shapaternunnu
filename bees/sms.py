@@ -28,6 +28,9 @@ def _env(name):
 
 
 def is_configured():
+    from django.conf import settings
+    if getattr(settings, "STAGING", False) and not _env("STAGING_ALLOW_SMS"):
+        return False  # never text real customers from the test site
     return bool(_env("TWILIO_ACCOUNT_SID") and _env("TWILIO_AUTH_TOKEN") and _env("TWILIO_FROM"))
 
 

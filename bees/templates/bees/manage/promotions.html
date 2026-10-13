@@ -1,0 +1,6 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Store sales{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><a class="link small" href="{% url 'manage_coupons' %}">← Coupons</a><h1 style="margin-top:6px;">Store sales &amp; codes</h1><p>Timed sales apply to the store's own products. Sellers run sales on theirs in Seller Center &gt; Promotions.</p></div></div>
+{% include "bees/partials/promotions_body.html" with store=True %}
+{% endblock %}

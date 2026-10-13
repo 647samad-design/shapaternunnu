@@ -1,0 +1,7 @@
+{% extends "bees/emails/_base_email.html" %}
+{% block email_body %}{% load bees_extras %}{% site_brand as b %}
+    <h1 style="margin:0 0 8px;font-size:24px;">Welcome to the team</h1>
+    <p style="margin:0 0 16px;color:#56606B;">{{ inviter.get_full_name|default:inviter.username }} added you to the {{ b.site_name }} admin as <strong>{{ role }}</strong>.</p>
+    {% if created %}<p style="margin:0 0 16px;color:#56606B;">Your username is <strong>{{ user.username }}</strong>. Set a password to sign in:</p>{% endif %}
+    <a href="{{ url }}" style="display:inline-block;background:{{ b.primary_color }};color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:8px;font-weight:bold;">{% if created %}Set my password{% else %}Open the store admin{% endif %}</a>
+{% endblock %}

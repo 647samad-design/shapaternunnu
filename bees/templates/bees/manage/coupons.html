@@ -2,7 +2,7 @@
 {% load bees_extras %}
 {% block page_title %}Coupons{% endblock %}
 {% block admin %}
-<div class="adm-head"><div><h1>Coupons</h1><p>Discount codes customers enter at checkout.</p></div></div>
+<div class="adm-head"><div><h1>Coupons</h1><p>Discount codes customers enter at checkout. Codes made by sellers only work on their own products.</p></div><div class="actions"><a class="btn btn-secondary btn-sm" href="{% url 'manage_promotions' %}">Timed sales</a></div></div>
 <div class="two-col">
     <section class="panel" style="padding:8px 20px;">
         <div class="table-scroll">

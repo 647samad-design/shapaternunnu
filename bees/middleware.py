@@ -53,7 +53,7 @@ class StaffTwoFactorMiddleware:
 DEMO_BLOCKED = (
     "/admin/", "/manage/settings/", "/manage/setup/", "/manage/system/", "/manage/plans/", "/manage/currencies/",
     "/account/", "/profile/", "/password-reset/", "/seller/team/",
-    "/seller/settings/", "/seller/holiday/",
+    "/seller/settings/", "/seller/holiday/", "/manage/team/", "/manage/campaigns/",
 )
 
 

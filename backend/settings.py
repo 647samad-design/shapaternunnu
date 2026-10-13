@@ -104,6 +104,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'bees.background.AfterResponseMiddleware',
+    'bees.staging.StagingMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.locale.LocaleMiddleware',
@@ -113,6 +114,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'bees.middleware.StaffTwoFactorMiddleware',
     'bees.middleware.DemoGuardMiddleware',
+    'bees.staff_roles.StaffRoleMiddleware',
     'bees.currency.DisplayCurrencyMiddleware',
     'bees.middleware.ReferralCaptureMiddleware',
     'bees.analytics.VisitMiddleware',
@@ -139,6 +141,7 @@ TEMPLATES = [
                 'bees.context_processors.site_language',
                 'bees.context_processors.unread_notifications',
                 'bees.context_processors.compare_count',
+                'bees.context_processors.push_key',
                 'bees.context_processors.site_banner',
                 'bees.context_processors.brand',
                 'bees.context_processors.currencies',
@@ -356,6 +359,15 @@ if os.environ.get('EMAIL_HOST'):
     EMAIL_USE_TLS = env_bool('EMAIL_USE_TLS', True)
     EMAIL_TIMEOUT = 10
     DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
+
+# Test copy of the store (see bees/staging.py): emails are redirected,
+# SMS and payouts are off, search engines are kept out.
+STAGING = env_bool('STAGING', False)
+STAGING_PASSWORD = os.environ.get('STAGING_PASSWORD', '')
+STAGING_EMAIL_TO = os.environ.get('STAGING_EMAIL_TO', '')
+if STAGING:
+    STAGING_REAL_EMAIL_BACKEND = EMAIL_BACKEND
+    EMAIL_BACKEND = 'bees.staging.RedirectEmailBackend'
 
 # Shared cache for rate limiting / verification codes. Set REDIS_URL when
 # running more than one app process (e.g. several gunicorn workers).

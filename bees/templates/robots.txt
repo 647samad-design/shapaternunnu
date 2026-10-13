@@ -1,4 +1,6 @@
-User-agent: *
+{% if staging %}User-agent: *
+Disallow: /
+{% else %}User-agent: *
 Allow: /
 Disallow: /admin/
 Disallow: /manage/
@@ -28,3 +30,4 @@ Disallow: /*?*sort=
 Disallow: /*?*q=
 
 Sitemap: {{ request.scheme }}://{{ request.get_host }}/sitemap.xml
+{% endif %}

@@ -124,6 +124,14 @@ def unread_notifications(request):
     return {"unread_notifications_count": 0}
 
 
+def push_key(request):
+    """Public web-push key (only for signed-in people; empty = push is off)."""
+    if not getattr(request, "user", None) or not request.user.is_authenticated:
+        return {}
+    from .webpush import public_key, is_configured
+    return {"push_public_key": public_key() if is_configured() else ""}
+
+
 def compare_count(request):
     return {"compare_count": len(request.session.get("compare", [])), "compare_ids": request.session.get("compare", [])}
 
@@ -148,4 +156,5 @@ def brand(request):
         "store_currency": dj_settings.STORE_CURRENCY.upper(),
         "nav_categories": Product.CATEGORY_CHOICES,
         "demo_mode": getattr(dj_settings, "DEMO_MODE", False),
+        "staging": getattr(dj_settings, "STAGING", False),
     }

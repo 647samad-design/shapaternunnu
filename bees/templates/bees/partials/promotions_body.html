@@ -1,0 +1,46 @@
+{# Coupons + timed sales. Needs: coupons, sales, categories, now_local, week_local, store (bool) #}
+{% load bees_extras %}
+<div class="promo-grid">
+<section class="panel">
+    <h2>Discount codes</h2>
+    <p class="muted small">{% if store %}Codes for the whole store.{% else %}Only your products get cheaper; the discount comes off your sale price. Share the code on social media or with loyal customers.{% endif %}</p>
+    <form method="post" class="promo-form">{% csrf_token %}<input type="hidden" name="action" value="coupon">
+        <div class="field"><label for="pc-code">Code</label><input id="pc-code" name="code" required maxlength="30" placeholder="SUMMER20" style="text-transform:uppercase;" autocomplete="off"></div>
+        <div class="field"><label for="pc-pct">% off</label><input id="pc-pct" name="percent_off" type="number" min="1" max="90" value="10" required></div>
+        <div class="field"><label for="pc-min">Min. order</label><input id="pc-min" name="min_order_value" type="number" min="0" step="0.01" value="0"></div>
+        <div class="field"><label for="pc-exp">Ends (optional)</label><input id="pc-exp" name="expiry_date" type="date"></div>
+        <div class="field"><label for="pc-lim">Total uses (optional)</label><input id="pc-lim" name="usage_limit" type="number" min="1"></div>
+        <div class="field"><label for="pc-pu">Uses per customer</label><input id="pc-pu" name="per_user_limit" type="number" min="1" max="100" value="1"></div>
+        <button class="btn btn-primary btn-sm" type="submit">Create code</button>
+    </form>
+    <div class="table-scroll" style="margin-top:12px;"><table class="table"><thead><tr><th>Code</th><th class="num">Off</th><th class="num">Used</th><th>Status</th><th></th></tr></thead><tbody>
+    {% for c in coupons %}<tr><td data-no-translate><code>{{ c.code }}</code>{% if c.min_order_value %}<br><span class="muted small">min {{ c.min_order_value|money }}</span>{% endif %}</td><td class="num">{{ c.percent_off }}%</td><td class="num">{{ c.used }}{% if c.usage_limit %}/{{ c.usage_limit }}{% endif %}</td>
+        <td>{% if not c.active %}<span class="pill">Paused</span>{% elif c.expiry_date and c.expiry_date < today %}<span class="pill">Ended</span>{% else %}<span class="pill ok">On</span>{% endif %}{% if c.expiry_date %}<br><span class="muted small">until {{ c.expiry_date|date:"M j" }}</span>{% endif %}</td>
+        <td><form method="post" style="display:flex;gap:4px;margin:0;">{% csrf_token %}<input type="hidden" name="id" value="{{ c.id }}"><button class="btn btn-ghost btn-sm" name="action" value="coupon_toggle">{% if c.active %}Pause{% else %}Turn on{% endif %}</button><button class="btn btn-ghost btn-sm" name="action" value="coupon_delete" style="color:var(--sale);" onclick="return confirm('Delete this code?');">Delete</button></form></td></tr>
+    {% empty %}<tr><td colspan="5" class="muted" style="text-align:center;padding:18px;">No codes yet.</td></tr>{% endfor %}
+    </tbody></table></div>
+</section>
+<section class="panel">
+    <h2>Timed sales</h2>
+    <p class="muted small">Products go X% off at the start time (the old price shows crossed out) and go back automatically at the end. Shoppers with the products in their wishlist get a price-drop email.</p>
+    <form method="post" class="promo-form">{% csrf_token %}<input type="hidden" name="action" value="sale">
+        <div class="field"><label for="ps-name">Name</label><input id="ps-name" name="name" maxlength="80" placeholder="Weekend sale" required></div>
+        <div class="field"><label for="ps-pct">% off</label><input id="ps-pct" name="percent_off" type="number" min="1" max="90" value="15" required></div>
+        <div class="field"><label for="ps-cat">Products</label><select id="ps-cat" name="category"><option value="">All {% if store %}store {% endif %}products</option>{% for code, label in categories %}<option value="{{ code }}">{{ label }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="ps-start">Starts</label><input id="ps-start" name="starts_at" type="datetime-local" value="{{ now_local }}" required></div>
+        <div class="field"><label for="ps-end">Ends</label><input id="ps-end" name="ends_at" type="datetime-local" value="{{ week_local }}" required></div>
+        <button class="btn btn-primary btn-sm" type="submit">Schedule sale</button>
+    </form>
+    <div class="table-scroll" style="margin-top:12px;"><table class="table"><thead><tr><th>Sale</th><th>When</th><th>Status</th><th></th></tr></thead><tbody>
+    {% for s in sales %}<tr><td><strong>{{ s.name }}</strong> <span class="muted small">-{{ s.percent_off }}%{% if s.category %} · {{ s.get_category_display|default:s.category }}{% endif %}{% if s.saved_prices %} · {{ s.saved_prices|length }} products{% endif %}</span></td>
+        <td class="small">{{ s.starts_at|date:"M j, H:i" }} – {{ s.ends_at|date:"M j, H:i" }}</td>
+        <td>{% if s.status == "active" %}<span class="pill ok">Running</span>{% elif s.status == "scheduled" %}<span class="pill warn">Scheduled</span>{% else %}<span class="pill">{{ s.get_status_display }}</span>{% endif %}</td>
+        <td>{% if s.status == "active" or s.status == "scheduled" %}<form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="id" value="{{ s.id }}"><button class="btn btn-ghost btn-sm" name="action" value="sale_stop" onclick="return confirm('Stop this sale now? Prices go back.');">Stop</button></form>{% endif %}</td></tr>
+    {% empty %}<tr><td colspan="4" class="muted" style="text-align:center;padding:18px;">No sales yet.</td></tr>{% endfor %}
+    </tbody></table></div>
+</section>
+</div>
+<style>
+.promo-grid { display: grid; gap: 16px; }
+.promo-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; align-items: end; }
+</style>

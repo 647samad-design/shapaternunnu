@@ -333,6 +333,54 @@ def buy(shipment, rate_id, user=None):
     return shipment
 
 
+def return_label(rr, user=None):
+    """Books a prepaid return label (customer -> seller or store) for an
+    approved return, using the cheapest rate, and emails it to the customer."""
+    from django.utils import timezone
+    from .models import Notification, OrderEvent, Shipment
+    provider = active()
+    if provider is None:
+        raise CourierError("No courier service is connected yet.")
+    if rr.status != "approved":
+        raise CourierError("Approve the return first.")
+    if rr.labels.filter(is_return=True).exclude(status="cancelled").exclude(label_url="").exists():
+        raise CourierError("This return already has a label.")
+    item = rr.order_item
+    order = item.order
+    seller_addr, customer_addr = addresses(order, item.seller_account)
+    missing = missing_sender_fields(seller_addr)
+    if missing:
+        raise CourierError(f"The return address is missing: {', '.join(missing)}.")
+    shipment = Shipment(order=order, seller=item.seller_account, item_ids=[item.pk], provider=type(provider).__name__.lower(),
+                        created_by=user, is_return=True, return_request=rr)
+    shipment.rates = sorted(provider.quote(shipment, [item], customer_addr, seller_addr), key=lambda r: float(r.get("amount") or 0))
+    shipment.save()
+    result = provider.buy(shipment, shipment.rates[0]["id"])
+    shipment.tracking_number = result["tracking_number"][:80]
+    shipment.tracking_url = (result["tracking_url"] or "")[:500]
+    shipment.label_url = (result["label_url"] or "")[:500]
+    shipment.tracker_id = result.get("tracker_id", "")[:100]
+    shipment.transaction_id = result.get("transaction_id", "")[:100]
+    shipment.carrier = (result.get("carrier") or "")[:60]
+    shipment.service = (result.get("service") or "")[:80]
+    if result.get("cost") not in (None, ""):
+        shipment.cost = Decimal(str(result["cost"]))
+    shipment.cost_currency = (result.get("currency") or "")[:3]
+    shipment.status = "booked"
+    shipment.checked_at = timezone.now()
+    shipment.save()
+    OrderEvent.objects.create(order=order, kind="note", public=False,
+                              text=f"Return label for '{item.product_name[:60]}' booked with {shipment.carrier} ({shipment.tracking_number})"[:200])
+    if order.user_id:
+        Notification.objects.create(user_id=order.user_id, link="/my-orders/",
+                                    message=f"Your return label for {item.product_name[:60]} is ready. Print it from My orders.")
+    from .order_emails import absolute
+    from .views import _send_html_email
+    _send_html_email(f"Your return label for order #{order.id}", "bees/emails/return_label.html",
+                     {"order": order, "item": item, "shipment": shipment, "orders_url": absolute("/my-orders/")}, order.contact_email)
+    return shipment
+
+
 def refresh(shipment):
     """Asks the courier for the latest status and moves items along."""
     from django.utils import timezone
@@ -345,6 +393,13 @@ def refresh(shipment):
     status, raw = provider.refresh(shipment)
     shipment.checked_at = timezone.now()
     shipment.carrier_status = (raw or "")[:40]
+    if status and status != shipment.status and shipment.is_return:
+        shipment.status = status
+        if status == "delivered":
+            notify_staff(f"Return parcel for order #{shipment.order_id} has arrived ({shipment.tracking_number}). Check it and refund it under Returns.",
+                         link="/manage/returns/?status=approved")
+        shipment.save()
+        return shipment.status
     if status and status != shipment.status:
         shipment.status = status
         items = list(OrderItem.objects.filter(pk__in=shipment.item_ids))

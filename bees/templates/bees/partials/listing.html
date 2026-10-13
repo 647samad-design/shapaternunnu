@@ -13,6 +13,7 @@
         <div>
             {% if products %}
             <div class="grid-products">
+                {% if products.number == 1 or not products.number %}{% for ad in sponsored %}{% with product=ad.product %}{% include "bees/partials/product_card.html" %}{% endwith %}{% endfor %}{% endif %}
                 {% for product in products %}{% include "bees/partials/product_card.html" %}{% endfor %}
             </div>
             {% include "bees/partials/pagination.html" %}

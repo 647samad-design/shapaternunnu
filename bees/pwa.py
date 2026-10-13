@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET
 
 ICON_SIZES = (192, 512)
-OFFLINE_VERSION = "v1"
+OFFLINE_VERSION = "v2"
 
 
 def _brand():
@@ -83,6 +83,21 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.mode !== 'navigate') return;  // only page loads; everything else goes straight to the network
   e.respondWith(fetch(e.request).catch(() => caches.match(OFFLINE)));
+});
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (err) { d = { title: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Update', {
+    body: d.body || '', icon: '/app-icon-192.png', badge: '/app-icon-192.png', tag: d.tag || undefined, data: { url: d.url || '/' }
+  }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || '/', self.location.origin).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) { if (c.url === url && 'focus' in c) return c.focus(); }
+    return self.clients.openWindow(url);
+  }));
 });
 """
 
