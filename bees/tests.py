@@ -4881,10 +4881,20 @@ class WholePageTranslationTests(TestCase):
         self.client.post(reverse("manage_translations"), {"action": "save", "id": row.id, "lang": "fr", "text": "Mug uni"})
         row.refresh_from_db()
         self.assertEqual(row.fr, "Mug uni")
-        reply = mock.MagicMock()
         UIText.objects.create(source="Brand new text")
-        reply.__enter__.return_value.read.return_value = json.dumps({"content": [{"type": "text", "text": '["Texte tout neuf"]'}]}).encode()
-        with self.settings(AI_API_KEY="k"), mock.patch("urllib.request.urlopen", return_value=reply):
+
+        def fake_claude(req, timeout=None):
+            # Answer for exactly the texts that were sent: pages viewed above
+            # may have added other untranslated texts to the batch.
+            prompt = json.loads(req.data)["messages"][0]["content"]
+            sent = json.loads(prompt.split("Texts:\n", 1)[1])
+            answer = ["Texte tout neuf" if s == "Brand new text" else "" for s in sent]
+            reply = mock.MagicMock()
+            reply.__enter__.return_value.read.return_value = json.dumps(
+                {"content": [{"type": "text", "text": json.dumps(answer)}]}).encode()
+            return reply
+
+        with self.settings(AI_API_KEY="k"), mock.patch("urllib.request.urlopen", side_effect=fake_claude):
             self.client.post(reverse("manage_translations"), {"action": "ai", "lang": "fr"})
         self.assertEqual(UIText.objects.get(source="Brand new text").fr, "Texte tout neuf")
 
