@@ -18,10 +18,14 @@ from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 import dj_database_url
 
-load_dotenv()
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Settings and keys come from environment variables and the .env file.
+# ENV_FILE moves that file (Docker keeps it in a volume so the admin's
+# Keys & passwords page survives container rebuilds).
+ENV_FILE = os.environ.get('ENV_FILE') or str(BASE_DIR / '.env')
+load_dotenv(ENV_FILE)
 
 
 # Quick-start development settings - unsuitable for production
@@ -58,6 +62,49 @@ ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', '*' if DEBUG else 'localhost,127.0.0.1
 # Number of reverse proxies in front of Django (Render/Railway/Heroku/Fly = 1).
 # Used to read the real client IP for rate limiting. Leave 0 if unsure.
 NUM_PROXIES = int(os.environ.get('NUM_PROXIES', '0'))
+
+# REST API (bees/api): token or session sign-in, JSON only, rate limited.
+# Docs at /api/v1/docs/, OpenAPI schema at /api/v1/schema/.
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'bees.api.auth.TokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.AllowAny'],
+    'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
+    'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.JSONParser', 'rest_framework.parsers.FormParser'],
+    'DEFAULT_PAGINATION_CLASS': 'bees.api.pagination.Pagination',
+    'DEFAULT_SCHEMA_CLASS': 'bees.api.schema.ApiSchema',
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': os.environ.get('API_RATE_ANON', '120/min'),
+        'user': os.environ.get('API_RATE_USER', '600/min'),
+        'auth': '10/min',
+    },
+    'NUM_PROXIES': NUM_PROXIES or None,
+    'UNAUTHENTICATED_USER': 'django.contrib.auth.models.AnonymousUser',
+}
+API_TOKEN_DAYS = int(os.environ.get('API_TOKEN_DAYS', '90'))
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Lumen Market API',
+    'DESCRIPTION': 'REST API for the Lumen Market marketplace: catalog, accounts, orders and the Seller Center. '
+                   'Sign in with POST /api/v1/auth/token/, then send the token with every request as '
+                   '"Authorization: Bearer YOUR_TOKEN" (use the Authorize button to try it here). '
+                   'Money is in the store currency as strings, e.g. "19.99". Lists are paginated with ?page=N&page_size=N.',
+    'TAGS': [{'name': 'Overview'}, {'name': 'Catalog', 'description': 'Public: no sign-in needed.'},
+             {'name': 'Sign in'}, {'name': 'Account', 'description': 'The signed-in customer.'},
+             {'name': 'Seller Center', 'description': 'For sellers and their team members.'}],
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SWAGGER_UI_DIST': 'SIDECAR',
+    'SWAGGER_UI_FAVICON_HREF': 'SIDECAR',
+    'REDOC_DIST': 'SIDECAR',
+    'COMPONENT_SPLIT_REQUEST': True,
+    'SCHEMA_PATH_PREFIX': r'/api/v1',
+}
 CSP_REPORT_ONLY = env_bool('CSP_REPORT_ONLY', False)
 
 if not DEBUG:
@@ -100,6 +147,9 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django.contrib.sitemaps',
+    'rest_framework',
+    'drf_spectacular',
+    'drf_spectacular_sidecar',
 ]
 
 MIDDLEWARE = [
@@ -174,12 +224,31 @@ if DATABASE_URL and '://' not in DATABASE_URL:
         "- or remove DATABASE_URL to use local SQLite."
     )
 _uses_transaction_pooler = ':6543' in DATABASE_URL
+
+
+def _database_ssl():
+    """Encrypted database connections for hosted Postgres (Supabase, RDS...).
+    DATABASE_SSL=True/False decides explicitly; otherwise SSL is required
+    except for a database on the same machine or in the same Docker network,
+    or when the URL sets its own sslmode."""
+    choice = os.environ.get('DATABASE_SSL', '').strip().lower()
+    if choice in ('1', 'true', 'yes', 'require', 'on'):
+        return True
+    if choice in ('0', 'false', 'no', 'disable', 'off'):
+        return False
+    if not DATABASE_URL.startswith('postgres') or 'sslmode=' in DATABASE_URL:
+        return False
+    from urllib.parse import urlparse
+    host = (urlparse(DATABASE_URL).hostname or '').lower()
+    return host not in ('localhost', '127.0.0.1', '::1', 'db', 'postgres', 'postgresql')
+
+
 DATABASES = {
     'default': dj_database_url.config(
         default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
         conn_max_age=0 if _uses_transaction_pooler else 600,
         conn_health_checks=not _uses_transaction_pooler,
-        ssl_require=DATABASE_URL.startswith('postgres') and 'localhost' not in DATABASE_URL,
+        ssl_require=_database_ssl(),
     )
 }
 if _uses_transaction_pooler:

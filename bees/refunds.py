@@ -16,7 +16,7 @@ def refund_return(rr, as_credit=False, restock=True, note=""):
     from .models import Profile, ReturnRequest
     from .templatetags.bees_extras import money
     with transaction.atomic():
-        rr = ReturnRequest.objects.select_for_update().select_related("order_item__order").get(pk=rr.pk)
+        rr = ReturnRequest.objects.select_for_update(of=("self",)).select_related("order_item__order").get(pk=rr.pk)
         if rr.status == "refunded":
             raise RefundError("This item has already been refunded.")
         if note:

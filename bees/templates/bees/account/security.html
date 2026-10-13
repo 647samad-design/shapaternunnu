@@ -56,6 +56,32 @@
                 <button type="submit" class="btn btn-secondary" {% if not other_sessions %}disabled{% endif %}>Sign out of all other devices</button>
             </form>
         </section>
+        <section class="panel">
+            <h2>Apps &amp; API access</h2>
+            <p class="muted" style="margin:6px 0 14px;">Apps and tools you signed in to with your password (through the store's API). Changing your password signs them all out.</p>
+            {% if api_tokens %}
+            <div class="table-scroll" tabindex="0">
+            <table class="table">
+                <thead><tr><th>Name</th><th>Token</th><th>Created</th><th>Last used</th><th>Expires</th><th></th></tr></thead>
+                <tbody>
+                {% for t in api_tokens %}
+                <tr>
+                    <td>{{ t.name }}</td><td><code>{{ t.prefix }}…</code></td>
+                    <td>{{ t.created_at|date:"M j, Y" }}</td><td>{{ t.last_used_at|date:"M j, Y H:i"|default:"Never" }}</td>
+                    <td>{{ t.expires_at|date:"M j, Y"|default:"Never" }}</td>
+                    <td><form method="post">{% csrf_token %}<input type="hidden" name="action" value="revoke_token"><input type="hidden" name="token" value="{{ t.pk }}"><button type="submit" class="btn btn-secondary btn-sm">Revoke</button></form></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            <form method="post" style="margin-top:12px;">{% csrf_token %}<input type="hidden" name="action" value="revoke_all_tokens">
+                <button type="submit" class="btn btn-danger">Revoke all</button>
+            </form>
+            {% else %}
+            <p class="muted">No apps are signed in. Developers can connect an app with the <a class="link" href="{% url 'api:docs' %}">store API</a>.</p>
+            {% endif %}
+        </section>
     </div>
 </div>
 {% endblock %}

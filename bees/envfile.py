@@ -99,7 +99,7 @@ class EnvError(ValueError):
 
 
 def path():
-    return os.path.join(str(settings.BASE_DIR), ".env")
+    return getattr(settings, "ENV_FILE", "") or os.path.join(str(settings.BASE_DIR), ".env")
 
 
 def _unquote(raw):
@@ -201,7 +201,16 @@ def write(changes):
 
 def reload_app():
     """Restarts the web app so every setting is re-read. On PythonAnywhere
-    touching the WSGI file does that. Returns True if it could."""
+    touching the WSGI file does that; under gunicorn (Docker sets
+    RELOAD_WITH_HUP=1) the master process is asked to restart its workers
+    gracefully. Returns True if it could."""
+    if os.environ.get("RELOAD_WITH_HUP") == "1":
+        import signal
+        try:
+            os.kill(os.getppid(), signal.SIGHUP)
+            return True
+        except (OSError, AttributeError):
+            pass
     candidates = [os.environ.get("WSGI_FILE", "")] + glob("/var/www/*_wsgi.py")
     for candidate in candidates:
         if candidate and os.path.isfile(candidate) and os.access(candidate, os.W_OK):

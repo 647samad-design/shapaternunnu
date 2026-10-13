@@ -49,3 +49,14 @@ Reviewed with Django's deploy checks, the Bandit security scanner, a manual read
 | Database | Missing indexes for email lookups and cash-order checks | Indexes added |
 | Upkeep | Old notifications and abandoned gift card checkouts kept growing | Cleaned up daily |
 | Monitoring | No health URL for uptime monitors | /health/ returns 200 when the site and database answer |
+
+## Sale-readiness review (October 2026)
+The whole test suite now also runs on **PostgreSQL 16** and the full **Docker** stack is built and started on every change (GitHub Actions). Doing that found three problems that only showed up outside SQLite:
+
+| Area | Problem found | Fix |
+|---|---|---|
+| Orders (PostgreSQL) | Shipping items and refunding returns failed on PostgreSQL ("FOR UPDATE cannot be applied to the nullable side of an outer join"), so sellers couldn't mark orders shipped | Row locks now lock only the item row (`select_for_update(of=("self",))`); the 18 affected tests pass on PostgreSQL |
+| Cache | Setting `REDIS_URL` crashed every page: the `redis` package was missing from requirements | Added; tested with a real Redis-compatible server |
+| Database | A Postgres server in the same Docker network was forced to use SSL and refused the connection | SSL is decided by host (on for remote databases, off for local/Docker), or set with `DATABASE_SSL` |
+
+New in this round: REST API v1 with hashed tokens, two-step sign-in support, rate limits and OpenAPI docs; Docker setup (web, scheduler, PostgreSQL, Valkey/Redis); developer guide, handover and licence documents. Tests: 422 passing on SQLite and PostgreSQL.

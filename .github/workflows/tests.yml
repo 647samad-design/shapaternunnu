@@ -32,3 +32,72 @@ jobs:
           python manage.py makemigrations --check --dry-run
       - name: Tests
         run: python manage.py test bees --parallel auto
+
+  postgres:
+    name: Tests on PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      db:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lumen
+          POSTGRES_PASSWORD: lumen
+          POSTGRES_DB: lumen
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U lumen" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DEBUG: "True"
+      SECRET_KEY: ci-only-not-secret
+      SECURE_SSL_REDIRECT: "False"
+      DEMO_MODE: "False"
+      DATABASE_URL: postgresql://lumen:lumen@localhost:5432/lumen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.txt
+      - name: Tests
+        run: python manage.py test bees --parallel auto
+
+  docker:
+    name: Docker (web + scheduler + Postgres + Redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SECRET_KEY: ci-docker-only-not-a-real-secret-0123456789
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start
+        run: docker compose up -d --build
+      - name: Wait for the site
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/health/; then exit 0; fi
+            sleep 3
+          done
+          docker compose logs
+          exit 1
+      - name: Pages load
+        run: |
+          for p in / /products/ /login/ /sitemap.xml /api/v1/ /api/v1/products/; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000$p")
+            echo "$p -> $code"
+            if [ "$code" != "200" ]; then docker compose logs web; exit 1; fi
+          done
+      - name: Scheduler runs its jobs
+        run: |
+          sleep 10
+          docker compose logs scheduler
+          docker compose logs scheduler | grep -q "run_promotions ok"
+      - name: Admin account can be created
+        run: |
+          docker compose exec -T -e DJANGO_SUPERUSER_PASSWORD=ci-Admin-pass-123 web \
+            python manage.py createsuperuser --noinput --username ciadmin --email ci@example.com
+      - name: Stop
+        if: always()
+        run: docker compose down -v

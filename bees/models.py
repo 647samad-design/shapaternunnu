@@ -2104,3 +2104,46 @@ class ListingReport(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class ApiToken(models.Model):
+    """Personal access token for the REST API (mobile apps, integrations).
+
+    Only a SHA-256 hash of the token is stored; the token itself is shown
+    once when it's created. ``prefix`` (the first characters) identifies it
+    in lists without revealing it."""
+    PREFIX = "lm_"
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="api_tokens")
+    name = models.CharField(max_length=60, default="API token")
+    key_hash = models.CharField(max_length=64, unique=True, editable=False)
+    prefix = models.CharField(max_length=12, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True, editable=False)
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.prefix}… ({self.name}) for {self.user_id}"
+
+    @staticmethod
+    def hash(key):
+        import hashlib
+        return hashlib.sha256(key.encode()).hexdigest()
+
+    @classmethod
+    def issue(cls, user, name="API token", days=None):
+        """Creates a token and returns (token_object, plain_key)."""
+        import secrets
+        from datetime import timedelta
+        from django.utils import timezone
+        key = cls.PREFIX + secrets.token_urlsafe(32)
+        token = cls.objects.create(user=user, name=(name or "API token")[:60], key_hash=cls.hash(key), prefix=key[:10],
+                                   expires_at=timezone.now() + timedelta(days=days) if days else None)
+        return token, key
+
+    @property
+    def is_expired(self):
+        from django.utils import timezone
+        return self.expires_at is not None and self.expires_at <= timezone.now()
