@@ -6061,3 +6061,293 @@ class ListingReportTests(TestCase):
         self.assertEqual((p.approval_status, rep.status), ("rejected", "removed"))
         self.assertTrue(any(m.to == ["spotter@example.com"] for m in _mail.outbox))
         self.assertTrue(Notification.objects.filter(user=owner, message__icontains="taken down").exists())
+
+
+# ---------------------------------------------------------------------------
+# REST API (bees/api)
+# ---------------------------------------------------------------------------
+
+class ApiTests(TestCase):
+    """The REST API follows the same rules as the website."""
+
+    def setUp(self):
+        from .models import Profile
+        self.buyer = User.objects.create_user("apibuyer", "apibuyer@example.com", "pass12345")
+        Profile.objects.get_or_create(user=self.buyer)
+        self.seller_user = User.objects.create_user("apiseller", "apiseller@example.com", "pass12345")
+        self.seller = SellerAccount.objects.create(user=self.seller_user, status="approved", business_name="Api Studio")
+        self.live = make_product(name="Rose Serum", price=Decimal("25.00"), seller_account=self.seller, seller_name="Api Studio")
+        self.cheap = make_product(name="Plain Soap", price=Decimal("3.00"), category="grocery")
+        self.hidden = make_product(name="Secret Serum", approval_status="pending", seller_account=self.seller, seller_name="Api Studio")
+
+    # --- helpers -----------------------------------------------------------
+    def token_for(self, username, password="pass12345", **extra):
+        r = self.client.post("/api/v1/auth/token/", {"username": username, "password": password, **extra},
+                             content_type="application/json")
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()["token"]
+
+    def get(self, path, token=None, **params):
+        headers = {"HTTP_AUTHORIZATION": f"Bearer {token}"} if token else {}
+        return self.client.get(path, params, **headers)
+
+    def send(self, method, path, data=None, token=None):
+        headers = {"HTTP_AUTHORIZATION": f"Bearer {token}"} if token else {}
+        return getattr(self.client, method)(path, data or {}, content_type="application/json", **headers)
+
+    def order_for(self, user, product, seller=None, **kw):
+        order = Order.objects.create(user=user, email=user.email, full_name="Api Buyer", address="1 St", city="Austin",
+                                     country="US", phone="+15550100", payment_method="cod", status="confirmed", **kw)
+        item = OrderItem.objects.create(order=order, product=product, product_name=product.name, price=product.price,
+                                        quantity=2, seller_account=seller)
+        return order, item
+
+    # --- catalog -----------------------------------------------------------
+    def test_index_and_docs(self):
+        r = self.get("/api/v1/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("/api/v1/products/", r.json()["catalog"]["products"])
+        self.assertEqual(self.get("/api/v1/schema/").status_code, 200)
+        self.assertEqual(self.get("/api/v1/docs/").status_code, 200)
+
+    def test_products_only_live(self):
+        r = self.get("/api/v1/products/")
+        self.assertEqual(r.status_code, 200)
+        names = [p["name"] for p in r.json()["results"]]
+        self.assertIn("Rose Serum", names)
+        self.assertNotIn("Secret Serum", names)
+        self.seller.status = "suspended"
+        self.seller.save()
+        names = [p["name"] for p in self.get("/api/v1/products/").json()["results"]]
+        self.assertNotIn("Rose Serum", names)
+        self.assertEqual(self.get(f"/api/v1/products/{self.hidden.id}/").status_code, 404)
+
+    def test_product_fields(self):
+        p = self.get(f"/api/v1/products/{self.live.id}/").json()
+        self.assertEqual(p["price"], "25.00")
+        self.assertTrue(p["url"].startswith("http"))
+        self.assertEqual(p["seller"]["name"], "Api Studio")
+        self.assertEqual(p["category"]["code"], "skincare")
+        self.assertTrue(p["in_stock"])
+
+    def test_search_filters_and_sort(self):
+        r = self.get("/api/v1/products/", search="serum").json()
+        self.assertEqual([p["name"] for p in r["results"]], ["Rose Serum"])
+        r = self.get("/api/v1/products/", category="grocery").json()
+        self.assertEqual([p["name"] for p in r["results"]], ["Plain Soap"])
+        r = self.get("/api/v1/products/", max_price="10").json()
+        self.assertEqual([p["name"] for p in r["results"]], ["Plain Soap"])
+        r = self.get("/api/v1/products/", sort="price_asc").json()
+        self.assertEqual(r["results"][0]["name"], "Plain Soap")
+        r = self.get("/api/v1/products/", seller_id=self.seller.id).json()
+        self.assertEqual([p["name"] for p in r["results"]], ["Rose Serum"])
+        self.assertEqual(self.get("/api/v1/products/", seller_id="x").status_code, 400)
+
+    def test_categories_and_reviews_and_seller(self):
+        cats = {c["code"]: c["product_count"] for c in self.get("/api/v1/categories/").json()}
+        self.assertEqual(cats["skincare"], 1)
+        Review.objects.create(product=self.live, username="Ann", rating=5, comment="Lovely")
+        r = self.get(f"/api/v1/products/{self.live.id}/reviews/").json()
+        self.assertEqual(r["results"][0]["comment"], "Lovely")
+        self.assertEqual(self.get(f"/api/v1/sellers/{self.seller.id}/").json()["name"], "Api Studio")
+        self.seller.status = "pending"
+        self.seller.save()
+        self.assertEqual(self.get(f"/api/v1/sellers/{self.seller.id}/").status_code, 404)
+
+    # --- sign-in ------------------------------------------------------------
+    def test_token_sign_in_and_out(self):
+        from .models import ApiToken
+        r = self.send("post", "/api/v1/auth/token/", {"username": "apibuyer", "password": "wrong"})
+        self.assertEqual(r.status_code, 400)
+        token = self.token_for("apibuyer@example.com")  # email works too
+        self.assertTrue(token.startswith("lm_"))
+        stored = ApiToken.objects.get(user=self.buyer)
+        self.assertNotEqual(stored.key_hash, token)  # only the hash is stored
+        self.assertEqual(stored.key_hash, ApiToken.hash(token))
+        me = self.get("/api/v1/me/", token)
+        self.assertEqual(me.status_code, 200)
+        self.assertEqual(me.json()["username"], "apibuyer")
+        self.assertEqual(self.get("/api/v1/me/").status_code, 401)
+        self.assertEqual(self.get("/api/v1/me/", "lm_not-a-real-token").status_code, 401)
+        self.assertEqual(self.send("post", "/api/v1/auth/logout/", token=token).status_code, 204)
+        self.assertEqual(self.get("/api/v1/me/", token).status_code, 401)
+
+    def test_expired_and_inactive_tokens_refused(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from .models import ApiToken
+        token = self.token_for("apibuyer")
+        ApiToken.objects.update(expires_at=timezone.now() - timedelta(seconds=1))
+        self.assertEqual(self.get("/api/v1/me/", token).status_code, 401)
+        token = self.token_for("apibuyer")
+        self.buyer.is_active = False
+        self.buyer.save()
+        self.assertEqual(self.get("/api/v1/me/", token).status_code, 401)
+
+    def test_two_step_accounts_need_a_code(self):
+        from . import twofactor
+        from .models import Profile
+        secret = twofactor.new_secret()
+        Profile.objects.filter(user=self.buyer).update(totp_secret=secret, totp_enabled=True)
+        r = self.send("post", "/api/v1/auth/token/", {"username": "apibuyer", "password": "pass12345"})
+        self.assertEqual(r.status_code, 400)
+        self.assertTrue(r.json()["code_required"])
+        r = self.send("post", "/api/v1/auth/token/", {"username": "apibuyer", "password": "pass12345", "code": "000000"})
+        self.assertEqual(r.status_code, 400)
+        code = twofactor.code_at(secret, twofactor.current_step())
+        self.token_for("apibuyer", code=code)
+        # the same code can't be used twice
+        r = self.send("post", "/api/v1/auth/token/", {"username": "apibuyer", "password": "pass12345", "code": code})
+        self.assertEqual(r.status_code, 400)
+
+    def test_sign_in_is_rate_limited(self):
+        codes = [self.send("post", "/api/v1/auth/token/", {"username": "apibuyer", "password": "nope"}).status_code
+                 for _ in range(12)]
+        self.assertIn(429, codes)
+
+    # --- customer -----------------------------------------------------------
+    def test_orders_are_private(self):
+        mine, _ = self.order_for(self.buyer, self.cheap)
+        other = User.objects.create_user("other", "other@example.com", "pass12345")
+        theirs, _ = self.order_for(other, self.cheap)
+        token = self.token_for("apibuyer")
+        r = self.get("/api/v1/orders/", token).json()
+        self.assertEqual([o["id"] for o in r["results"]], [mine.id])
+        detail = self.get(f"/api/v1/orders/{mine.id}/", token).json()
+        self.assertEqual(detail["totals"]["subtotal"], "6.00")
+        self.assertEqual(detail["items"][0]["quantity"], 2)
+        self.assertEqual(self.get(f"/api/v1/orders/{theirs.id}/", token).status_code, 404)
+
+    def test_wishlist(self):
+        token = self.token_for("apibuyer")
+        self.assertEqual(self.send("post", "/api/v1/wishlist/", {"product_id": self.live.id}, token).status_code, 201)
+        self.assertEqual(self.send("post", "/api/v1/wishlist/", {"product_id": self.hidden.id}, token).status_code, 404)
+        self.assertEqual([p["id"] for p in self.get("/api/v1/wishlist/", token).json()], [self.live.id])
+        self.assertEqual(self.send("delete", f"/api/v1/wishlist/{self.live.id}/", token=token).status_code, 204)
+        self.assertEqual(self.get("/api/v1/wishlist/", token).json(), [])
+
+    # --- seller ---------------------------------------------------------------
+    def test_seller_endpoints_need_a_seller(self):
+        token = self.token_for("apibuyer")
+        self.assertEqual(self.get("/api/v1/seller/products/", token).status_code, 403)
+
+    def test_seller_products_create_and_review_rules(self):
+        token = self.token_for("apiseller")
+        r = self.get("/api/v1/seller/products/", token).json()
+        self.assertEqual({p["name"] for p in r["results"]}, {"Rose Serum", "Secret Serum"})
+        self.assertEqual(self.send("post", "/api/v1/seller/products/", {"name": "No price"}, token).status_code, 400)
+        r = self.send("post", "/api/v1/seller/products/", {"name": "Lip Balm", "category": "skincare", "price": "4.50",
+                                                           "stock": 7, "image_url": "https://example.com/balm.jpg"}, token)
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["status"], "pending")  # new products go to review
+        balm = Product.objects.get(name="Lip Balm")
+        self.assertEqual(balm.seller_account, self.seller)
+        self.assertEqual(balm.stock, 7)
+        # price and stock are live at once, a new name goes back to review
+        r = self.send("patch", f"/api/v1/seller/products/{self.live.id}/", {"price": "19.00", "stock": 3}, token)
+        self.assertEqual(r.status_code, 200)
+        self.live.refresh_from_db()
+        self.assertEqual((self.live.price, self.live.stock, self.live.approval_status), (Decimal("19.00"), 3, "approved"))
+        self.send("patch", f"/api/v1/seller/products/{self.live.id}/", {"name": "Rose Serum XL"}, token)
+        self.live.refresh_from_db()
+        self.assertEqual(self.live.approval_status, "pending")
+
+    def test_sellers_only_touch_their_own_products(self):
+        other = SellerAccount.objects.create(user=User.objects.create_user("o2", "o2@example.com", "pass12345"),
+                                             status="approved", business_name="Other")
+        theirs = make_product(name="Not yours", seller_account=other, seller_name="Other")
+        token = self.token_for("apiseller")
+        self.assertEqual(self.get(f"/api/v1/seller/products/{theirs.id}/", token).status_code, 404)
+        self.assertEqual(self.send("patch", f"/api/v1/seller/products/{theirs.id}/", {"price": "1.00"}, token).status_code, 404)
+        theirs.refresh_from_db()
+        self.assertEqual(theirs.price, Decimal("500.00"))
+
+    def test_unapproved_seller_cannot_change_things(self):
+        self.seller.status = "pending"
+        self.seller.save()
+        token = self.token_for("apiseller")
+        r = self.send("patch", f"/api/v1/seller/products/{self.live.id}/", {"price": "1.00"}, token)
+        self.assertEqual(r.status_code, 403)
+
+    def test_seller_orders_and_fulfilment(self):
+        order, item = self.order_for(self.buyer, self.live, seller=self.seller)
+        token = self.token_for("apiseller")
+        r = self.get("/api/v1/seller/orders/", token, status="to_pack").json()
+        self.assertEqual([o["id"] for o in r["results"]], [order.id])
+        self.assertEqual(r["results"][0]["your_sale"], "50.00")
+        r = self.send("post", f"/api/v1/seller/orders/{order.id}/fulfil/",
+                      {"status": "handed_to_courier", "courier_name": "DHL", "tracking_number": "JD0001"}, token)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()["customer_notified"])
+        item.refresh_from_db()
+        order.refresh_from_db()
+        self.assertEqual(item.fulfillment_status, "handed_to_courier")
+        self.assertEqual((order.courier_name, order.tracking_number, order.status), ("DHL", "JD0001", "shipped"))
+
+    def test_fulfilment_blocked_for_unconfirmed_cash_orders(self):
+        order, item = self.order_for(self.buyer, self.live, seller=self.seller, cod_confirmed=False)
+        token = self.token_for("apiseller")
+        r = self.send("post", f"/api/v1/seller/orders/{order.id}/fulfil/", {"status": "handed_to_courier"}, token)
+        self.assertEqual(r.status_code, 400)
+        item.refresh_from_db()
+        self.assertEqual(item.fulfillment_status, "pending")
+
+    def test_team_staff_see_no_money(self):
+        staff = User.objects.create_user("teamstaff", "teamstaff@example.com", "pass12345")
+        OrganizationMember.objects.create(organization=self.seller, user=staff, role="staff")
+        token = self.token_for("teamstaff")
+        data = self.get("/api/v1/seller/", token).json()
+        self.assertEqual(data["role"], "staff")
+        self.assertNotIn("money", data)
+        owner = self.get("/api/v1/seller/", self.token_for("apiseller")).json()
+        self.assertIn("balance_available", owner["money"])
+
+
+class ApiTokenAccountPageTests(TestCase):
+    def test_tokens_listed_revoked_and_cleared_on_password_change(self):
+        from .models import ApiToken
+        user = User.objects.create_user("tok", "tok@example.com", "pass12345")
+        t1, _k = ApiToken.issue(user, name="Phone app")
+        ApiToken.issue(user, name="Script")
+        self.client.force_login(user)
+        page = self.client.get(reverse("account_security"))
+        self.assertContains(page, "Phone app")
+        self.assertContains(page, t1.prefix)
+        self.client.post(reverse("account_security"), {"action": "revoke_token", "token": t1.pk})
+        self.assertEqual(list(ApiToken.objects.filter(user=user).values_list("name", flat=True)), ["Script"])
+        self.client.post(reverse("account_security"), {"old_password": "pass12345", "new_password1": "N3w-strong-pass!",
+                                                       "new_password2": "N3w-strong-pass!"})
+        self.assertFalse(ApiToken.objects.filter(user=user).exists())
+
+
+class DockerSupportTests(TestCase):
+    def test_env_file_location_and_gunicorn_reload(self):
+        import os
+        import tempfile
+        from unittest import mock
+        from django.test import override_settings
+        from . import envfile
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, ".env")
+            with override_settings(ENV_FILE=target), mock.patch.dict(os.environ, {}, clear=False):
+                envfile.write({"STORE_CURRENCY": "eur"})
+                self.assertEqual(envfile.read()["STORE_CURRENCY"], "eur")
+                self.assertTrue(os.path.exists(target))
+        with mock.patch.dict(os.environ, {"RELOAD_WITH_HUP": "1"}), mock.patch("os.kill") as kill:
+            self.assertTrue(envfile.reload_app())
+            kill.assert_called_once()
+
+    def test_database_ssl_choice(self):
+        import os
+        from unittest import mock
+        from backend import settings as st
+        cases = [
+            ("postgresql://u:p@db:5432/x", "", False),
+            ("postgresql://u:p@abc.pooler.supabase.com:5432/postgres", "", True),
+            ("postgresql://u:p@abc.example.com:5432/x?sslmode=disable", "", False),
+            ("postgresql://u:p@db:5432/x", "True", True),
+            ("postgresql://u:p@abc.example.com:5432/x", "False", False),
+        ]
+        for url, choice, expected in cases:
+            with mock.patch.dict(os.environ, {"DATABASE_SSL": choice}), mock.patch.object(st, "DATABASE_URL", url):
+                self.assertEqual(st._database_ssl(), expected, (url, choice))

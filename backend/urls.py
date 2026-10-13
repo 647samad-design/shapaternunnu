@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.urls import path, re_path
+from django.urls import include, path, re_path
 from django.views.static import serve
 from django.contrib.auth import views as auth_views
 from django.conf import settings
@@ -39,6 +39,7 @@ urlpatterns = [
     path('sw.js', pwa.service_worker, name='service_worker'),
     path('offline/', pwa.offline, name='offline'),
     path('health/', views.health, name='health'),
+    path('api/v1/', include('bees.api.urls')),
     path('product/<int:pk>/report/', reports_listing.report, name='report_listing'),
     path('manage/listing-reports/', mv.staff_required(reports_listing.admin_page), name='manage_listing_reports'),
     path('robots.txt', TemplateView.as_view(template_name="robots.txt", content_type="text/plain"), name='robots'),

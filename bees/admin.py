@@ -596,3 +596,22 @@ def _admin_login(request, extra_context=None):
 
 
 admin.site.login = _admin_login
+
+
+from .models import ApiToken  # noqa: E402
+
+
+@admin.register(ApiToken)
+class ApiTokenAdmin(admin.ModelAdmin):
+    """API sign-ins. Only a hash is stored, so tokens can be revoked here
+    (delete) but never read."""
+    list_display = ("prefix", "name", "user", "created_at", "last_used_at", "expires_at")
+    search_fields = ("user__username", "user__email", "name", "prefix")
+    readonly_fields = ("user", "name", "prefix", "created_at", "last_used_at", "expires_at")
+    exclude = ("key_hash",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

@@ -6,6 +6,18 @@ independent sellers and businesses run their own stores, and the owner earns com
 Out of the box it ships as **"Lumen Market"**. Change the name, logo, colours, homepage copy, shipping,
 tax and contact details from **Admin → Site settings** — no code changes.
 
+## Documentation
+
+| Document | What's inside |
+|---|---|
+| [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Architecture, code map, data model, money and order flows, conventions |
+| [DOCKER.md](DOCKER.md) | One-command setup: web, scheduler, PostgreSQL, Redis |
+| [DEPLOY.md](DEPLOY.md) | Going live: hosting, payments, email, sign-in, SMS, payouts, legal |
+| [API.md](API.md) | REST API for mobile apps and integrations (live docs at `/api/v1/docs/`) |
+| [QUALITY.md](QUALITY.md) | Security audit, accessibility audit, load test |
+| [HANDOVER.md](HANDOVER.md) | Ownership, licences and handover checklist |
+| [LICENSE](LICENSE), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Licence and open-source components |
+
 ## Highlights
 
 **For customers**
@@ -32,7 +44,9 @@ tax and contact details from **Admin → Site settings** — no code changes.
 - Django 6, Postgres (**Supabase**) or SQLite, S3-compatible file storage (**Supabase Storage**)
 - Atomic checkout with row locking (no overselling), idempotent signed Stripe webhooks with amount checks
 - Rate limiting, upload validation, private storage for seller ID documents, safe production defaults
-- 85+ automated tests: `python manage.py test bees`
+- REST API with token sign-in and OpenAPI docs (`/api/v1/docs/`)
+- Docker setup with PostgreSQL, Redis and a background scheduler
+- 400+ automated tests, run on SQLite, PostgreSQL and Docker by GitHub Actions: `python manage.py test bees`
 
 ## Seller Center (/seller/)
 
@@ -106,6 +120,16 @@ and `daily_tasks` resets them every day.
 
 ## Quick start (local)
 
+With Docker (see [DOCKER.md](DOCKER.md)):
+
+```bash
+cp .env.example .env            # then set SECRET_KEY
+docker compose up -d --build
+docker compose exec web python manage.py createsuperuser
+```
+
+Without Docker:
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -116,7 +140,7 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
-Open http://127.0.0.1:8000 — the admin is at `/admin/`, the store dashboard at `/owner/dashboard/`.
+Open http://127.0.0.1:8000 — the store admin is at `/manage/`, Seller Center at `/seller/`, the API at `/api/v1/` and the Django admin at `/admin/`.
 
 ## Rebrand the store
 
@@ -210,15 +234,18 @@ Netlify domain.
 ## Project layout
 
 ```
-backend/            settings, URLs, WSGI
-bees/               the marketplace app
-  views.py          storefront, checkout, seller and staff views
-  payments.py       Stripe Checkout + webhook handling
-  security.py       redirect safety, client IP, upload validation
-  models.py         products, orders, sellers, site settings ...
-  templates/bees/   storefront templates (design tokens live in base.html)
-  management/       seed_data, release_unpaid_orders
+backend/              settings, URLs, WSGI
+bees/                 the marketplace app
+  views.py            storefront, cart, checkout, orders
+  seller_views.py     Seller Center        manage_views.py  store admin
+  api/                REST API v1          payments.py      Stripe (paypal.py: PayPal)
+  fulfilment.py       shipping rules       bulk.py          spreadsheet import/export
+  models.py           all database models  templates/bees/  every page (design tokens in base.html)
+  management/         scheduled jobs and maintenance commands
+deploy/docker/        container entrypoint and scheduler
 ```
+
+The full code map is in [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md).
 
 ## Tests
 
@@ -226,8 +253,10 @@ bees/               the marketplace app
 python manage.py test bees
 ```
 
-Covers order totals, shipping/tax, coupons, stock locking, Stripe flows (mocked), refunds,
-permissions, rate limiting, open-redirect protection, upload validation and white-label rendering.
+Covers order totals, shipping/tax, coupons, stock locking, Stripe and PayPal flows (mocked), refunds,
+payouts, fulfilment, the REST API, permissions and staff roles, rate limiting, open-redirect protection,
+upload validation, translations and white-label rendering. CI runs it on SQLite and PostgreSQL and boots
+the Docker stack on every pull request.
 
 ## Daily maintenance (PythonAnywhere scheduled task)
 

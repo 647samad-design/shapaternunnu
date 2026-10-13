@@ -74,6 +74,16 @@ def security(request):
         field.widget.attrs.update({"class": "input"})
     if request.method == "POST":
         action = request.POST.get("action", "password")
+        if action in ("revoke_token", "revoke_all_tokens"):
+            from .models import ApiToken
+            tokens = ApiToken.objects.filter(user=request.user)
+            if action == "revoke_token":
+                tokens = tokens.filter(pk=request.POST.get("token") if str(request.POST.get("token", "")).isdigit() else 0)
+            n = tokens.count()
+            tokens.delete()
+            AuditLog.objects.create(user=request.user, action=f"Revoked {n} API token{'s' if n != 1 else ''}")
+            messages.success(request, f"Revoked {n} app/API sign-in{'s' if n != 1 else ''}." if n else "Nothing to revoke.")
+            return redirect("account_security")
         if action == "signout_others":
             keys = _other_sessions(request)
             Session.objects.filter(session_key__in=keys).delete()
@@ -83,6 +93,8 @@ def security(request):
         if form.is_valid():
             user = form.save()
             update_session_auth_hash(request, user)  # stay signed in here; other devices are signed out
+            from .models import ApiToken
+            ApiToken.objects.filter(user=user).delete()  # apps must sign in again with the new password
             AuditLog.objects.create(user=user, action="Changed password")
             if user.email:
                 _send("Your password was changed", "bees/emails/security_notice.html", {
@@ -90,13 +102,14 @@ def security(request):
                     "detail": "If this wasn't you, reset your password straight away and contact us.",
                     "reset_url": request.build_absolute_uri(reverse("password_reset")),
                 }, user)
-            messages.success(request, "Password changed. You've been signed out on your other devices.")
+            messages.success(request, "Password changed. You've been signed out on your other devices and apps.")
             return redirect("account_security")
     profile = _profile(request.user)
     return render(request, "bees/account/security.html", {
         "tab": "security", "form": form, "other_sessions": len(_other_sessions(request)),
         "totp_enabled": profile.totp_enabled, "backup_left": len(profile.backup_codes or []),
         "twofa_required": _staff_must_use_2fa(request.user),
+        "api_tokens": request.user.api_tokens.all()[:20],
     })
 
 
