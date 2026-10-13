@@ -221,7 +221,8 @@ def _email_verified(user):
 
 def _send_order_confirmation(request, order):
     if order.payment_method == "cod" and not order.cod_confirmed:
-        _send_cod_confirmation(request, order)
+        if not order.cod_otp_hash:  # phone-code orders are confirmed on the site
+            _send_cod_confirmation(request, order)
         return
     invoice_url = request.build_absolute_uri(reverse("invoice_pdf", args=[order.id]))
     if order.is_guest:
@@ -281,7 +282,9 @@ def _category_tiles():
 
 
 def product_detail(request, pk):
-    product = get_object_or_404(Product, pk=pk)
+    # Rating + review count in the same query (the page shows them several
+    # times: stars, summary, structured data).
+    product = get_object_or_404(with_ratings(Product.objects.all()), pk=pk)
 
     if not product.is_live and not _can_view_unapproved(request.user, product):
         bought = (product.approval_status == "archived" and request.user.is_authenticated
@@ -320,6 +323,8 @@ def product_detail(request, pk):
 
     recent_ids = request.session.get("recently_viewed", [])
     if not is_speculative(request):
+        from . import analytics
+        analytics.track(request, "view", str(product.id))
         recent_ids = [i for i in recent_ids if i != product.id]
         recent_ids.insert(0, product.id)
         request.session["recently_viewed"] = recent_ids[:10]
@@ -441,6 +446,13 @@ def search_products(request):
     context = _listing(request, base_qs, 12)
     context["query"] = query
     context["smart"] = smart
+    if query and not is_speculative(request) and request.GET.get("page", "1") == "1":
+        from . import analytics
+        key = " ".join(query.lower().split())[:150]
+        analytics.track(request, "search", key)
+        page = context.get("page_obj")
+        if page is not None and not page.paginator.count:
+            analytics.track(request, "search_zero", key)
     return render(request, "bees/search.html", context)
 
 
@@ -1016,6 +1028,8 @@ def add_to_cart(request, pk):
     request.session["cart"] = cart
     _persist_cart(request)
     request.session.modified = True
+    from . import analytics
+    analytics.track(request, "cart")
 
     if _is_ajax(request):
         return JsonResponse({
@@ -1031,6 +1045,7 @@ def add_to_cart(request, pk):
         messages.warning(request, warning)
     messages.success(request, f"{name} added to cart.")
     return redirect_back(request, "cart")
+
 
 
 @require_POST
@@ -1213,6 +1228,13 @@ def checkout_view(request):
     default_address = Address.objects.filter(user=request.user, is_default=True).first() if request.user.is_authenticated else None
     pricing = _price_cart(subtotal, coupon, default_address.country if default_address else None, count)
     methods = _payment_methods()
+    cod_note = ""
+    if "cod" in methods:
+        from . import cod
+        cod_note = cod.problem(pricing["total"], request.user.email if request.user.is_authenticated else "",
+                               default_address.phone if default_address else "")
+        if cod_note and request.method != "POST":
+            methods = [m for m in methods if m != "cod"]
 
     if request.method == "POST":
         if coupon_error:
@@ -1234,9 +1256,22 @@ def checkout_view(request):
             validate_email(data["email"])
             if not pricing["ships"]:
                 raise ValidationError(f"Sorry, we don't deliver to {country_name(data['country'])} yet.")
+            if payment_method == "cod":
+                from . import cod
+                cod_note = cod.problem(pricing["total"], data["email"], data["phone"]) or (
+                    cod.problem(pricing["total"], request.user.email) if request.user.is_authenticated else "")
+                if cod_note:
+                    methods = [m for m in methods if m != "cod"]
+                    raise ValidationError(cod_note)
+                if cod.phone_check_on():
+                    from . import sms
+                    if not sms.normalize(data["phone"], data["country"]):
+                        raise ValidationError("Please enter a mobile number we can text a confirmation code to (with country code, e.g. +92 300 1234567).")
         except ValidationError as exc:
             messages.error(request, " ".join(exc.messages))
-            return render(request, "bees/checkout.html", _checkout_context(request, items, pricing, coupon, methods, data))
+            ctx = _checkout_context(request, items, pricing, coupon, methods, data)
+            ctx["cod_note"] = cod_note
+            return render(request, "bees/checkout.html", ctx)
 
         try:
             order = _place_order(request, items, data, payment_method, use_credit=request.POST.get("use_credit") == "1")
@@ -1251,6 +1286,9 @@ def checkout_view(request):
             _remember_guest_order(request, order)
         request.session.modified = True
 
+        if payment_method in ("card", "paypal") and order.total_cents > 0:
+            from .currency import apply_presentment
+            apply_presentment(order, payment_method)
         if payment_method == "card" and order.total_cents > 0:
             try:
                 return redirect(payments.create_checkout_session(request, order))
@@ -1275,12 +1313,23 @@ def checkout_view(request):
             order._skip_status_email = True  # the confirmation email below covers it
             order.save(update_fields=["payment_status", "status"])
 
+        if payment_method == "cod" and not order.cod_confirmed and order.total_cents:
+            from . import cod
+            if cod.phone_check_on():
+                cod.send_code(order)
         _send_order_confirmation(request, order)
         if order.user_id:
             Notification.objects.create(user=request.user, message=f"Order #{order.id} placed successfully.", link="/my-orders/")
         return redirect("order_success", order_id=order.id)
 
-    return render(request, "bees/checkout.html", _checkout_context(request, items, pricing, coupon, methods))
+    ctx = _checkout_context(request, items, pricing, coupon, methods)
+    ctx["cod_note"] = cod_note
+    from . import analytics
+    marker = f"{timezone.localdate()}:{count}"
+    if request.session.get("_co") != marker:
+        request.session["_co"] = marker
+        analytics.track(request, "checkout")
+    return render(request, "bees/checkout.html", ctx)
 
 
 def _store_credit(user):
@@ -1314,7 +1363,11 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
         sa = row["product"].seller_account
         if sa and sa not in sellers:
             sellers.append(sa)
+    from .currency import charge_currency_for
+    charge_in = charge_currency_for("card") or charge_currency_for("paypal")
     return {
+        "charge_in": charge_in,
+        "charge_paypal_ok": bool(charge_currency_for("paypal")),
         "checkout_sellers": sellers,
         "checkout_data": checkout_data,
         "store_credit": credit,
@@ -1331,6 +1384,11 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
         "payment_methods": methods,
         "form": form,
     }
+
+
+def _cod_phone_check():
+    from . import cod
+    return cod.phone_check_on()
 
 
 def _place_order(request, items, data, payment_method, use_credit=False):
@@ -1411,7 +1469,7 @@ def _place_order(request, items, data, payment_method, use_credit=False):
             courier_name=tracking.suggest_courier(data["country"]),
             # Cash orders from accounts with an unconfirmed email need one
             # click on an emailed link before sellers pack them (stops fake orders).
-            cod_confirmed=is_card or not signed_in or _email_verified(request.user),
+            cod_confirmed=is_card or (not _cod_phone_check() and (not signed_in or _email_verified(request.user))),
         )
         seller_cache = {}
         for product, variant, price, qty in lines:
@@ -1827,6 +1885,8 @@ def pay_online(request, order_id):
         order.payment_method = "card"
         order.payment_status = "pending"
         order.save(update_fields=["cod_fallback", "payment_method", "payment_status"])
+    from .currency import apply_presentment
+    apply_presentment(order, "card")
     try:
         return redirect(payments.create_checkout_session(request, order))
     except payments.PaymentError as exc:
@@ -1899,6 +1959,13 @@ def stripe_webhook(request):
     session = (event.get("data") or {}).get("object") or {}
     if event_type.startswith("charge."):
         _stripe_charge_event(event_type, session)
+        return HttpResponse(status=200)
+    gift_card_id = (session.get("metadata") or {}).get("gift_card_id")
+    if gift_card_id and event_type.startswith("checkout.session."):
+        if event_type in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
+            from . import giftcards
+            with transaction.atomic():
+                giftcards.confirm_stripe(gift_card_id, session)
         return HttpResponse(status=200)
     plan_payment_id = (session.get("metadata") or {}).get("plan_payment_id")
     if plan_payment_id and event_type.startswith("checkout.session."):
@@ -2523,6 +2590,27 @@ def paypal_webhook(request):
     resource = event.get("resource") or {}
     kind = event.get("event_type", "")
     order = None
+    if kind.startswith("PAYMENT.PAYOUTS"):
+        from . import payouts as auto
+        from .models import Payout
+        batch_id = resource.get("payout_batch_id") or (resource.get("batch_header") or {}).get("payout_batch_id", "")
+        payout = Payout.objects.filter(status="processing", reference=f"PayPal {batch_id}").first() if batch_id else None
+        if payout:
+            auto.refresh_paypal(payout)
+        return HttpResponse(status=200)
+    if kind in ("CHECKOUT.ORDER.APPROVED", "PAYMENT.CAPTURE.COMPLETED"):
+        from .models import GiftCard
+        pp_id = resource.get("id", "") if kind.startswith("CHECKOUT") else \
+            ((resource.get("supplementary_data") or {}).get("related_ids") or {}).get("order_id", "")
+        card = GiftCard.objects.filter(paypal_order_id=pp_id, status="pending").first() if pp_id else None
+        if card:
+            from . import giftcards
+            try:
+                with transaction.atomic():
+                    giftcards.capture_paypal(card)
+            except paypal.PayPalError:
+                return HttpResponse(status=503)
+            return HttpResponse(status=200)
     if kind.startswith("CHECKOUT.ORDER"):
         order = Order.objects.filter(paypal_order_id=resource.get("id", "")).first()
     elif kind.startswith("PAYMENT.CAPTURE"):
@@ -2731,6 +2819,9 @@ def confirm_cod(request, order_id, token):
     if order.status == "cancelled":
         messages.error(request, f"Order #{order.id} was cancelled because it wasn't confirmed in time. Please order again.")
         return redirect("home")
+    if not order.cod_confirmed and order.cod_otp_hash:
+        messages.info(request, f"Please confirm order #{order.id} with the code we texted to your phone.")
+        return redirect("order_success", order_id=order.id) if _can_see_order(request, order) else redirect("home")
     if not order.cod_confirmed:
         Order.objects.filter(pk=order.pk).update(cod_confirmed=True)
         order.cod_confirmed = True
@@ -2740,6 +2831,45 @@ def confirm_cod(request, order_id, token):
         _send_order_confirmation(request, order)
     messages.success(request, f"Thank you! Order #{order.id} is confirmed. Please keep {money(order.total)} ready in cash for the courier.")
     return redirect("my_orders" if request.user.is_authenticated else "home")
+
+
+def _can_see_order(request, order):
+    try:
+        _order_access(request, order.id)
+        return True
+    except Http404:
+        return False
+
+
+@require_POST
+@ratelimit("cod_code", rate_limit=12, window_seconds=600, redirect_to="home",
+           message="Too many attempts. Please wait a few minutes and try again.")
+def cod_verify(request, order_id):
+    """The customer types the 6-digit code we texted (cash orders)."""
+    from . import cod
+    order = _order_access(request, order_id, owner_only=True)
+    back = request.POST.get("next") or ""
+    if order.payment_method != "cod" or order.status == "cancelled":
+        return redirect("order_success", order_id=order.id)
+    if request.POST.get("resend"):
+        if order.cod_confirmed:
+            pass
+        elif not cod.can_resend(order):
+            messages.error(request, "Please wait a minute before asking for another code.")
+        elif cod.send_code(order):
+            messages.success(request, "We've sent a new code to your phone.")
+        else:
+            messages.error(request, "We couldn't text that number. Please contact support.")
+    else:
+        ok, error = cod.check_code(order, request.POST.get("code", ""))
+        if ok:
+            _send_order_confirmation(request, order)
+            messages.success(request, f"Thank you! Order #{order.id} is confirmed. Please keep {money(order.total)} ready in cash for the courier.")
+        else:
+            messages.error(request, error)
+    if back == "orders":
+        return _orders_page(request, order)
+    return redirect("order_success", order_id=order.id)
 
 
 @require_POST

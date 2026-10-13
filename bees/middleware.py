@@ -37,6 +37,13 @@ class StaffTwoFactorMiddleware:
                 if not Profile.objects.filter(user=user, totp_enabled=True).exists():
                     messages.info(request, "Please set up two-step sign-in to open the store admin. It takes a minute and protects the store if your password is ever stolen.")
                     return redirect("two_factor_setup")
+        if user is not None and path.startswith("/seller/") and user.is_authenticated and not user.is_staff:
+            from django.conf import settings
+            from .models import Profile, SiteSettings
+            demo = getattr(settings, "DEMO_MODE", False) and user.username.startswith("demo_")
+            if not demo and SiteSettings.load().require_seller_2fa and not Profile.objects.filter(user=user, totp_enabled=True).exists():
+                messages.info(request, "Please set up two-step sign-in to open Seller Center. It protects your earnings if your password is ever stolen.")
+                return redirect("two_factor_setup")
         return self.get_response(request)
 
 

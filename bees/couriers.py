@@ -362,6 +362,10 @@ def refresh(shipment):
                 Notification.objects.bulk_create([Notification(user=u, link=f"/seller/orders/{shipment.order_id}/",
                                                                message=f"Courier problem with order #{shipment.order_id}: {raw}.")
                                                   for u in _seller_users(shipment.seller)])
+            order = shipment.order
+            if status == "returned" and order.payment_method == "cod" and not order.cod_collected_at:
+                from . import cod
+                cod.mark_refused(order, reason=f"Courier returned the cash on delivery parcel ({shipment.tracking_number})")
     shipment.save()
     return shipment.status
 

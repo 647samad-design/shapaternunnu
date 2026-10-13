@@ -92,9 +92,10 @@
                 <dt>Status</dt><dd>{{ order.get_payment_status_display }}</dd>
                 {% if order.card_label %}<dt>Card</dt><dd>{{ order.card_label }}</dd>{% endif %}
                 {% if order.refunded_at %}<dt>Refunded</dt><dd>{{ order.refunded_at|date:"M j, Y H:i" }}{% if order.refund_id %} <span class="muted small">({{ order.refund_id }})</span>{% endif %}</dd>{% endif %}
-                {% if order.payment_method == "cod" %}<dt>Cash</dt><dd>{% if not order.cod_confirmed %}<span class="pill warn">Waiting for customer to confirm</span>{% elif order.cod_collected_at %}<span class="pill ok">Collected {{ order.cod_collected_at|date:"M j" }}</span>{% else %}Collect {{ order.total|money }} on delivery{% endif %}</dd>{% endif %}
+                {% if order.payment_method == "cod" %}<dt>Cash</dt><dd>{% if not order.cod_confirmed %}<span class="pill warn">Waiting for customer to confirm</span>{% elif order.cod_collected_at %}<span class="pill ok">Collected {{ order.cod_collected_at|date:"M j" }}</span>{% else %}Collect {{ order.total|money }} on delivery{% endif %}{% if order.cod_refused %} <span class="pill bad">Refused by customer</span>{% elif not order.cod_collected_at and order.status != "delivered" and order.status != "pending" %}
+                    <form method="post" style="margin-top:6px;" onsubmit="return confirm('Mark this cash order as refused? It will be cancelled and stock returned.');">{% csrf_token %}<input type="hidden" name="action" value="cod_refused"><button class="btn btn-secondary btn-sm" type="submit">Customer refused delivery</button></form>{% endif %}</dd>{% endif %}
                 {% if order.cancel_reason %}<dt>Cancel reason</dt><dd>{{ order.cancel_reason }}</dd>{% endif %}
-                <dt>Currency</dt><dd>{{ order.currency|upper }}</dd>
+                <dt>Currency</dt><dd>{{ order.currency|upper }}{% if order.charge_currency %} · charged <strong>{{ order.charge_amount }} {{ order.charge_currency|upper }}</strong> <span class="muted small">(rate {{ order.charge_rate|floatformat:4 }})</span>{% endif %}</dd>
             </dl>
         </section>
         <section class="panel">

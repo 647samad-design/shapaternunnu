@@ -16,6 +16,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from . import payments
@@ -215,6 +216,12 @@ def _seller_block(user):
     return ""
 
 
+def _sms_on():
+    from . import sms
+    from .models import SiteSettings
+    return sms.is_configured() and SiteSettings.load().sms_customer_updates
+
+
 @login_required
 def privacy(request):
     email = (request.user.email or "").lower()
@@ -224,13 +231,14 @@ def privacy(request):
         Profile.objects.filter(pk=_profile(request.user).pk).update(
             cart_reminders=bool(request.POST.get("cart_reminders")),
             price_drop_alerts=bool(request.POST.get("price_drop_alerts")),
+            sms_updates=bool(request.POST.get("sms_updates")),
             language=lang if lang in TRANSLATIONS else "")
         wants = bool(request.POST.get("marketing"))
         if wants and email:
             NewsletterSubscriber.objects.get_or_create(email=email)
         else:
             NewsletterSubscriber.objects.filter(email__iexact=email).delete()
-        messages.success(request, "Email preferences saved." + ("" if email or not wants else " Add an email address to your profile first."))
+        messages.success(request, "Preferences saved." + ("" if email or not wants else " Add an email address to your profile first."))
         return redirect("account_privacy")
     open_orders = Order.objects.filter(user=request.user, status__in=OPEN_ORDER_STATUSES).count()
     return render(request, "bees/account/privacy.html", {
@@ -238,6 +246,8 @@ def privacy(request):
         "subscribed": bool(email) and NewsletterSubscriber.objects.filter(email__iexact=email).exists(),
         "cart_reminders": _profile(request.user).cart_reminders,
         "price_drop_alerts": _profile(request.user).price_drop_alerts,
+        "sms_updates": _profile(request.user).sms_updates,
+        "sms_on": _sms_on(),
         "email_language": _profile(request.user).language,
         "open_orders": open_orders,
         "seller_block": _seller_block(request.user),
@@ -571,3 +581,56 @@ def referrals(request):
         "share_text": f"Here's {site.referral_friend_percent}% off your first order at {site.site_name}: {link}",
         "share_short": f"Get {site.referral_friend_percent}% off your first order at {site.site_name}",
     })
+
+
+# ---------------------------------------------------------------------------
+# Sign in with Google / Apple
+# ---------------------------------------------------------------------------
+
+def social_start(request, provider):
+    from . import social
+    from .security import safe_next_url
+    if provider not in social.providers():
+        messages.error(request, "That sign-in option isn't available.")
+        return redirect("login")
+    next_url = safe_next_url(request, request.GET.get("next"), reverse("home"))
+    return redirect(social.start(request, provider, next_url))
+
+
+@csrf_exempt  # Apple posts back from its own site; protected by the single-use state + nonce instead
+def social_callback(request, provider):
+    import json as _json
+    from django.contrib.auth import login as auth_login
+    from . import social
+    from .security import safe_next_url
+    data = request.POST if request.method == "POST" else request.GET
+    pending = social.pop_state(data.get("state", ""))
+    if not pending or pending.get("provider") != provider or provider not in social.providers():
+        messages.error(request, "That sign-in link expired. Please try again.")
+        return redirect("login")
+    if data.get("error"):
+        messages.info(request, "Sign-in was cancelled.")
+        return redirect("login")
+    try:
+        info = social.finish(request, provider, data.get("code", ""), pending["nonce"])
+        extra = {}
+        if provider == "apple" and data.get("user"):
+            try:
+                extra = (_json.loads(data["user"]) or {}).get("name") or {}
+            except ValueError:
+                extra = {}
+        user, created = social.account_for(info, provider, extra)
+    except social.SocialError as exc:
+        messages.error(request, f"Couldn't sign in with {provider.title()}: {exc}.")
+        return redirect("login")
+    next_url = safe_next_url(request, pending.get("next"), reverse("home"))
+    backend = "django.contrib.auth.backends.ModelBackend"
+    if Profile.objects.filter(user=user, totp_enabled=True).exists():
+        request.session["2fa_pending"] = {"uid": user.pk, "backend": backend, "next": next_url, "remember": True,
+                                          "tries": 0, "expires": timezone.now().timestamp() + 300}
+        return redirect("login_code")
+    auth_login(request, user, backend=backend)
+    AuditLog.objects.create(user=user, action=f"Signed in with {provider.title()}" + (" (new account)" if created else ""))
+    if created:
+        messages.success(request, f"Welcome, {user.first_name or user.username}! Your account is ready.")
+    return redirect(next_url)

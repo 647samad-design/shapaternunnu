@@ -48,7 +48,9 @@
             </div>
         </div>
         {% include "bees/partials/order_status.html" %}
-        {% if order.payment_method == "cod" and not order.cod_confirmed and order.status == "pending" %}
+        {% if order.payment_method == "cod" and not order.cod_confirmed and order.status == "pending" and order.cod_otp_hash %}
+        {% include "bees/partials/cod_code.html" with next="orders" %}
+        {% elif order.payment_method == "cod" and not order.cod_confirmed and order.status == "pending" %}
         <div class="callout warn" style="margin:12px 0 0;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;">
             <span><strong>Please confirm this cash order.</strong> We emailed a confirmation link to {{ order.contact_email }}. Unconfirmed cash orders are cancelled after 48 hours.</span>
             <form method="post" action="{% url 'resend_cod_confirmation' order.id %}" style="margin:0;">{% csrf_token %}<button class="btn btn-secondary btn-sm" type="submit">Send the link again</button></form>
@@ -57,7 +59,7 @@
         <p class="order-note">{% if order.cod_collected_at %}✓ Paid in cash on delivery ({{ order.cod_collected_at|date:"M j" }}).{% else %}💵 Pay <strong>{{ order.total|money }}</strong> in cash when the courier delivers.{% endif %}</p>
         {% endif %}
         {% if order.payment_status == "refunded" %}<p class="order-note ok">↩ {{ order.total|money }} refunded{% if order.card_label %} to {{ order.card_label }}{% endif %}{% if order.refunded_at %} on {{ order.refunded_at|date:"M j, Y" }}{% endif %}. Banks usually show it within 5–10 business days.</p>
-        {% elif order.payment_status == "paid" and order.card_label %}<p class="order-note">Paid with {{ order.card_label }}</p>{% endif %}
+        {% elif order.payment_status == "paid" and order.card_label %}<p class="order-note">Paid with {{ order.card_label }}{% if order.charge_currency %} · <span data-no-translate>{{ order.charge_amount }} {{ order.charge_currency|upper }}</span>{% endif %}</p>{% endif %}
         {% if order.status == "cancelled" and order.cancel_reason %}<p class="order-note">Cancelled: {{ order.cancel_reason }}</p>{% endif %}
         {% if order.status != "cancelled" %}
         <div class="tracking">

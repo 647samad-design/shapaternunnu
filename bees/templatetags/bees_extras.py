@@ -227,3 +227,9 @@ def sitemap_languages():
     if not SiteSettings.load().show_language_menu:
         return []
     return list(HREFLANG.items())
+
+
+@register.simple_tag
+def social_providers():
+    from bees import social
+    return social.providers()

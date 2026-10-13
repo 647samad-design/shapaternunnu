@@ -269,6 +269,8 @@ def notify_new_order(order):
                 message=f"New order #{order.id}: {units} item{'s' if units != 1 else ''} to ship. Pack it within 2 days.",
             )
         transaction.on_commit(lambda s=seller, its=items, e=earning: _email_new_order(order.pk, s.pk, [i.pk for i in its], e))
+        from . import sms
+        transaction.on_commit(lambda s=seller, u=units: sms.seller_new_order(s, order, u))
 
 
 def _email_new_order(order_id, seller_id, item_ids, earning):

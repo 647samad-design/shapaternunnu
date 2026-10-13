@@ -77,6 +77,7 @@
                     <span><strong>{{ t.cash_on_delivery }}</strong><span class="muted">Pay the courier when your order arrives{% if "card" in payment_methods %}, or pay online any time before it ships from My orders{% endif %}.</span></span>
                 </label>
                 {% endif %}
+                {% if cod_note %}<p class="muted small" style="margin:8px 0 0;"><span aria-hidden="true">💵 </span><span>{{ cod_note }}</span></p>{% endif %}
                 {% if store_credit > 0 %}
                 <label class="pay-option" style="margin-top:12px;">
                     <input type="checkbox" name="use_credit" value="1" id="use-credit" checked>
@@ -90,7 +91,7 @@
                     {% if "card" in payment_methods or "paypal" in payment_methods %}Continue to payment{% else %}{{ t.place_order }}{% endif %} · {% if store_credit > 0 %}{{ total_after_credit|money }}{% else %}{{ pricing.total|money }}{% endif %}
                 </button>
                 {% else %}
-                <p class="muted">Checkout is temporarily unavailable. Please contact support{% if brand.support_email %} at <a class="link" href="mailto:{{ brand.support_email }}">{{ brand.support_email }}</a>{% endif %}.</p>
+                {% if cod_note %}<p class="callout warn">{{ cod_note }}</p>{% else %}<p class="muted">Checkout is temporarily unavailable. Please contact support{% if brand.support_email %} at <a class="link" href="mailto:{{ brand.support_email }}">{{ brand.support_email }}</a>{% endif %}.</p>{% endif %}
                 {% endif %}
             </section>
         </form>
@@ -111,6 +112,15 @@
                 <input class="input" id="coupon" type="text" name="coupon_code" placeholder="{{ t.coupon_code_placeholder }}" value="{{ coupon.code|default:'' }}">
                 <button type="submit" class="btn btn-secondary">{{ t.apply }}</button>
             </form>
+            {% if user.is_authenticated %}
+            <details class="gift-redeem" style="margin:-4px 0 12px;"><summary class="small link">Have a gift card?</summary>
+                <form method="post" action="{% url 'gift_cards_mine' %}" class="coupon" style="margin-top:8px;">{% csrf_token %}<input type="hidden" name="next" value="checkout">
+                    <label for="gift-code" class="sr-only">Gift card code</label>
+                    <input class="input" id="gift-code" name="code" placeholder="GIFT-XXXX-XXXX-XXXX" autocomplete="off" required>
+                    <button type="submit" class="btn btn-secondary">Add</button>
+                </form>
+            </details>
+            {% endif %}
 
             <div class="sum-row"><span>Subtotal</span><span>{{ pricing.subtotal|money }}</span></div>
             {% if coupon %}<div class="sum-row" style="color:var(--ok);font-weight:700;"><span>Discount ({{ coupon.code }})</span><span>−{{ pricing.discount|money }}</span></div>{% endif %}
@@ -118,7 +128,8 @@
             <div class="sum-row" id="tax-row" {% if not pricing.tax %}style="display:none;"{% endif %}><span id="tax-label">{% if pricing.tax_included %}Includes {% endif %}{{ pricing.tax_name }}{% if pricing.tax_rate %} {{ pricing.tax_rate|floatformat:"-2" }}%{% endif %}</span><span id="sum-tax">{{ pricing.tax|money }}</span></div>
             {% if store_credit > 0 %}<div class="sum-row" id="credit-row" style="color:var(--ok);font-weight:700;"><span>Store credit</span><span id="credit-amount">−{{ credit_applicable|money }}</span></div>{% endif %}
             <div class="sum-total"><span>{{ t.total }}</span><span><span id="sum-total">{% if store_credit > 0 %}{{ total_after_credit|money }}{% else %}{{ pricing.total|money }}{% endif %}</span> <span class="muted small" style="font-weight:400;">{{ store_currency }}</span></span></div>
-            {% if shopper_currency %}<p class="muted small" style="margin-top:8px;">{{ t.approx_note }} {{ store_currency_code }}.</p>{% endif %}
+            {% if charge_in %}<p class="muted small" style="margin-top:8px;" id="charge-note"><span>{% if charge_paypal_ok %}Card and PayPal payments are charged in{% else %}Card payments are charged in{% endif %}</span> <strong data-no-translate>{{ charge_in.code }}</strong> <span data-no-translate>(≈ <span id="charge-total">{{ total_after_credit|price }}</span>)</span>. <span>Your bank shows that amount, with no conversion fee from us.</span> <span>Cash on delivery is paid in</span> <span data-no-translate>{{ store_currency_code }}</span>.</p>
+            {% elif shopper_currency %}<p class="muted small" style="margin-top:8px;">{{ t.approx_note }} {{ store_currency_code }}.</p>{% endif %}
             {% if user.is_authenticated and checkout_sellers %}<p class="small" style="margin-top:12px;">Questions before you pay? {% for sa in checkout_sellers %}<a class="link" href="{% url 'message_store' sa.id %}" rel="nofollow">💬 {% if checkout_sellers|length > 1 %}{{ sa.display_name }}{% else %}Message the seller{% endif %}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>{% endif %}
         </aside>
     </div>

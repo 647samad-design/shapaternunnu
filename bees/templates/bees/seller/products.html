@@ -13,7 +13,7 @@
 {% block seller %}
 <div class="adm-head">
     <div><h1>Products</h1><p>Change price and stock right here - it goes live instantly. Name, photo or description changes go through a quick review.</p></div>
-    {% if seller.status == "approved" %}<div class="actions"><a class="btn btn-primary btn-sm" href="{% url 'seller_add_product' %}">+ Add product</a></div>{% endif %}
+    {% if seller.status == "approved" %}<div class="actions"><a class="btn btn-secondary btn-sm" href="{% url 'seller_bulk' %}">Import / export</a><a class="btn btn-primary btn-sm" href="{% url 'seller_add_product' %}">+ Add product</a></div>{% endif %}
 </div>
 <div class="tabs" role="group" aria-label="Filter products">
     {% for key, label, n in tabs %}<a href="?tab={{ key }}{% if q %}&q={{ q|urlencode }}{% endif %}" class="{% if tab == key %}on{% endif %}">{{ label }} <span class="n">({{ n }})</span></a>{% endfor %}

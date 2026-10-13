@@ -1,4 +1,5 @@
 {% extends "bees/base.html" %}
+{% load bees_extras %}
 {% block title %}{{ t.login }} — {{ brand.site_name }}{% endblock %}
 {% block robots_meta %}noindex, nofollow{% endblock %}
 {% block extra_css %}
@@ -30,6 +31,7 @@
         <div class="panel">
             <h1>{{ t.login_title }}</h1>
             <p class="lede">Welcome back. Sign in to check out faster and track your orders.</p>
+            {% include "bees/partials/social_buttons.html" %}
             <form method="post">
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{{ next }}">

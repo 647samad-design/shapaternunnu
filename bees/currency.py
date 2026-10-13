@@ -102,3 +102,48 @@ def update_rates():
             updated += 1
     cache.delete(CACHE_KEY)
     return updated, None
+
+
+# ---------------------------------------------------------------------------
+# Charging in the shopper's currency (presentment)
+# ---------------------------------------------------------------------------
+
+THREE_DECIMAL = {"BHD", "JOD", "KWD", "OMR", "TND", "IQD", "LYD"}
+PAYPAL_WHOLE = {"HUF", "TWD", "JPY"}
+
+
+def chargeable(cur, method):
+    """Can a payment by ``method`` be taken in this currency?"""
+    if cur is None:
+        return False
+    code = cur.code.upper()
+    if code in THREE_DECIMAL or not cur.rate or cur.rate <= 0:
+        return False
+    if method == "paypal":
+        from .paypal import SUPPORTED
+        return code in SUPPORTED and code not in PAYPAL_WHOLE
+    return method == "card"
+
+
+def charge_currency_for(method):
+    """The shopper's currency if this payment should be taken in it, else None."""
+    from .models import SiteSettings
+    if not SiteSettings.load().charge_local_currency:
+        return None
+    cur = current()
+    return cur if chargeable(cur, method) else None
+
+
+def apply_presentment(order, method):
+    """Fixes the amount to charge for this order in the shopper's currency
+    (or clears it to charge in the store currency)."""
+    from .models import Order
+    cur = charge_currency_for(method)
+    if cur is None:
+        fields = {"charge_currency": "", "charge_rate": None, "charge_amount": None}
+    else:
+        fields = {"charge_currency": cur.code.lower(), "charge_rate": cur.rate, "charge_amount": convert(order.total, cur)}
+    Order.objects.filter(pk=order.pk).update(**fields)
+    for k, v in fields.items():
+        setattr(order, k, v)
+    return cur

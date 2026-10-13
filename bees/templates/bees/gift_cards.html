@@ -1,0 +1,81 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Gift cards — {{ brand.site_name }}{% endblock %}
+{% block meta_description %}Send a {{ brand.site_name }} digital gift card by email in seconds. Any amount, delivered instantly, valid for 3 years.{% endblock %}
+{% block extra_css %}
+    .gc-wrap { max-width: 980px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 28px; align-items: start; }
+    .gc-card { aspect-ratio: 1.6; border-radius: 18px; padding: 24px; color: var(--on-brand); background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 55%, var(--accent))); display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 18px 40px -18px rgba(0,0,0,.45); }
+    .gc-card strong { font-family: var(--font-display); font-size: clamp(2rem, 6vw, 3rem); line-height: 1; }
+    .gc-card span { opacity: .9; }
+    .gc-amounts { display: flex; flex-wrap: wrap; gap: 8px; }
+    .gc-amounts label { position: relative; }
+    .gc-amounts input { position: absolute; opacity: 0; inset: 0; }
+    .gc-amounts span { display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border: 1.5px solid var(--line); border-radius: 999px; font-weight: 700; cursor: pointer; background: var(--surface); }
+    .gc-amounts input:checked + span { border-color: var(--brand); background: var(--brand); color: var(--on-brand); }
+    .gc-amounts input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
+    .gc-points { margin: 18px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+    .gc-points li::before { content: "✓ "; color: var(--ok); font-weight: 800; }
+    @media (max-width: 760px) { .gc-wrap { grid-template-columns: minmax(0, 1fr); } }
+{% endblock %}
+{% block content %}
+<div class="wrap page">
+    <div class="page-head"><div><h1>Gift cards</h1><p>Let them choose. Delivered by email in seconds.</p></div></div>
+    <div class="gc-wrap">
+        <div>
+            <div class="gc-card" aria-hidden="true"><span>{{ brand.site_name }}</span><strong id="gc-preview">{{ form.amount|default:"50"|money }}</strong><span>Gift card</span></div>
+            <ul class="gc-points small">
+                <li>Any amount from {{ 5|money }} to {{ 1000|money }}</li>
+                <li>Arrives by email straight away, with your message</li>
+                <li>Added to their account as store credit - works on any product</li>
+                <li>Valid for 3 years</li>
+            </ul>
+        </div>
+        <section class="panel">
+            {% if methods %}
+            <form method="post" id="gc-form">{% csrf_token %}
+                <fieldset style="border:0;padding:0;margin:0 0 14px;"><legend class="field-label" style="font-weight:700;margin-bottom:8px;">Amount</legend>
+                    <div class="gc-amounts">
+                        {% for a in amounts %}<label><input type="radio" name="amount" value="{{ a }}" {% if form.amount == a|stringformat:"s" %}checked{% endif %}><span>{{ a|money }}</span></label>{% endfor %}
+                        <label><input type="radio" name="amount" value="custom" {% if form.amount == "custom" %}checked{% endif %}><span>Other</span></label>
+                    </div>
+                </fieldset>
+                <div class="field" id="gc-custom-wrap" {% if form.amount != "custom" %}hidden{% endif %}><label for="gc-custom">Other amount</label><input id="gc-custom" name="custom" inputmode="decimal" value="{{ form.custom|default:'' }}" placeholder="75"></div>
+                <div class="field"><label for="gc-rname">Their name</label><input id="gc-rname" name="recipient_name" maxlength="80" value="{{ form.recipient_name|default:'' }}" autocomplete="off"></div>
+                <div class="field"><label for="gc-remail">Their email</label><input id="gc-remail" type="email" name="recipient_email" value="{{ form.recipient_email|default:'' }}" autocomplete="off"><span class="hint">Leave empty to get the card yourself (to print or forward).</span></div>
+                <div class="field"><label for="gc-msg">Message (optional)</label><textarea id="gc-msg" name="message" rows="3" maxlength="300">{{ form.message|default:'' }}</textarea></div>
+                <div class="field"><label for="gc-from">From</label><input id="gc-from" name="from_name" maxlength="80" value="{{ form.from_name|default:'' }}" autocomplete="name"></div>
+                <div class="field"><label for="gc-email">Your email (for the receipt)</label><input id="gc-email" type="email" name="email" required value="{{ form.email|default:'' }}" autocomplete="email"></div>
+                <fieldset style="border:0;padding:0;margin:0 0 14px;"><legend style="font-weight:700;margin-bottom:8px;">Pay with</legend>
+                    {% if "card" in methods %}<label class="pay-option"><input type="radio" name="method" value="card" checked><span><strong>Card</strong><span class="muted">Visa, Mastercard, Apple Pay, Google Pay</span></span></label>{% endif %}
+                    {% if "paypal" in methods %}<label class="pay-option"><input type="radio" name="method" value="paypal" {% if "card" not in methods %}checked{% endif %}><span><strong>PayPal</strong></span></label>{% endif %}
+                </fieldset>
+                <button class="btn btn-primary btn-block" type="submit">Continue to payment</button>
+            </form>
+            {% else %}
+            <p class="muted">Gift cards are coming soon.</p>
+            {% endif %}
+            {% if user.is_authenticated %}<p class="small" style="margin-top:14px;">Got a gift card? <a class="link" href="{% url 'gift_cards_mine' %}">Add it to your account</a>.</p>
+            {% else %}<p class="small" style="margin-top:14px;">Got a gift card? <a class="link" href="{% url 'login' %}?next={% url 'gift_cards_mine' %}">Sign in to add it</a>.</p>{% endif %}
+        </section>
+    </div>
+</div>
+<script>
+(function () {
+    const form = document.getElementById('gc-form');
+    if (!form) return;
+    const wrap = document.getElementById('gc-custom-wrap'), custom = document.getElementById('gc-custom'), out = document.getElementById('gc-preview');
+    const sample = out.textContent.trim();
+    function fmt(n) { return sample.replace(/[\d.,]+/, Number(n || 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2})); }
+    function update() {
+        const picked = form.querySelector('input[name="amount"]:checked');
+        const isCustom = picked && picked.value === 'custom';
+        wrap.hidden = !isCustom;
+        custom.required = isCustom;
+        out.textContent = fmt(isCustom ? custom.value : (picked ? picked.value : 0));
+    }
+    form.addEventListener('change', update);
+    custom.addEventListener('input', update);
+    update();
+})();
+</script>
+{% endblock %}

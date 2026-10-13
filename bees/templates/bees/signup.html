@@ -25,6 +25,7 @@
             <h1>Create your account</h1>
             <p class="lede">Shop faster, save favourites and track every order. Selling? Pick a seller account below.</p>
 
+            {% include "bees/partials/social_buttons.html" %}
             <form method="post" enctype="multipart/form-data">
                 {% csrf_token %}
                 <input type="hidden" name="ref" value="{{ ref_code }}">

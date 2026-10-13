@@ -1,0 +1,39 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Gift cards &amp; credit — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:920px;">
+    <div class="page-head"><div><h1>Your account</h1><p>Signed in as <span data-no-translate>{{ request.user.username }}</span></p></div></div>
+    {% include "bees/partials/account_tabs.html" %}
+    <div style="display:grid;gap:20px;">
+        <section class="panel">
+            <h2>Store credit</h2>
+            <p style="font-size:2rem;font-weight:800;margin:4px 0 0;">{{ balance|money }}</p>
+            <p class="muted small">Taken off your next order automatically at checkout.</p>
+        </section>
+        <section class="panel">
+            <h2>Add a gift card</h2>
+            <form method="post" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">{% csrf_token %}
+                <div class="field" style="margin:0;flex:1 1 240px;"><label for="gc-code">Gift card code</label><input id="gc-code" name="code" required value="{{ code }}" placeholder="GIFT-XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false" style="letter-spacing:.06em;"></div>
+                <button class="btn btn-primary" type="submit">Add to my credit</button>
+            </form>
+        </section>
+        {% if redeemed %}
+        <section class="panel"><h2>Added to your account</h2>
+            <ul class="plain-list">{% for c in redeemed %}<li class="small">{{ c.amount|money }} · {{ c.masked }} · {{ c.redeemed_at|date:"M j, Y" }}</li>{% endfor %}</ul>
+        </section>
+        {% endif %}
+        <section class="panel">
+            <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;"><h2 style="margin:0;">Gift cards you sent</h2>{% if can_buy %}<a class="btn btn-secondary btn-sm" href="{% url 'gift_cards' %}">Send a gift card</a>{% endif %}</div>
+            {% if bought %}
+            <div class="table-scroll" style="margin-top:10px;"><table class="table"><thead><tr><th>To</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead><tbody>
+            {% for c in bought %}<tr><td data-no-translate>{{ c.recipient_name|default:c.recipient_email|default:"You" }}</td><td class="num">{{ c.amount|money }}</td>
+                <td>{% if c.status == "redeemed" %}<span class="pill ok">Used</span>{% elif c.status == "active" %}<span class="pill">Not used yet</span>{% else %}<span class="pill bad">{{ c.get_status_display }}</span>{% endif %}</td>
+                <td>{% if c.status == "active" %}<form method="post" action="{% url 'gift_card_resend' c.id %}" style="margin:0;">{% csrf_token %}<button class="btn btn-ghost btn-sm" type="submit">Email again</button></form>{% endif %}</td></tr>{% endfor %}
+            </tbody></table></div>
+            {% else %}<p class="muted small" style="margin-top:8px;">None yet.</p>{% endif %}
+        </section>
+    </div>
+</div>
+{% endblock %}

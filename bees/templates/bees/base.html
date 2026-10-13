@@ -47,8 +47,8 @@
             --muted: #56606B;
             --line: #DDE2E6;
             --sale: #B42318;
-            --ok: #1E7B4F;
-            --warn: #9A5B00;
+            --ok: #176B42;
+            --warn: #855000;
             --on-brand: #FFFFFF;
             --on-accent: #141A1F;
             --radius-lg: 18px;
@@ -554,7 +554,7 @@
                     </div>
                 </details>
                 {% else %}
-                <a href="{% url 'login' %}?next={{ request.path|urlencode }}" class="icon-btn">
+                <a href="{% url 'login' %}?next={{ request.path|urlencode }}" class="icon-btn" aria-label="{{ t.login }}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
                     <span class="icon-label">{{ t.login }}</span>
                 </a>
@@ -636,6 +636,7 @@
                     <ul>
                         <li><a href="{% url 'all_products' %}">{{ t.all_products }}</a></li>
                         {% for slug, label in nav_categories|slice:":4" %}<li><a href="{% url 'category_products' slug %}">{{ label }}</a></li>{% endfor %}
+                        {% if brand.gift_cards_enabled %}<li><a href="{% url 'gift_cards' %}">Gift cards</a></li>{% endif %}
                     </ul>
                 </div>
                 <div>
@@ -1169,5 +1170,17 @@
     </script>
     <script>if ('serviceWorker' in navigator && location.protocol === 'https:') { window.addEventListener('load', function () { navigator.serviceWorker.register('{% url "service_worker" %}').catch(function () {}); }); }</script>
     {% block extra_js %}{% endblock %}
+<script>
+/* Scrollable tables can be scrolled with the keyboard (WCAG 2.1.1). */
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.table-scroll').forEach(function (el) {
+        if (el.scrollWidth > el.clientWidth + 1 && !el.hasAttribute('tabindex')) {
+            el.setAttribute('tabindex', '0');
+            el.setAttribute('role', 'region');
+            if (!el.hasAttribute('aria-label')) el.setAttribute('aria-label', (el.closest('section') && el.closest('section').querySelector('h2') || {}).textContent || 'Table');
+        }
+    });
+});
+</script>
 </body>
 </html>

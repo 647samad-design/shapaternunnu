@@ -338,8 +338,18 @@ class Order(models.Model):
     cod_fallback = models.BooleanField(default=False)
     stripe_payment_intent = models.CharField(max_length=255, blank=True)
     paypal_order_id = models.CharField(max_length=64, blank=True, db_index=True)
+    cod_otp_hash = models.CharField(max_length=64, blank=True, editable=False)
+    cod_otp_sent_at = models.DateTimeField(null=True, blank=True, editable=False)
+    cod_otp_tries = models.PositiveSmallIntegerField(default=0, editable=False)
+    cod_refused = models.BooleanField(default=False, help_text="Customer refused / didn't collect a cash-on-delivery parcel.")
     paypal_capture_id = models.CharField(max_length=64, blank=True)
     currency = models.CharField(max_length=3, default="usd")
+    # Charged in the shopper's own currency (Store settings > "Charge in the
+    # shopper's currency"): the converted total and the rate used, so
+    # refunds go back in the same currency.
+    charge_currency = models.CharField(max_length=3, blank=True)
+    charge_rate = models.DecimalField(max_digits=16, decimal_places=6, null=True, blank=True)
+    charge_amount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     shipping_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     tax_name = models.CharField(max_length=30, blank=True)
@@ -450,6 +460,31 @@ class Order(models.Model):
         return to_cents(self.total, self.currency)
 
     @property
+    def pay_currency(self):
+        """Currency the card / PayPal payment is in."""
+        return (self.charge_currency or self.currency).lower()
+
+    @property
+    def pay_amount(self):
+        return self.charge_amount if self.charge_currency and self.charge_amount is not None else self.total
+
+    @property
+    def pay_cents(self):
+        from .payments import to_cents
+        return to_cents(self.pay_amount, self.pay_currency)
+
+    def to_charge_currency(self, amount):
+        """A store-currency amount (e.g. a partial refund) in the currency
+        the customer paid in, never more than they paid."""
+        from decimal import Decimal, ROUND_HALF_UP
+        if not self.charge_currency or not self.charge_rate:
+            return Decimal(str(amount))
+        from .templatetags.bees_extras import ZERO_DECIMAL
+        step = Decimal("1") if self.charge_currency.lower() in ZERO_DECIMAL else Decimal("0.01")
+        value = (Decimal(str(amount)) * self.charge_rate).quantize(step, rounding=ROUND_HALF_UP)
+        return min(value, self.pay_amount)
+
+    @property
     def tracking_link(self):
         from .tracking import tracking_link
         if self.uses_store_tracking:
@@ -532,6 +567,9 @@ class Order(models.Model):
             from . import order_emails, seller_center
             order_emails.status_changed(self, old_status, self.status)
             seller_center.order_status_changed(self, old_status, self.status)
+            from django.db import transaction as _tx
+            from . import sms
+            _tx.on_commit(lambda o=self, st=self.status: sms.order_status(o, st))
         if self.user and not is_new and old_status and old_status != self.status:
             Notification.objects.create(
                 user=self.user,
@@ -804,6 +842,7 @@ class Profile(models.Model):
     referral_rewarded = models.BooleanField(default=False)
     loyalty_points = models.PositiveIntegerField(default=0)
     language = models.CharField(max_length=8, blank=True, help_text="Language for emails (the one picked on the site).")
+    sms_updates = models.BooleanField(default=True, help_text="Text messages about orders.")
     price_drop_alerts = models.BooleanField(default=True, help_text="Email when something in the wishlist gets cheaper.")
     store_credit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     # Stripe customer that holds this person's saved cards. Card numbers
@@ -949,6 +988,11 @@ class SellerAccount(models.Model):
     brand_info = models.TextField(blank=True)
     tax_info = models.CharField(max_length=100, blank=True)
     bank_details = models.CharField(max_length=255, blank=True)
+    PAYOUT_METHODS = [("manual", "Bank / manual transfer"), ("paypal", "PayPal (automatic)"), ("stripe", "Stripe (automatic, to your bank)")]
+    payout_method = models.CharField(max_length=10, choices=PAYOUT_METHODS, default="manual")
+    paypal_email = models.EmailField(blank=True, help_text="PayPal account that receives automatic payouts.")
+    stripe_account_id = models.CharField(max_length=64, blank=True, editable=False)
+    stripe_payouts_ready = models.BooleanField(default=False, editable=False)
 
     business_certificate = models.FileField(upload_to=seller_cert_path, storage=_private_storage, blank=True, null=True)
     id_document = models.FileField(upload_to=seller_id_path, storage=_private_storage, blank=True, null=True)
@@ -1179,12 +1223,15 @@ class Payout(models.Model):
     up to SellerAccount.total_paid_out."""
     STATUS_CHOICES = [
         ("requested", "Requested"),
+        ("processing", "Sending"),
         ("paid", "Paid"),
+        ("failed", "Failed"),
         ("cancelled", "Cancelled"),
     ]
     METHOD_CHOICES = [
         ("bank", "Bank transfer"),
         ("paypal", "PayPal"),
+        ("stripe", "Stripe"),
         ("wise", "Wise"),
         ("payoneer", "Payoneer"),
         ("other", "Other"),
@@ -1195,6 +1242,8 @@ class Payout(models.Model):
     method = models.CharField(max_length=20, choices=METHOD_CHOICES, blank=True)
     reference = models.CharField("Transfer reference", max_length=120, blank=True)
     note = models.CharField(max_length=255, blank=True)
+    automatic = models.BooleanField(default=False)
+    error = models.CharField(max_length=255, blank=True)
     requested_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     recorded_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1399,6 +1448,19 @@ class SiteSettings(models.Model):
     youtube_url = models.URLField(blank=True)
     # --- Commerce ---
     tax_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0, help_text="Default tax for countries without their own rate (Store settings > Tax rates). 0 = none.")
+    sms_customer_updates = models.BooleanField(default=True, help_text="Text customers when an order is confirmed, shipped and delivered (needs Twilio keys).")
+    sms_seller_alerts = models.BooleanField(default=True, help_text="Text sellers when they get a new order (needs Twilio keys).")
+    cod_phone_check = models.BooleanField(default=False, help_text="Cash on delivery orders must be confirmed with a code sent by SMS to the customer's phone (needs Twilio keys). Stops fake orders.")
+    cod_max_order = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Largest order allowed with cash on delivery (0 = no limit). Bigger orders must be paid online.")
+    cod_refusal_limit = models.PositiveSmallIntegerField(default=2, help_text="After this many refused cash parcels a customer's phone and email can only pay online (0 = never block).")
+    AUTO_PAYOUTS = [("off", "Off - I pay sellers by hand"), ("weekly", "Every Monday"), ("daily", "Every day")]
+    auto_payouts = models.CharField("Automatic seller payouts", max_length=8, choices=AUTO_PAYOUTS, default="off",
+                                    help_text="Sends each seller's available balance to their PayPal or Stripe account (sellers choose in Seller Center > Earnings). Runs with the daily tasks.")
+    min_auto_payout = models.DecimalField(max_digits=10, decimal_places=2, default=20, help_text="Only send automatic payouts of at least this amount.")
+    charge_local_currency = models.BooleanField("Charge in the shopper's currency", default=False,
+                                                help_text="Card and PayPal payments are taken in the currency the shopper picked (at today's rate in Currencies), so their bank shows exactly that amount. Your Stripe/PayPal account converts it back.")
+    gift_cards_enabled = models.BooleanField(default=True, help_text="Sell digital gift cards (needs card or PayPal payments). Redeemed as store credit.")
+    require_seller_2fa = models.BooleanField(default=False, help_text="Sellers must turn on two-step sign-in before using Seller Center.")
     cookie_banner = models.BooleanField(default=True, help_text="Ask visitors before using analytics/marketing cookies (required in the EU/UK).")
     ga4_id = models.CharField("Google Analytics 4 ID", max_length=20, blank=True, help_text="e.g. G-ABC123XYZ. Only loads after the visitor accepts cookies.")
     meta_pixel_id = models.CharField("Meta (Facebook) Pixel ID", max_length=20, blank=True, help_text="Only loads after the visitor accepts cookies.")
@@ -1789,3 +1851,90 @@ class TaxRate(models.Model):
 
     def __str__(self):
         return f"{self.country} {self.name} {self.rate}%"
+
+
+class SocialAccount(models.Model):
+    """A Google / Apple sign-in linked to a user."""
+    user = models.ForeignKey("auth.User", related_name="social_accounts", on_delete=models.CASCADE)
+    provider = models.CharField(max_length=20)
+    uid = models.CharField(max_length=255)
+    email = models.EmailField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_login = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("provider", "uid")
+
+    def __str__(self):
+        return f"{self.provider}: {self.email or self.uid}"
+
+
+class CodBlock(models.Model):
+    """Phone numbers / emails that may only pay online (no cash on delivery)."""
+    KINDS = [("phone", "Phone"), ("email", "Email")]
+    kind = models.CharField(max_length=10, choices=KINDS)
+    value = models.CharField(max_length=254, db_index=True)
+    reason = models.CharField(max_length=200, blank=True)
+    automatic = models.BooleanField(default=False)
+    created_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("kind", "value")
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.kind}: {self.value}"
+
+
+class GiftCard(models.Model):
+    """A digital gift card. Bought online (or issued by staff), emailed as a
+    code, and redeemed into the recipient's store credit."""
+    STATUS = [("pending", "Awaiting payment"), ("active", "Active"), ("redeemed", "Redeemed"), ("void", "Cancelled")]
+    code = models.CharField(max_length=24, unique=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=3, default="usd")
+    status = models.CharField(max_length=10, choices=STATUS, default="pending", db_index=True)
+    purchaser = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="gift_cards_bought")
+    purchaser_email = models.EmailField(blank=True)
+    from_name = models.CharField(max_length=80, blank=True)
+    recipient_name = models.CharField(max_length=80, blank=True)
+    recipient_email = models.EmailField(blank=True)
+    message = models.CharField(max_length=300, blank=True)
+    payment_method = models.CharField(max_length=10, blank=True)  # card / paypal / staff
+    stripe_session_id = models.CharField(max_length=255, blank=True, db_index=True)
+    paypal_order_id = models.CharField(max_length=64, blank=True, db_index=True)
+    issued_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    note = models.CharField(max_length=200, blank=True, help_text="Only staff see this.")
+    paid_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    redeemed_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="gift_cards_redeemed")
+    redeemed_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Gift card {self.masked} ({self.amount})"
+
+    @property
+    def masked(self):
+        return f"…{self.code[-4:]}"
+
+
+class DailyStat(models.Model):
+    """Anonymous daily counters for store reports (no personal data):
+    visits, product views, add-to-cart, checkout starts, searches."""
+    date = models.DateField(db_index=True)
+    kind = models.CharField(max_length=16)
+    key = models.CharField(max_length=150, blank=True, default="")
+    count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        unique_together = ("date", "kind", "key")
+        indexes = [models.Index(fields=["kind", "date"])]
+
+    def __str__(self):
+        return f"{self.date} {self.kind} {self.key}: {self.count}"

@@ -1,0 +1,108 @@
+{% extends "bees/manage/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Reports{% endblock %}
+{% block page_css %}
+    .rep-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 12px; }
+    .rep-kpis div { padding: 14px 16px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); }
+    .rep-kpis strong { display: block; font-family: var(--font-display); font-size: 1.5rem; line-height: 1.15; }
+    .rep-kpis span { color: var(--muted); font-weight: 700; font-size: .88rem; }
+    .rep-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 16px; }
+    .funnel { display: grid; gap: 8px; }
+    .funnel .row { display: grid; grid-template-columns: minmax(110px, 160px) minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+    .funnel .fbar { height: 26px; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
+    .funnel .ffill { display: block; height: 100%; background: var(--brand); margin: 0; }
+    html[data-theme="dark"] .funnel .ffill { background: var(--accent); }
+    .chart { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; align-items: end; height: 160px; }
+    .chart .b { background: var(--brand); border-radius: 3px 3px 0 0; min-height: 2px; }
+    html[data-theme="dark"] .chart .b { background: var(--accent); }
+    .range { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-end; }
+    .range form { display: flex; gap: 6px; align-items: flex-end; flex-wrap: wrap; margin: 0; }
+    .range input[type=date] { min-height: 36px; }
+    @media (max-width: 560px) { .funnel .row { grid-template-columns: minmax(0, 1fr) auto; } .funnel .fbar { grid-column: 1 / -1; grid-row: 2; } }
+{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Reports</h1><p>{{ r.start|date:"M j, Y" }} – {{ r.end|date:"M j, Y" }}. Paid and cash orders count; cancelled, unpaid and refunded orders don't.</p></div>
+    <div class="actions"><a class="btn btn-secondary btn-sm" href="?{{ query }}&export=summary">Download CSV</a><a class="btn btn-ghost btn-sm" href="?{{ query }}&export=orders">Orders CSV</a></div></div>
+<div class="range">
+    {% for key, label in ranges %}<a class="btn btn-{% if chosen == key %}primary{% else %}ghost{% endif %} btn-sm" href="?range={{ key }}">{{ label }}</a>{% endfor %}
+    <form method="get"><label class="small">From <input class="input" type="date" name="from" value="{{ r.start|date:'Y-m-d' }}"></label><label class="small">To <input class="input" type="date" name="to" value="{{ r.end|date:'Y-m-d' }}"></label><button class="btn btn-secondary btn-sm" type="submit">Show</button></form>
+</div>
+<div class="rep-kpis">
+    <div><strong>{{ r.revenue|money }}</strong><span>Sales</span></div>
+    <div><strong>{{ r.orders }}</strong><span>Orders · {{ r.items_sold }} items</span></div>
+    <div><strong>{{ r.aov|money }}</strong><span>Average order</span></div>
+    <div><strong>{{ r.conversion }}%</strong><span>Visits that ordered</span></div>
+    <div><strong>{{ r.customers }}</strong><span>Customers · {{ r.repeat_rate }}% returning</span></div>
+    <div><strong>{{ r.commission|money }}</strong><span>Commission earned</span></div>
+    <div><strong>{{ r.refund_rate }}%</strong><span>Refunded orders ({{ r.refunded }})</span></div>
+    <div><strong>{{ r.return_rate }}%</strong><span>Items returned ({{ r.returns }})</span></div>
+    <div><strong>{{ r.cancel_rate }}%</strong><span>Cancelled ({{ r.cancelled }})</span></div>
+</div>
+<section class="panel">
+    <h2>Sales by day</h2>
+    <div class="chart" role="img" aria-label="Sales per day">{% for d in r.series %}<div class="b" style="height:{{ d.pct|floatformat:1 }}%;" title="{{ d.date|date:'D, M j' }}: {{ d.revenue|money }} · {{ d.orders }} order{{ d.orders|pluralize }}"></div>{% endfor %}</div>
+</section>
+<div class="rep-grid">
+    <section class="panel">
+        <h2>Shopper funnel</h2>
+        <div class="funnel">
+            {% for f in r.funnel %}
+            <div class="row"><span class="small"><strong>{{ f.label }}</strong></span><div class="fbar" aria-hidden="true"><div class="ffill" style="width:{{ f.of_first }}%;"></div></div><span class="small">{{ f.n }}{% if f.of_prev is not None %} <span class="muted">({{ f.of_prev }}%)</span>{% endif %}</span></div>
+            {% endfor %}
+        </div>
+        <p class="muted small" style="margin-top:10px;">Counted without cookies or personal data; bots and staff are left out. % = share of the step before.</p>
+    </section>
+    <section class="panel">
+        <h2>Most viewed products</h2>
+        <div class="table-scroll"><table class="table"><thead><tr><th>Product</th><th class="num">Views</th><th class="num">Sold</th><th class="num">Rate</th></tr></thead><tbody>
+        {% for p in r.top_viewed %}<tr><td data-no-translate>{{ p.name|truncatechars:40 }}</td><td class="num">{{ p.n }}</td><td class="num">{{ p.sold }}</td><td class="num">{{ p.rate }}%</td></tr>
+        {% empty %}<tr><td colspan="4" class="muted">No views yet.</td></tr>{% endfor %}
+        </tbody></table></div>
+    </section>
+    <section class="panel">
+        <div class="adm-head" style="margin:0 0 8px;"><h2 style="margin:0;">Best sellers</h2><a class="link small" href="?{{ query }}&export=products">CSV</a></div>
+        <div class="table-scroll"><table class="table"><thead><tr><th>Product</th><th class="num">Units</th><th class="num">Sales</th></tr></thead><tbody>
+        {% for p in r.top_products %}<tr><td data-no-translate>{{ p.product_name|truncatechars:40 }}</td><td class="num">{{ p.units }}</td><td class="num">{{ p.revenue|money }}</td></tr>
+        {% empty %}<tr><td colspan="3" class="muted">No sales yet.</td></tr>{% endfor %}
+        </tbody></table></div>
+    </section>
+    <section class="panel">
+        <h2>By country</h2>
+        <div class="table-scroll"><table class="table"><thead><tr><th>Country</th><th class="num">Orders</th><th class="num">Sales</th></tr></thead><tbody>
+        {% for c in r.by_country %}<tr><td>{{ c.name }}</td><td class="num">{{ c.orders }}</td><td class="num">{{ c.revenue|money }}</td></tr>
+        {% empty %}<tr><td colspan="3" class="muted">No orders yet.</td></tr>{% endfor %}
+        </tbody></table></div>
+    </section>
+    <section class="panel">
+        <h2>By category</h2>
+        <div class="table-scroll"><table class="table"><thead><tr><th>Category</th><th class="num">Units</th><th class="num">Sales</th></tr></thead><tbody>
+        {% for c in r.by_category %}<tr><td>{{ c.label }}</td><td class="num">{{ c.units }}</td><td class="num">{{ c.revenue|money }}</td></tr>
+        {% empty %}<tr><td colspan="3" class="muted">No sales yet.</td></tr>{% endfor %}
+        </tbody></table></div>
+    </section>
+    <section class="panel">
+        <div class="adm-head" style="margin:0 0 8px;"><h2 style="margin:0;">By seller</h2><a class="link small" href="?{{ query }}&export=sellers">CSV</a></div>
+        <div class="table-scroll"><table class="table"><thead><tr><th>Seller</th><th class="num">Units</th><th class="num">Sales</th><th class="num">Commission</th></tr></thead><tbody>
+        {% for s in r.by_seller %}<tr><td data-no-translate>{% if s.seller_account_id %}<a class="link" href="{% url 'manage_seller' s.seller_account_id %}">{{ s.seller_account__business_name }}</a>{% else %}Store{% endif %}</td><td class="num">{{ s.units }}</td><td class="num">{{ s.revenue|money }}</td><td class="num">{{ s.commission|default:0|money }}</td></tr>
+        {% empty %}<tr><td colspan="4" class="muted">No sales yet.</td></tr>{% endfor %}
+        </tbody></table></div>
+    </section>
+    <section class="panel">
+        <h2>Payment methods</h2>
+        <div class="table-scroll"><table class="table"><thead><tr><th>Method</th><th class="num">Orders</th><th class="num">Sales</th></tr></thead><tbody>
+        {% for m in r.by_method %}<tr><td>{% if m.method == "cod" %}Cash on delivery{% elif m.method == "card" %}Card{% elif m.method == "paypal" %}PayPal{% else %}{{ m.method|title }}{% endif %}</td><td class="num">{{ m.orders }}</td><td class="num">{{ m.revenue|money }}</td></tr>
+        {% empty %}<tr><td colspan="3" class="muted">No orders yet.</td></tr>{% endfor %}
+        </tbody></table></div>
+    </section>
+    <section class="panel">
+        <div class="adm-head" style="margin:0 0 8px;"><h2 style="margin:0;">Searches</h2><a class="link small" href="?{{ query }}&export=searches">CSV</a></div>
+        <div class="table-scroll"><table class="table"><thead><tr><th>Search</th><th class="num">Times</th></tr></thead><tbody>
+        {% for s in r.searches %}<tr><td data-no-translate>{{ s.key }}</td><td class="num">{{ s.n }}</td></tr>{% empty %}<tr><td colspan="2" class="muted">No searches yet.</td></tr>{% endfor %}
+        </tbody></table></div>
+        {% if r.zero_searches %}
+        <h3 style="margin:16px 0 6px;font-size:1rem;">Found nothing <span class="muted small">- products to add</span></h3>
+        <ul class="small" style="margin:0;padding-inline-start:18px;">{% for s in r.zero_searches %}<li data-no-translate>{{ s.key }} <span class="muted">({{ s.n }})</span></li>{% endfor %}</ul>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}
