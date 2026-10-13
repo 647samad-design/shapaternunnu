@@ -45,6 +45,7 @@ archives go to the private bucket (off the server) - recommended. Restore with
 - **Stripe** (cards, Apple Pay, Google Pay): needs a company in a Stripe-supported country.
 - **PayPal**: add Client ID / Secret / Webhook ID in Keys & passwords. Store currency must be one PayPal supports (USD, EUR, GBP, AED is *not* supported - use USD).
 - **Cash on delivery** works everywhere.
+- **Charge in the shopper's currency** (Store settings > Language & currency): card/PayPal payments are taken in the currency the shopper picked, at the rate in Currencies. Stripe and PayPal convert it back to your currency; 3-decimal currencies (KWD, BHD, OMR, JOD) are charged in the store currency.
 
 ## 6. Tax & legal
 
@@ -58,3 +59,27 @@ archives go to the private bucket (off the server) - recommended. Restore with
 - Verify the site in Google Search Console and submit `https://yourdomain.com/sitemap.xml`
   (includes every product with images and all language versions).
 - Each product can have its own SEO title/description (product form > Google search listing).
+
+## 8. Sign in with Google / Apple
+All keys go in **Admin > Keys & passwords** (the page shows the exact redirect URLs to copy).
+- **Google**: console.cloud.google.com > APIs & Services > Credentials > *Create OAuth client ID* (Web application). Authorised redirect URI: `https://YOUR-DOMAIN/login/callback/google/`. Paste the Client ID and Client secret. Also fill the *OAuth consent screen* (app name, logo, privacy link) and publish it.
+- **Apple** (needs an Apple Developer account): create a *Services ID* with "Sign in with Apple", add your domain and the return URL `https://YOUR-DOMAIN/login/callback/apple/`; create a *Key* with Sign in with Apple and download the `.p8` file. Paste Services ID, Team ID, Key ID and the whole `.p8` text.
+- Accounts are linked by verified email, and people who use two-step sign-in still have to type their code.
+
+## 9. Text messages (Twilio SMS)
+twilio.com > Console: copy **Account SID** and **Auth Token**; buy a phone number (or create a *Messaging Service*, `MG...`, or an approved alphanumeric sender like `LUMEN`). Add the three values in Keys & passwords. For Pakistan and some other countries Twilio needs a registered sender ID - check *Messaging > Regulatory compliance*.
+Then in Store settings: *Text messages (SMS)* (order updates, seller alerts) and *Cash on delivery* (phone code check, largest cash order, block after N refused parcels).
+
+## 10. Seller payouts
+- **PayPal Payouts**: in your PayPal business account ask PayPal to enable *Payouts* (developer.paypal.com > Apps > your app > Features > Payouts). Uses the same PayPal keys. Add the webhook events `PAYMENT.PAYOUTS-ITEM.*` to the PayPal webhook you already made.
+- **Stripe Connect**: dashboard.stripe.com > Connect > *Get started* (choose "Express"). Uses the same Stripe keys. Stripe Connect isn't available to sellers in every country (e.g. not Pakistan) - those sellers use PayPal or bank transfer.
+- Store settings > *Seller payouts*: Off / every Monday / every day, plus the minimum amount. Payouts run with the daily task; only money past the return window is ever sent.
+
+## 11. After updating
+```
+git pull
+pip install -r requirements.txt     # adds PyJWT[crypto] and openpyxl
+python manage.py migrate
+python manage.py collectstatic --noinput
+```
+Then press **Reload** on the Web tab. The daily task (`manage.py daily_tasks`) now also sends automatic payouts.

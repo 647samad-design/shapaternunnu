@@ -1,0 +1,8 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Import & export products{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><a class="link small" href="{% url 'manage_products' %}">← Products</a><h1 style="margin-top:6px;">Import &amp; export</h1>
+    <p>Store products are added as the store's own (live straight away). Use "All products" to export everything or fix any listing by id.</p></div>
+    <div class="actions"><a class="btn btn-{% if scope != 'all' %}primary{% else %}ghost{% endif %} btn-sm" href="?scope=store">Store products</a><a class="btn btn-{% if scope == 'all' %}primary{% else %}ghost{% endif %} btn-sm" href="?scope=all">All products</a></div></div>
+{% include "bees/partials/bulk_body.html" with url_name="manage_bulk" store=True %}
+{% endblock %}

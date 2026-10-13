@@ -41,22 +41,37 @@
                 <dt>Paid to you</dt><dd>{{ balance.paid|money }}</dd>
                 <dt>Earned all time</dt><dd>{{ balance.earned|money }}</dd>
             </dl>
-            {% if open_request %}
+            {% if sending %}
+            <div class="callout" style="margin:16px 0 0;"><strong>{{ sending.amount|money }} is on its way</strong> to your {{ sending.get_method_display }} account.</div>
+            {% elif open_request %}
             <div class="callout warn" style="margin:16px 0 0;display:grid;gap:10px;"><span><strong>Payout of {{ open_request.amount|money }} requested</strong> on {{ open_request.created_at|date:"M j" }}. We'll send it to your payout account soon.</span>
                 <form method="post" action="{% url 'seller_cancel_payout' open_request.id %}" onsubmit="return confirm('Cancel this payout request?')">{% csrf_token %}<button class="btn btn-ghost btn-sm" type="submit">Cancel request</button></form></div>
             {% elif seller.status == "approved" %}
-                {% if not seller.bank_details %}
-                <p class="small" style="margin-top:16px;">Add your bank or PayPal details in <a class="link" href="{% url 'seller_store_settings' %}">Store settings</a> to get paid.</p>
+                {% if not seller.bank_details and not auto_ready %}
+                <p class="small" style="margin-top:16px;">Choose how you get paid below{% if not payout_options.paypal and not payout_options.stripe %} - add your bank or PayPal details in <a class="link" href="{% url 'seller_store_settings' %}">Store settings</a>{% endif %}.</p>
                 {% elif balance.available >= min_payout %}
                 <form method="post" action="{% url 'seller_request_payout' %}" class="stack-sm" style="margin-top:16px;">
                     {% csrf_token %}
-                    <label for="pa" class="label">Request a payout</label>
-                    <div class="toolbar"><input class="input grow" id="pa" type="number" name="amount" min="{{ min_payout }}" max="{{ balance.available|floatformat:2 }}" step="0.01" value="{{ balance.available|floatformat:2 }}" required><button class="btn btn-primary btn-sm" type="submit">Request</button></div>
-                    <p class="muted small">Sent to: {{ seller.bank_details|truncatechars:40 }}</p>
+                    <label for="pa" class="label">{% if auto_ready %}Withdraw now{% else %}Request a payout{% endif %}</label>
+                    <div class="toolbar"><input class="input grow" id="pa" type="number" name="amount" min="{{ min_payout }}" max="{{ balance.available|floatformat:2 }}" step="0.01" value="{{ balance.available|floatformat:2 }}" required><button class="btn btn-primary btn-sm" type="submit">{% if auto_ready %}Withdraw{% else %}Request{% endif %}</button></div>
+                    <p class="muted small">Sent to: {% if auto_ready and seller.payout_method == "paypal" %}PayPal <span data-no-translate>{{ seller.paypal_email }}</span>{% elif auto_ready %}your bank, through Stripe{% else %}{{ seller.bank_details|truncatechars:40 }}{% endif %}</p>
                 </form>
                 {% else %}
-                <p class="muted small" style="margin-top:16px;">You can request a payout once at least {{ min_payout|money }} is available.</p>
+                <p class="muted small" style="margin-top:16px;">You can {% if auto_ready %}withdraw{% else %}request a payout{% endif %} once at least {{ min_payout|money }} is available.</p>
                 {% endif %}
+            {% endif %}
+            {% if can_money and seller.status == "approved" %}
+            <details class="payout-method" style="margin-top:16px;" {% if not auto_ready and not seller.bank_details %}open{% endif %}>
+                <summary class="small" style="font-weight:700;cursor:pointer;">How you get paid: {{ seller.get_payout_method_display }}{% if seller.payout_method != "manual" and not auto_ready %} <span class="pill warn">Not finished</span>{% endif %}</summary>
+                <form method="post" action="{% url 'seller_payout_settings' %}" style="display:grid;gap:8px;margin-top:10px;">{% csrf_token %}
+                    <label class="pay-option"><input type="radio" name="payout_method" value="manual" {% if seller.payout_method == "manual" %}checked{% endif %}><span><strong>Bank transfer by the store</strong><span class="muted">You request, the store sends it to the details in Store settings.</span></span></label>
+                    {% if payout_options.paypal %}<label class="pay-option"><input type="radio" name="payout_method" value="paypal" {% if seller.payout_method == "paypal" %}checked{% endif %}><span><strong>PayPal - automatic</strong><span class="muted">Withdraw any time; also paid automatically on payout day.</span>
+                        <input class="input" type="email" name="paypal_email" value="{{ seller.paypal_email }}" placeholder="PayPal email" aria-label="PayPal email" style="margin-top:6px;" autocomplete="email"></span></label>{% endif %}
+                    {% if payout_options.stripe %}<label class="pay-option"><input type="radio" name="payout_method" value="stripe" {% if seller.payout_method == "stripe" %}checked{% endif %}><span><strong>Stripe - automatic to your bank</strong><span class="muted">{% if seller.stripe_payouts_ready %}Connected ✓{% elif seller.stripe_account_id %}Started - finish the Stripe setup.{% else %}Stripe checks your ID and bank once. Not available in every country.{% endif %}</span></span></label>{% endif %}
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-secondary btn-sm" type="submit">Save</button>
+                    {% if payout_options.stripe and seller.stripe_account_id and not seller.stripe_payouts_ready %}<a class="btn btn-ghost btn-sm" href="{% url 'seller_stripe_connect' %}">Continue Stripe setup</a>{% endif %}</div>
+                </form>
+            </details>
             {% endif %}
         </section>
 
@@ -75,7 +90,7 @@
             <h2>Payout history</h2>
             {% for p in payouts %}
             <div class="list-row"><span>{{ p.paid_at|default:p.created_at|date:"M j, Y" }}<div class="muted small">{% if p.status == "paid" %}{{ p.get_method_display|default:"Paid" }}{% if p.reference %} · {{ p.reference }}{% endif %}{% elif p.status == "requested" %}Requested{% else %}Cancelled{% if p.note %} · {{ p.note|truncatechars:40 }}{% endif %}{% endif %}</div></span>
-                <span style="text-align:right;"><strong>{{ p.amount|money }}</strong><div>{% if p.status == "paid" %}<span class="pill ok">Paid</span>{% elif p.status == "requested" %}<span class="pill warn">Requested</span>{% else %}<span class="pill">Cancelled</span>{% endif %}</div></span></div>
+                <span style="text-align:right;"><strong>{{ p.amount|money }}</strong><div>{% if p.status == "paid" %}<span class="pill ok">Paid</span>{% elif p.status == "requested" %}<span class="pill warn">Requested</span>{% elif p.status == "processing" %}<span class="pill">Sending</span>{% elif p.status == "failed" %}<span class="pill bad" title="{{ p.error }}">Failed</span>{% else %}<span class="pill">Cancelled</span>{% endif %}</div></span></div>
             {% empty %}<p class="muted">No payouts yet.</p>{% endfor %}
         </section>
 </div>

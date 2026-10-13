@@ -1,0 +1,13 @@
+{% extends "bees/emails/_base_email.html" %}
+{% block email_body %}{% load bees_extras %}{% site_brand as b %}
+    <h1 style="margin:0 0 8px;font-size:24px;">{% if card.recipient_name %}Hi {{ card.recipient_name }}, you{% else %}You{% endif %}'ve got a gift card!</h1>
+    <p style="margin:0 0 16px;color:#56606B;">{{ card.from_name|default:"A friend" }} sent you a {{ card.amount|money }} gift card for {{ b.site_name }}.</p>
+    {% if card.message %}<div style="margin:0 0 20px;padding:16px 18px;background:#F4F6F7;border-radius:10px;white-space:pre-line;font-style:italic;">“{{ card.message }}”</div>{% endif %}
+    <div style="margin:0 0 20px;padding:22px;border-radius:14px;background:{{ b.primary_color }};color:#ffffff;text-align:center;">
+        <div style="font-size:30px;font-weight:bold;">{{ card.amount|money }}</div>
+        <div style="margin-top:10px;font-size:13px;opacity:.85;">Your code</div>
+        <div style="font-family:monospace;font-size:22px;letter-spacing:2px;font-weight:bold;">{{ card.code }}</div>
+    </div>
+    <a href="{{ redeem_url }}" style="display:inline-block;background:{{ b.primary_color }};color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:8px;font-weight:bold;">Add it to my account</a>
+    <p style="margin:18px 0 0;color:#56606B;font-size:13px;">Sign in (or create a free account), enter the code and the amount becomes store credit for anything on {{ b.site_name }}. Valid until {{ card.expires_at|date:"M j, Y" }}. Keep this code private - anyone with it can use it.</p>
+{% endblock %}

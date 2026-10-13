@@ -115,6 +115,9 @@ def _after_change(items, new_status, user, by_staff, by_customer=False):
             Notification.objects.create(user_id=order.user_id, message=msg[:255], link="/my-orders/")
         from . import order_emails
         order_emails.send_later(order, "item_delivered" if new_status == "delivered" else "item_shipped", [i.pk for i in items])
+        from django.db import transaction
+        from . import sms
+        transaction.on_commit(lambda: sms.package_update(order, names, new_status))
 
     if not by_staff and new_status == "delivered":
         from .alerts import notify_staff

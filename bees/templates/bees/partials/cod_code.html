@@ -1,0 +1,11 @@
+{# Cash order waiting for the SMS code. Needs: order, next ("orders" or "") #}
+<div class="callout warn cod-code" style="margin:12px 0 0;">
+    <p style="margin:0 0 8px;"><strong>Confirm your cash order.</strong> We texted a 6-digit code to <span data-no-translate>{{ order.phone }}</span>. Type it here so the seller can pack your order. Unconfirmed cash orders are cancelled after 48 hours.</p>
+    <form method="post" action="{% url 'cod_verify' order.id %}" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin:0;">
+        {% csrf_token %}<input type="hidden" name="next" value="{{ next }}">
+        <div class="field" style="margin:0;"><label for="cod-code-{{ order.id }}">Code</label>
+            <input id="cod-code-{{ order.id }}" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required style="max-width:9em;letter-spacing:.2em;"></div>
+        <button class="btn btn-primary btn-sm" type="submit">Confirm order</button>
+    </form>
+    <form method="post" action="{% url 'cod_verify' order.id %}" style="margin:8px 0 0;">{% csrf_token %}<input type="hidden" name="next" value="{{ next }}"><input type="hidden" name="resend" value="1"><button class="btn btn-secondary btn-sm" type="submit">Text me a new code</button></form>
+</div>

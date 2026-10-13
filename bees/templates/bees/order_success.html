@@ -19,6 +19,10 @@
             {% elif order.payment_status == "pending" %}
             <h1>Payment processing</h1>
             <p class="muted" style="margin-top:8px;">Order #{{ order.id }} is reserved. We'll email {{ order.contact_email }} as soon as your payment is confirmed.</p>
+            {% elif order.payment_method == "cod" and not order.cod_confirmed and order.cod_otp_hash %}
+            <h1>One last step</h1>
+            <p class="muted" style="margin-top:8px;">Order #{{ order.id }} is reserved for you.</p>
+            {% include "bees/partials/cod_code.html" with next="" %}
             {% else %}
             <div class="done-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></div>
             <h1>Thank you, your order is confirmed</h1>
@@ -42,6 +46,7 @@
             {% if order.tax_amount %}<div class="row"><span>{{ order.tax_label }}</span><span>{{ order.tax_amount|money }}</span></div>{% endif %}
             {% if order.credit_used %}<div class="row" style="color:var(--ok);"><span>Store credit</span><span>−{{ order.credit_used|money }}</span></div>{% endif %}
             <div class="row total"><span>{{ t.total }}</span><span>{{ order.total|money }}</span></div>
+            {% if order.charge_currency and order.payment_method != "cod" %}<div class="row"><span>{% if order.payment_status == "paid" %}Charged{% else %}To pay{% endif %} in {{ order.charge_currency|upper }}</span><span data-no-translate>{{ order.charge_amount }} {{ order.charge_currency|upper }}</span></div>{% endif %}
 
             <hr class="divider">
             <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(min(220px, 100%),1fr));gap:20px;">

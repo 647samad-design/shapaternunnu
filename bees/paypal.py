@@ -108,11 +108,11 @@ def api(method, path, body=None, request_id=None):
 
 
 def _amount(order):
-    from .payments import to_cents
     from .templatetags.bees_extras import ZERO_DECIMAL
-    cents = to_cents(order.total, order.currency)
-    value = Decimal(cents) if order.currency.lower() in ZERO_DECIMAL else Decimal(cents) / 100
-    return {"currency_code": order.currency.upper(), "value": f"{value:.0f}" if order.currency.lower() in ZERO_DECIMAL else f"{value:.2f}"}
+    cents = order.pay_cents
+    currency = order.pay_currency
+    value = Decimal(cents) if currency in ZERO_DECIMAL else Decimal(cents) / 100
+    return {"currency_code": currency.upper(), "value": f"{value:.0f}" if currency in ZERO_DECIMAL else f"{value:.2f}"}
 
 
 def create_order(request, order):
@@ -132,7 +132,7 @@ def create_order(request, order):
             "return_url": return_url, "cancel_url": cancel_url,
         }}},
     }
-    data = api("POST", "/v2/checkout/orders", body, request_id=f"lumen-order-{order.id}-{order.total_cents}")
+    data = api("POST", "/v2/checkout/orders", body, request_id=f"lumen-order-{order.id}-{order.pay_currency}-{order.pay_cents}")
     link = next((l["href"] for l in data.get("links", []) if l.get("rel") in ("payer-action", "approve")), "")
     if not data.get("id") or not link:
         raise PayPalError("PayPal didn't return a payment page.")
@@ -205,7 +205,7 @@ def refund(order, amount=None, key=None):
         return False
     body = {}
     if amount is not None:
-        body["amount"] = {"currency_code": order.currency.upper(), "value": f"{Decimal(amount):.2f}"}
+        body["amount"] = {"currency_code": order.pay_currency.upper(), "value": f"{order.to_charge_currency(amount):.2f}"}
     try:
         data = api("POST", f"/v2/payments/captures/{order.paypal_capture_id}/refund", body,
                    request_id=f"lumen-refund-{key or order.id}")
@@ -216,7 +216,7 @@ def refund(order, amount=None, key=None):
         return False
     if amount is None:
         Order.objects.filter(pk=order.pk).update(refund_id=str(data.get("id", ""))[:80], refunded_at=timezone.now())
-        OrderEvent.objects.create(order=order, kind="refunded", text=f"Refund of {order.total} {order.currency.upper()} sent to PayPal")
+        OrderEvent.objects.create(order=order, kind="refunded", text=f"Refund of {order.pay_amount} {order.pay_currency.upper()} sent to PayPal")
     return True
 
 

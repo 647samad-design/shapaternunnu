@@ -4,6 +4,7 @@
     <a href="{% url 'messages_inbox' %}">{{ t.messages }}</a>
     {% if brand.referral_enabled %}<a href="{% url 'referrals' %}" {% if tab == 'referrals' %}aria-current="page"{% endif %}>{{ t.invite_friends }}</a>{% endif %}
     <a href="{% url 'account_security' %}" {% if tab == 'security' %}aria-current="page"{% endif %}>Password &amp; security</a>
+    <a href="{% url 'gift_cards_mine' %}" {% if tab == 'gift_cards' %}aria-current="page"{% endif %}>Gift cards &amp; credit</a>
     <a href="{% url 'payment_methods' %}" {% if tab == 'cards' %}aria-current="page"{% endif %}>Saved cards</a>
     <a href="{% url 'account_privacy' %}" {% if tab == 'privacy' %}aria-current="page"{% endif %}>Privacy &amp; data</a>
 </nav>

@@ -11,3 +11,5 @@ django-storages[s3]>=1.14
 boto3>=1.34
 gunicorn>=22.0
 qrcode>=7.4
+PyJWT[crypto]>=2.8
+openpyxl>=3.1

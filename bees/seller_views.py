@@ -554,8 +554,20 @@ def earnings(request):
         "payouts": seller.payouts.all()[:50], "min_payout": min_payout,
         "statement_months": statements.months_with_sales(seller),
         "open_request": seller.payouts.filter(status="requested").first(),
+        "sending": seller.payouts.filter(status="processing").first(),
+        "payout_options": _payout_options(), "auto_ready": _auto_ready(seller),
         "lifetime": {"sales": seller.lifetime_sales, "commission": seller.commission_total, "net": seller.net_earnings},
     })
+
+
+def _payout_options():
+    from . import payouts as auto
+    return auto.options()
+
+
+def _auto_ready(seller):
+    from . import payouts as auto
+    return auto.method_ready(seller)
 
 
 def _statement_csv(seller, period, items):
@@ -596,7 +608,9 @@ def request_payout(request):
         if seller.payouts.filter(status="requested").exists():
             messages.error(request, "You already have a payout request waiting. We'll process it soon.")
             return redirect("seller_earnings")
-        if not seller.bank_details.strip():
+        from . import payouts as auto
+        automatic = auto.method_ready(seller)
+        if not automatic and not seller.bank_details.strip():
             messages.error(request, "Add your payout details (bank / PayPal) in Store settings first.")
             return redirect("seller_earnings")
         available = sc.balance(seller)["available"]
@@ -610,13 +624,80 @@ def request_payout(request):
         if amount > available:
             messages.error(request, f"You can request up to {money(available)}. Earnings become available once an item is delivered and its return window has passed.")
             return redirect("seller_earnings")
-        payout = Payout.objects.create(seller=seller, amount=amount, status="requested", requested_by=request.user)
+        if not automatic:
+            payout = Payout.objects.create(seller=seller, amount=amount, status="requested", requested_by=request.user)
+    if automatic:
+        try:
+            payout = auto.send(seller, amount, user=request.user)
+        except auto.PayoutError as exc:
+            messages.error(request, f"We couldn't send it: {exc}")
+            return redirect("seller_earnings")
+        AuditLog.objects.create(user=request.user, action=f"Seller {seller.display_name} withdrew {money(amount)} ({payout.method})")
+        messages.success(request, f"{money(amount)} is on its way to your {payout.get_method_display()} account."
+                         if payout.status == "processing" else f"{money(amount)} has been sent to your {payout.get_method_display()} account.")
+        return redirect("seller_earnings")
     from .alerts import notify_staff
     notify_staff(f"{seller.display_name} asked for a payout of {money(amount)}.", link=f"/manage/sellers/{seller.pk}/")
     from .manage_views import _refresh_attention
     _refresh_attention()
     AuditLog.objects.create(user=request.user, action=f"Seller {seller.display_name} requested payout #{payout.pk} of {money(amount)}")
     messages.success(request, f"Payout of {money(amount)} requested. We'll send it to your payout account and let you know.")
+    return redirect("seller_earnings")
+
+
+@seller_required(roles=MONEY_ROLES)
+@require_POST
+def payout_settings(request):
+    """How the seller wants to be paid: manual bank transfer, PayPal or Stripe."""
+    from django.core.exceptions import ValidationError
+    from django.core.validators import validate_email
+    from . import payouts as auto
+    seller = request.seller
+    method = request.POST.get("payout_method", "manual")
+    if method not in dict(seller.PAYOUT_METHODS) or (method != "manual" and not auto.options().get(method)):
+        messages.error(request, "That payout method isn't available.")
+        return redirect("seller_earnings")
+    fields = ["payout_method"]
+    if method == "paypal":
+        email = request.POST.get("paypal_email", "").strip().lower()
+        try:
+            validate_email(email)
+        except ValidationError:
+            messages.error(request, "Enter the email address of your PayPal account.")
+            return redirect("seller_earnings")
+        seller.paypal_email = email
+        fields.append("paypal_email")
+    if method == "stripe" and not (seller.stripe_account_id and seller.stripe_payouts_ready):
+        return redirect("seller_stripe_connect")
+    seller.payout_method = method
+    seller.save(update_fields=fields)
+    AuditLog.objects.create(user=request.user, action=f"Seller {seller.display_name}: payout method {method}")
+    messages.success(request, "Payout method saved." + (" Payouts now go to your PayPal automatically." if method == "paypal" else ""))
+    return redirect("seller_earnings")
+
+
+@seller_required(roles=MONEY_ROLES, approved=True)
+def stripe_connect(request):
+    from . import payouts as auto
+    if not auto.options()["stripe"]:
+        messages.error(request, "Stripe payouts aren't available on this store.")
+        return redirect("seller_earnings")
+    try:
+        return redirect(auto.stripe_onboarding_link(request, request.seller))
+    except auto.PayoutError as exc:
+        messages.error(request, f"Stripe couldn't set up your account: {exc}. Stripe may not support payouts to your country yet - choose PayPal or bank transfer instead.")
+        return redirect("seller_earnings")
+
+
+@seller_required(roles=MONEY_ROLES)
+def stripe_return(request):
+    from . import payouts as auto
+    seller = request.seller
+    if auto.refresh_stripe_account(seller):
+        type(seller).objects.filter(pk=seller.pk).update(payout_method="stripe")
+        messages.success(request, "Stripe is connected. Your earnings will be paid to your bank through Stripe.")
+    else:
+        messages.info(request, "Stripe still needs a few details before it can pay you. Press 'Continue Stripe setup' to finish.")
     return redirect("seller_earnings")
 
 

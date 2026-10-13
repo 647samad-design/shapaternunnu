@@ -14,11 +14,14 @@
             <div class="key-meta"><label for="k-{{ r.key }}"><strong>{{ r.label }}</strong></label><code class="muted small">{{ r.key }}</code>
                 <span class="small">{% if r.set %}<span class="pill ok">Set</span> <span data-no-translate>{{ r.shown }}</span>{% else %}<span class="pill">Not set</span>{% endif %}</span></div>
             <div class="key-input">
-                <input class="input" id="k-{{ r.key }}" name="{{ r.key }}" {% if r.secret %}type="password"{% else %}type="text"{% endif %} autocomplete="off" spellcheck="false" placeholder="{% if r.set %}Leave empty to keep{% else %}Paste here{% endif %}">
+                {% if r.key == "APPLE_PRIVATE_KEY" %}<textarea class="input" id="k-{{ r.key }}" name="{{ r.key }}" rows="3" autocomplete="off" spellcheck="false" placeholder="{% if r.set %}Leave empty to keep{% else %}-----BEGIN PRIVATE KEY----- ...{% endif %}"></textarea>{% else %}
+                <input class="input" id="k-{{ r.key }}" name="{{ r.key }}" {% if r.secret %}type="password"{% else %}type="text"{% endif %} autocomplete="off" spellcheck="false" placeholder="{% if r.set %}Leave empty to keep{% else %}Paste here{% endif %}">{% endif %}
                 {% if r.set %}<label class="small key-remove"><input type="checkbox" name="remove_{{ r.key }}" value="1"> Remove</label>{% endif %}
             </div>
         </div>
         {% endfor %}
+        {% if title == "Sign in with Google" %}<div class="callout" style="margin:12px 0 0;"><strong>Authorized redirect URI</strong>:<br><code style="word-break:break-all;" data-no-translate>{{ social_redirects.google }}</code></div>{% endif %}
+        {% if title == "Sign in with Apple" %}<div class="callout" style="margin:12px 0 0;"><strong>Return URL</strong> (Services ID > Configure):<br><code style="word-break:break-all;" data-no-translate>{{ social_redirects.apple }}</code></div>{% endif %}
         {% if title == "PayPal" %}
         <div class="callout" style="margin:12px 0 0;"><strong>Webhook address</strong> - in your PayPal app add this webhook with the events CHECKOUT.ORDER.APPROVED, PAYMENT.CAPTURE.COMPLETED, PAYMENT.CAPTURE.REFUNDED, PAYMENT.CAPTURE.DENIED and PAYMENT.CAPTURE.REVERSED, then paste its Webhook ID above:<br><code style="word-break:break-all;" data-no-translate>{{ paypal_webhook }}</code></div>
         {% endif %}

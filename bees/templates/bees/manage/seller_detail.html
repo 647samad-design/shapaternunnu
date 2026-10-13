@@ -112,7 +112,11 @@
                 <dt>Still owed</dt><dd><strong>{{ balance.owed|money }}</strong></dd>
                 <dt>From delivered orders</dt><dd>{{ balance.available|money }} <span class="muted small">(the rest is on orders not delivered yet)</span></dd>
                 <dt>Payout details</dt><dd>{{ seller.bank_details|default:"Not added yet" }}</dd>
+                <dt>Gets paid by</dt><dd>{{ seller.get_payout_method_display }}{% if seller.payout_method == "paypal" %} · <span data-no-translate>{{ seller.paypal_email }}</span>{% endif %}{% if seller.payout_method != "manual" %}{% if auto_ready %} <span class="pill ok">Ready</span>{% else %} <span class="pill warn">Not ready</span>{% endif %}{% endif %}</dd>
             </dl>
+            {% if auto_ready and balance.available > 0 %}
+            <form method="post" style="margin-bottom:12px;">{% csrf_token %}<input type="hidden" name="action" value="auto_payout"><button class="btn btn-primary btn-sm" type="submit" onclick="return confirm('Send {{ balance.available|money }} to this seller now?');">Send {{ balance.available|money }} now via {% if seller.payout_method == "paypal" %}PayPal{% else %}Stripe{% endif %}</button></form>
+            {% endif %}
             {% if payout_request %}<div class="callout warn" style="margin-bottom:12px;"><strong>{{ seller.display_name }} asked for {{ payout_request.amount|money }}</strong> on {{ payout_request.created_at|date:"M j" }}. Send it from your bank, then record it below.</div>{% endif %}
             <form method="post" class="stack-sm">
                 {% csrf_token %}<input type="hidden" name="action" value="payout">
@@ -132,7 +136,7 @@
             {% if payouts %}
             <div class="table-scroll" style="margin-top:16px;"><table class="table">
                 <thead><tr><th>Date</th><th>Status</th><th class="num">Amount</th></tr></thead>
-                <tbody>{% for p in payouts %}<tr><td>{{ p.paid_at|default:p.created_at|date:"M j, Y" }}<div class="muted small">{{ p.get_method_display|default:"" }}{% if p.reference %} · {{ p.reference }}{% endif %}</div></td><td>{% if p.status == 'paid' %}<span class="pill ok">Paid</span>{% elif p.status == 'requested' %}<span class="pill warn">Requested</span>{% else %}<span class="pill">Cancelled</span>{% endif %}</td><td class="num">{{ p.amount|money }}</td></tr>{% endfor %}</tbody>
+                <tbody>{% for p in payouts %}<tr><td>{{ p.paid_at|default:p.created_at|date:"M j, Y" }}<div class="muted small">{{ p.get_method_display|default:"" }}{% if p.reference %} · {{ p.reference }}{% endif %}</div></td><td>{% if p.status == 'paid' %}<span class="pill ok">Paid</span>{% elif p.status == 'requested' %}<span class="pill warn">Requested</span>{% elif p.status == 'processing' %}<span class="pill">Sending</span>{% elif p.status == 'failed' %}<span class="pill bad" title="{{ p.error }}">Failed</span>{% else %}<span class="pill">Cancelled</span>{% endif %}</td><td class="num">{{ p.amount|money }}</td></tr>{% endfor %}</tbody>
             </table></div>
             {% endif %}
         </section>

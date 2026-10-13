@@ -4889,3 +4889,709 @@ class SystemHealthTests(TestCase):
         self.assertContains(r, "/boom/")
         cache.clear()
         self.assertContains(self.client.get(reverse("manage_dashboard")), "Open System check")
+
+
+class SecurityPackTests(TestCase):
+    """Google/Apple sign-in, seller 2FA, SMS (Twilio) and cash-on-delivery protection."""
+    real_cod_confirmation = True
+
+    def setUp(self):
+        import os as _os
+        self.os = _os
+        for k in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM",
+                  "APPLE_SERVICES_ID", "APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY"):
+            self.addCleanup(self.os.environ.pop, k, None)
+        self.product = make_product(name="Lamp", price=Decimal("40.00"), stock=20)
+        self.buyer = User.objects.create_user("secbuyer", "sb@example.com", "pass12345")
+
+    def _site(self, **values):
+        site = SiteSettings.load()
+        for k, v in values.items():
+            setattr(site, k, v)
+        site.save()
+
+    def _twilio_on(self):
+        self.os.environ.update({"TWILIO_ACCOUNT_SID": "AC" + "a" * 32, "TWILIO_AUTH_TOKEN": "t" * 32, "TWILIO_FROM": "+15005550006"})
+
+    def _sms_catch(self):
+        sent = []
+
+        def opener(req, timeout=None):
+            from urllib.parse import parse_qs
+            self.assertIn("api.twilio.com", req.full_url)
+            sent.append({k: v[0] for k, v in parse_qs(req.data.decode()).items()})
+            resp = mock.MagicMock()
+            resp.__enter__.return_value.status = 201
+            return resp
+        return mock.patch("urllib.request.urlopen", side_effect=opener), sent
+
+    # --- Google sign in -------------------------------------------------
+    def _id_token(self, **claims):
+        import base64 as b64
+        body = {"iss": "https://accounts.google.com", "aud": "gid.apps.googleusercontent.com", "exp": 9999999999,
+                "sub": "g-123", "email": "new.person@gmail.com", "email_verified": True, "given_name": "New", "family_name": "Person"}
+        body.update(claims)
+        enc = lambda d: b64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+        return f"{enc({'alg': 'RS256'})}.{enc(body)}.sig"
+
+    def _google(self, **claims):
+        self.os.environ.update({"GOOGLE_CLIENT_ID": "gid.apps.googleusercontent.com", "GOOGLE_CLIENT_SECRET": "secret"})
+        r = self.client.get(reverse("social_start", args=["google"]) + "?next=/my-orders/")
+        self.assertTrue(r.url.startswith("https://accounts.google.com/"))
+        from urllib.parse import parse_qs, urlparse
+        q = {k: v[0] for k, v in parse_qs(urlparse(r.url).query).items()}
+        token = self._id_token(nonce=q["nonce"], **claims)
+
+        def opener(req, timeout=None):
+            self.assertIn("oauth2.googleapis.com/token", req.full_url)
+            resp = mock.MagicMock()
+            resp.__enter__.return_value.read.return_value = json.dumps({"id_token": token}).encode()
+            return resp
+        with mock.patch("urllib.request.urlopen", side_effect=opener):
+            return self.client.get(reverse("social_callback", args=["google"]), {"state": q["state"], "code": "abc"})
+
+    def test_google_sign_in_creates_and_links_account(self):
+        self.assertNotContains(self.client.get(reverse("login")), "Continue with Google")
+        r = self._google()
+        self.assertRedirects(r, "/my-orders/", fetch_redirect_response=False)
+        from .models import SocialAccount
+        link = SocialAccount.objects.get()
+        self.assertEqual((link.provider, link.uid, link.user.email, link.user.first_name), ("google", "g-123", "new.person@gmail.com", "New"))
+        self.assertFalse(link.user.has_usable_password())
+        self.assertEqual(int(self.client.session["_auth_user_id"]), link.user.pk)
+        self.client.logout()
+        self.assertContains(self.client.get(reverse("login")), "Google")
+        self._google()  # second time: same user, no duplicate
+        self.assertEqual(User.objects.filter(email="new.person@gmail.com").count(), 1)
+
+    def test_google_rejects_wrong_audience_and_reused_state(self):
+        r = self._google(aud="someone-elses-app")
+        self.assertRedirects(r, reverse("login"), fetch_redirect_response=False)
+        self.assertNotIn("_auth_user_id", self.client.session)
+        r = self.client.get(reverse("social_callback", args=["google"]), {"state": "made-up", "code": "x"})
+        self.assertRedirects(r, reverse("login"), fetch_redirect_response=False)
+
+    def test_google_unverified_email_does_not_take_over_account(self):
+        r = self._google(email="sb@example.com", email_verified=False)
+        self.assertNotIn("_auth_user_id", self.client.session)
+        from .models import SocialAccount
+        self.assertFalse(SocialAccount.objects.exists())
+
+    def test_google_with_2fa_asks_for_code(self):
+        from .models import Profile
+        Profile.objects.update_or_create(user=self.buyer, defaults={"totp_enabled": True, "totp_secret": "JBSWY3DPEHPK3PXP"})
+        r = self._google(email="sb@example.com", sub="g-9")
+        self.assertRedirects(r, reverse("login_code"), fetch_redirect_response=False)
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    # --- Seller 2FA ----------------------------------------------------
+    def test_sellers_must_set_up_2fa_when_required(self):
+        seller_user = User.objects.create_user("twofa", "2fa@example.com", "pass12345")
+        acc = SellerAccount.objects.create(user=seller_user, business_name="Safe Shop")
+        acc.status = "approved"
+        acc.save()
+        self.client.force_login(seller_user)
+        self.assertEqual(self.client.get("/seller/").status_code, 200)
+        self._site(require_seller_2fa=True)
+        self.assertRedirects(self.client.get("/seller/"), reverse("two_factor_setup"), fetch_redirect_response=False)
+
+    # --- SMS -----------------------------------------------------------
+    def test_phone_numbers_are_normalised(self):
+        from . import sms
+        self.assertEqual(sms.normalize("0300-1234567", "PK"), "+923001234567")
+        self.assertEqual(sms.normalize("+44 7700 900123"), "+447700900123")
+        self.assertEqual(sms.normalize("00971501234567"), "+971501234567")
+        self.assertEqual(sms.normalize("555 0100", "ZZ"), "")
+
+    def test_order_updates_are_texted_and_customers_can_opt_out(self):
+        from .models import Profile
+        Profile.objects.update_or_create(user=self.buyer, defaults={"email_verified": True})
+        self._twilio_on()
+        self.client.force_login(self.buyer)
+        self.client.post(reverse("add_to_cart", args=[self.product.id]))
+        patcher, sent = self._sms_catch()
+        with patcher, self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        order = Order.objects.get()
+        with patcher, self.captureOnCommitCallbacks(execute=True):
+            order.status = "shipped"
+            order.save()
+        self.assertEqual(sent[-1]["To"], "+15550100")
+        self.assertIn(f"#{order.id} is on its way", sent[-1]["Body"])
+        self.assertEqual(sent[-1]["From"], "+15005550006")
+        count = len(sent)
+        self.client.post(reverse("account_privacy"), {"action": "emails"})  # all boxes unticked
+        self.assertFalse(Profile.objects.get(user=self.buyer).sms_updates)
+        with patcher, self.captureOnCommitCallbacks(execute=True):
+            order.status = "delivered"
+            order.save()
+        self.assertEqual(len(sent), count)
+
+    def test_sellers_get_a_text_for_new_orders(self):
+        from . import seller_center
+        self._twilio_on()
+        owner = User.objects.create_user("smsseller", "ss@example.com", "pass12345")
+        acc = SellerAccount.objects.create(user=owner, business_name="Text Shop", phone="03001234567", country="Pakistan")
+        product = make_product(name="Mug", price=Decimal("5.00"), stock=5, seller_account=acc, seller_name="Text Shop")
+        order = Order.objects.create(user=self.buyer, full_name="B", address="a", city="c", postal_code="1", country="PK", phone="1",
+                                     payment_method="cod", payment_status="not_applicable")
+        OrderItem.objects.create(order=order, product=product, product_name="Mug", price=Decimal("5.00"), quantity=2, seller_account=acc)
+        patcher, sent = self._sms_catch()
+        with patcher, self.captureOnCommitCallbacks(execute=True):
+            seller_center.notify_new_order(order)
+        self.assertEqual(sent[0]["To"], "+923001234567")
+        self.assertIn("2 items to ship", sent[0]["Body"])
+
+    def test_no_keys_means_no_sms(self):
+        from . import sms
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            self.assertFalse(sms.send_now("+15550100", "hi"))
+        urlopen.assert_not_called()
+
+    # --- Cash on delivery protection ---------------------------------------
+    def _cod_checkout(self, **extra):
+        self.client.force_login(self.buyer)
+        self.client.post(reverse("add_to_cart", args=[self.product.id]))
+        patcher, sent = self._sms_catch()
+        with patcher, self.captureOnCommitCallbacks(execute=True):
+            r = self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod", **extra})
+        return r, sent
+
+    def test_cod_phone_code_confirms_order(self):
+        from .models import Profile
+        Profile.objects.update_or_create(user=self.buyer, defaults={"email_verified": True})
+        self._twilio_on()
+        self._site(cod_phone_check=True)
+        r, sent = self._cod_checkout()
+        order = Order.objects.get()
+        self.assertFalse(order.cod_confirmed)  # even a verified email needs the phone code
+        self.assertTrue(order.cod_otp_hash)
+        import re as _re
+        code = _re.search(r"is (\d{6})", sent[0]["Body"]).group(1)
+        page = self.client.get(reverse("order_success", args=[order.id]))
+        self.assertContains(page, "One last step")
+        self.assertContains(page, 'autocomplete="one-time-code"')
+        # confirm_cod email link can't bypass the phone check
+        self.client.get(reverse("confirm_cod", args=[order.id, order.access_token]))
+        order.refresh_from_db()
+        self.assertFalse(order.cod_confirmed)
+        wrong = "000000" if code != "000000" else "111111"
+        self.client.post(reverse("cod_verify", args=[order.id]), {"code": wrong})
+        order.refresh_from_db()
+        self.assertEqual((order.cod_confirmed, order.cod_otp_tries), (False, 1))
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("cod_verify", args=[order.id]), {"code": code})
+        order.refresh_from_db()
+        self.assertTrue(order.cod_confirmed and order.sellers_notified is not None)
+        self.assertTrue(order.events.filter(text__icontains="phone").exists())
+
+    def test_cod_code_locks_after_five_wrong_tries_and_expires(self):
+        from . import cod
+        self._twilio_on()
+        self._site(cod_phone_check=True)
+        self._cod_checkout()
+        order = Order.objects.get()
+        for _ in range(5):
+            cod.check_code(order, "999999" if order.cod_otp_hash != cod._hash(order, "999999") else "888888")
+        ok, msg = cod.check_code(order, "123456")
+        self.assertFalse(ok)
+        self.assertIn("Too many", msg)
+        patcher, sent = self._sms_catch()
+        with patcher:
+            self.assertTrue(cod.send_code(order))
+        Order.objects.filter(pk=order.pk).update(cod_otp_sent_at=timezone.now() - timedelta(minutes=31))
+        order.refresh_from_db()
+        self.assertIn("expired", cod.check_code(order, "123456")[1])
+
+    def test_cod_phone_check_needs_a_textable_number(self):
+        self._twilio_on()
+        self._site(cod_phone_check=True)
+        r, _ = self._cod_checkout(phone="12", country="ZZ")
+        self.assertFalse(Order.objects.exists())
+
+    def test_cod_limit_and_block_list(self):
+        from .models import CodBlock
+        self._site(cod_max_order=Decimal("30.00"))
+        self.client.force_login(self.buyer)
+        self.client.post(reverse("add_to_cart", args=[self.product.id]))
+        page = self.client.get(reverse("checkout"))
+        self.assertNotContains(page, 'value="cod"')
+        self.assertContains(page, "Cash on delivery is available for orders up to")
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        self.assertFalse(Order.objects.exists())
+        self._site(cod_max_order=Decimal("0"))
+        from . import cod
+        CodBlock.objects.create(kind="phone", value=cod.phone_key("+1 555-0100"))
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        self.assertFalse(Order.objects.exists())
+        CodBlock.objects.all().delete()
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        self.assertTrue(Order.objects.exists())
+
+    def test_refused_parcels_cancel_and_block_repeat_refusers(self):
+        from . import cod
+        from .models import CodBlock
+        self._site(cod_refusal_limit=2)
+        admin = User.objects.create_superuser("codadmin", "ca@example.com", "pass12345")
+        orders = []
+        for _ in range(2):
+            o = Order.objects.create(user=self.buyer, email="sb@example.com", full_name="B", address="a", city="c", postal_code="1",
+                                     country="US", phone="+1 (555) 0100", payment_method="cod", payment_status="not_applicable", status="shipped")
+            OrderItem.objects.create(order=o, product=self.product, product_name="Lamp", price=Decimal("40"), quantity=1)
+            orders.append(o)
+        self.client.force_login(admin)
+        self.client.post(reverse("manage_order", args=[orders[0].id]), {"action": "cod_refused"})
+        orders[0].refresh_from_db()
+        self.assertTrue(orders[0].cod_refused)
+        self.assertEqual(orders[0].status, "cancelled")
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 21)
+        self.assertFalse(CodBlock.objects.exists())
+        cod.mark_refused(orders[1])
+        self.assertEqual(set(CodBlock.objects.values_list("kind", flat=True)), {"email", "phone"})
+        self.assertTrue(cod.blocked(phone="0015550100"))
+        self.assertIn("pay online", cod.problem(Decimal("1"), email="SB@example.com"))
+        page = self.client.get(reverse("manage_cod"))
+        self.assertContains(page, "Refused on delivery")
+        self.client.post(reverse("manage_cod"), {"action": "add", "kind": "email", "value": "Fraud@Example.com"})
+        self.assertTrue(CodBlock.objects.filter(kind="email", value="fraud@example.com").exists())
+        block = CodBlock.objects.get(value="fraud@example.com")
+        self.client.post(reverse("manage_cod"), {"action": "delete", "id": block.id})
+        self.assertFalse(CodBlock.objects.filter(pk=block.pk).exists())
+
+
+class BulkProductTests(TestCase):
+    def setUp(self):
+        owner = User.objects.create_user("bulkseller", "bs@example.com", "pass12345")
+        self.seller = SellerAccount.objects.create(user=owner, business_name="Bulk Co")
+        self.seller.status = "approved"
+        self.seller.save()
+        self.mine = make_product(name="Old mug", price=Decimal("10.00"), stock=5, seller_account=self.seller, seller_name="Bulk Co")
+        self.other = make_product(name="Not mine", price=Decimal("8.00"), stock=5)
+        self.client.force_login(owner)
+
+    def _upload(self, content, name="p.csv", url="seller_bulk", **extra):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        f = SimpleUploadedFile(name, content if isinstance(content, bytes) else content.encode())
+        return self.client.post(reverse(url), {"action": "upload", "file": f, **extra})
+
+    def test_csv_preview_then_save(self):
+        csv_text = ("id,name,category,price,stock,image_url\n"
+                    f"{self.mine.id},Old mug,{self.mine.category},12.00,9,\n"
+                    ",New bowl,grocery,7.5,3,https://img.example.com/bowl.jpg\n"
+                    f"{self.other.id},Hack,grocery,1,1,\n"
+                    ",No photo,grocery,3,1,\n")
+        r = self._upload(csv_text)
+        self.assertContains(r, "Check before saving")
+        self.assertContains(r, "isn&#x27;t yours")
+        self.assertContains(r, "new products need image_url")
+        self.mine.refresh_from_db()
+        self.assertEqual(self.mine.price, Decimal("10.00"))  # nothing saved yet
+        self.client.post(reverse("seller_bulk"), {"action": "confirm"})
+        self.mine.refresh_from_db()
+        self.assertEqual((self.mine.price, self.mine.stock, self.mine.approval_status), (Decimal("12.00"), 9, "approved"))
+        new = Product.objects.get(name="New bowl")
+        self.assertEqual((new.seller_account, new.approval_status, new.stock), (self.seller, "pending", 3))
+        self.other.refresh_from_db()
+        self.assertEqual(self.other.name, "Not mine")
+        # confirming twice does nothing
+        self.client.post(reverse("seller_bulk"), {"action": "confirm"})
+        self.assertEqual(Product.objects.filter(name="New bowl").count(), 1)
+
+    def test_name_change_goes_to_review(self):
+        self._upload(f"id,name\n{self.mine.id},Better mug\n")
+        self.client.post(reverse("seller_bulk"), {"action": "confirm"})
+        self.mine.refresh_from_db()
+        self.assertEqual((self.mine.name, self.mine.approval_status), ("Better mug", "pending"))
+
+    def test_excel_round_trip_and_formula_safety(self):
+        from openpyxl import load_workbook
+        Product.objects.filter(pk=self.mine.pk).update(description="=HYPERLINK(\"http://evil\")")
+        r = self.client.get(reverse("seller_bulk") + "?download=xlsx")
+        self.assertEqual(r["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        wb = load_workbook(io.BytesIO(r.content))
+        ws = wb["products"]
+        rows = list(ws.iter_rows(values_only=True))
+        self.assertEqual(rows[0][:4], ("id", "name", "category", "price"))
+        self.assertEqual(len(rows), 2)  # only my product
+        self.assertTrue(rows[1][6].startswith("'="))
+        ws.cell(row=2, column=4, value=15)
+        ws.cell(row=2, column=7, value="Plain text")
+        buf = io.BytesIO()
+        wb.save(buf)
+        self._upload(buf.getvalue(), name="p.xlsx")
+        self.client.post(reverse("seller_bulk"), {"action": "confirm"})
+        self.mine.refresh_from_db()
+        self.assertEqual(self.mine.price, Decimal("15.00"))
+        csv_resp = self.client.get(reverse("seller_bulk") + "?download=csv&what=template")
+        self.assertIn(b"id,name,category,price", csv_resp.content)
+
+    def test_bulk_price_change(self):
+        self.client.post(reverse("seller_bulk"), {"action": "change", "mode": "price_pct", "value": "-10"})
+        self.mine.refresh_from_db()
+        self.other.refresh_from_db()
+        self.assertEqual((self.mine.price, self.other.price), (Decimal("9.00"), Decimal("8.00")))
+        self.client.post(reverse("seller_bulk"), {"action": "change", "mode": "stock_set", "value": "2.5"})
+        self.mine.refresh_from_db()
+        self.assertEqual(self.mine.stock, 5)
+
+    def test_admin_imports_store_products_live(self):
+        admin = User.objects.create_superuser("bulkadmin", "ba@example.com", "pass12345")
+        self.client.force_login(admin)
+        self._upload("name,category,price,stock,image_url\nStore lamp,Table lamp,30,4,https://img.example.com/l.jpg\n", url="manage_bulk")
+        self.client.post(reverse("manage_bulk"), {"action": "confirm"})
+        p = Product.objects.get(name="Store lamp")
+        self.assertEqual((p.seller_account, p.approval_status, p.category), (None, "approved", "table-lamp"))
+        self.assertEqual(self.client.get(reverse("manage_bulk")).status_code, 200)
+
+
+class GiftCardTests(TestCase):
+    def setUp(self):
+        import os as _os
+        self.os = _os
+        self.buyer = User.objects.create_user("gcbuyer", "gb@example.com", "pass12345")
+        self.friend = User.objects.create_user("gcfriend", "friend@example.com", "pass12345")
+
+    def _stripe_on(self):
+        return mock.patch("bees.payments.is_configured", return_value=True)
+
+    def test_buy_with_card_then_redeem(self):
+        from django.core import mail as _mail
+        from .models import GiftCard, Profile
+        session = mock.MagicMock(id="cs_gift", url="https://checkout.stripe.com/c/pay/cs_gift")
+        fake = mock.MagicMock()
+        fake.checkout.Session.create.return_value = session
+        self.client.force_login(self.buyer)
+        with self._stripe_on(), mock.patch("bees.payments._stripe", return_value=fake):
+            self.assertContains(self.client.get(reverse("gift_cards")), 'value="card"')
+            r = self.client.post(reverse("gift_cards"), {"amount": "custom", "custom": "75", "email": "gb@example.com", "from_name": "Ali",
+                                                          "recipient_name": "Sara", "recipient_email": "friend@example.com", "message": "Happy birthday", "method": "card"})
+        self.assertEqual(r.url, "https://checkout.stripe.com/c/pay/cs_gift")
+        kwargs = fake.checkout.Session.create.call_args.kwargs
+        self.assertEqual(kwargs["line_items"][0]["price_data"]["unit_amount"], 7500)
+        card = GiftCard.objects.get()
+        self.assertEqual((card.status, card.stripe_session_id), ("pending", "cs_gift"))
+        # underpaid session doesn't activate
+        from . import giftcards
+        giftcards.confirm_stripe(card.id, {"id": "cs_gift", "payment_status": "paid", "amount_total": 100})
+        card.refresh_from_db()
+        self.assertEqual(card.status, "pending")
+        with self.captureOnCommitCallbacks(execute=True):
+            with mock.patch("bees.payments.retrieve_session", return_value={"id": "cs_gift", "payment_status": "paid", "amount_total": 7500}):
+                page = self.client.get(reverse("gift_card_done", args=[card.id]) + "?session_id=cs_gift")
+        self.assertContains(page, "Gift card sent")
+        card.refresh_from_db()
+        self.assertEqual(card.status, "active")
+        sent = [m for m in _mail.outbox if "friend@example.com" in m.to]
+        self.assertTrue(sent and card.code in sent[0].alternatives[0][0])
+        self.assertIn("Happy birthday", sent[0].alternatives[0][0])
+        # the friend redeems (code typed loosely)
+        self.client.force_login(self.friend)
+        self.client.post(reverse("gift_cards_mine"), {"code": card.code.lower().replace("-", " ")})
+        self.assertEqual(Profile.objects.get(user=self.friend).store_credit, Decimal("75.00"))
+        card.refresh_from_db()
+        self.assertEqual((card.status, card.redeemed_by), ("redeemed", self.friend))
+        # can't be used twice
+        self.client.force_login(self.buyer)
+        r = self.client.post(reverse("gift_cards_mine"), {"code": card.code}, follow=True)
+        self.assertContains(r, "already been used")
+        self.assertEqual(Profile.objects.get_or_create(user=self.buyer)[0].store_credit, Decimal("0"))
+
+    def test_strangers_cannot_see_purchase_and_bad_amounts_rejected(self):
+        from .models import GiftCard
+        card = GiftCard.objects.create(code="GIFT-AAAA-BBBB-CCCC", amount=Decimal("20"), purchaser=self.buyer, purchaser_email="gb@example.com")
+        self.client.force_login(self.friend)
+        self.assertEqual(self.client.get(reverse("gift_card_done", args=[card.id])).status_code, 404)
+        with self._stripe_on():
+            self.client.post(reverse("gift_cards"), {"amount": "custom", "custom": "5000", "email": "a@b.com", "method": "card"})
+        self.assertEqual(GiftCard.objects.count(), 1)
+        r = self.client.post(reverse("gift_cards_mine"), {"code": "GIFT-AAAA-BBBB-CCCC"}, follow=True)
+        self.assertContains(r, "couldn")  # unpaid cards can't be redeemed
+
+    def test_paypal_purchase(self):
+        from .models import GiftCard
+        self.os.environ.update({"PAYPAL_CLIENT_ID": "A" * 30, "PAYPAL_CLIENT_SECRET": "B" * 30, "PAYPAL_MODE": "sandbox"})
+        for k in ("PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_MODE"):
+            self.addCleanup(self.os.environ.pop, k, None)
+        state = {}
+
+        def opener(req, timeout=None):
+            url, method = req.full_url, req.get_method()
+            if "/v1/oauth2/token" in url:
+                data = {"access_token": "tok", "expires_in": 3600}
+            elif method == "POST" and url.endswith("/v2/checkout/orders"):
+                body = json.loads(req.data)
+                state["amount"] = body["purchase_units"][0]["amount"]
+                data = {"id": "PPG-1", "links": [{"rel": "payer-action", "href": "https://www.sandbox.paypal.com/checkoutnow?token=PPG-1"}]}
+            elif method == "GET":
+                data = {"id": "PPG-1", "status": "APPROVED"}
+            else:
+                card = GiftCard.objects.get()
+                data = {"id": "PPG-1", "status": "COMPLETED", "purchase_units": [{"custom_id": f"gift-{card.id}", "payments": {"captures": [
+                    {"id": "CAP", "status": "COMPLETED", "amount": {"currency_code": "USD", "value": "50.00"}}]}}]}
+            resp = mock.MagicMock()
+            resp.__enter__.return_value = io.BytesIO(json.dumps(data).encode())
+            return resp
+        with mock.patch("urllib.request.urlopen", side_effect=opener):
+            r = self.client.post(reverse("gift_cards"), {"amount": "50", "email": "guest@example.com", "method": "paypal"})
+            self.assertTrue(r.url.startswith("https://www.sandbox.paypal.com/"))
+            self.assertEqual(state["amount"], {"currency_code": "USD", "value": "50.00"})
+            card = GiftCard.objects.get()
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.get(reverse("gift_card_paypal_return", args=[card.id]) + "?token=PPG-1")
+        card.refresh_from_db()
+        self.assertEqual((card.status, card.payment_method), ("active", "paypal"))
+
+    def test_admin_issue_and_void(self):
+        from .models import GiftCard
+        admin = User.objects.create_superuser("gcadmin", "ga@example.com", "pass12345")
+        self.client.force_login(admin)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("manage_gift_cards"), {"action": "issue", "amount": "15", "email": "Lucky@Example.com", "note": "Sorry for the delay"})
+        card = GiftCard.objects.get()
+        self.assertEqual((card.status, card.recipient_email, card.payment_method, card.issued_by), ("active", "lucky@example.com", "staff", admin))
+        self.assertContains(self.client.get(reverse("manage_gift_cards")), card.code)
+        self.client.post(reverse("manage_gift_cards"), {"action": "void", "id": card.id})
+        card.refresh_from_db()
+        self.assertEqual(card.status, "void")
+        self.client.force_login(self.friend)
+        r = self.client.post(reverse("gift_cards_mine"), {"code": card.code}, follow=True)
+        self.assertContains(r, "cancelled")
+
+
+class ReportsTests(TestCase):
+    UA = {"HTTP_USER_AGENT": "Mozilla/5.0 (Windows NT 10.0) Firefox/130.0"}
+
+    def test_funnel_counts_humans_not_bots_and_report_numbers(self):
+        from .models import DailyStat
+        product = make_product(name="Report lamp", price=Decimal("20.00"), stock=10)
+        c = self.client
+        buyer = User.objects.create_user("repbuyer", "rb@example.com", "pass12345")
+        c.force_login(buyer)
+        c.get("/", **self.UA)
+        c.get("/", **self.UA)  # same visitor, same day: one visit
+        c.get(reverse("product_detail", args=[product.id]), **self.UA)
+        c.get(reverse("product_detail", args=[product.id]), HTTP_USER_AGENT="Googlebot/2.1")
+        c.get(reverse("search_products") + "?q=Unicorn+Kettle", **self.UA)
+        c.post(reverse("add_to_cart", args=[product.id]), **self.UA)
+        c.get(reverse("checkout"), **self.UA)
+        c.get(reverse("checkout"), **self.UA)  # refresh doesn't double count
+        stat = lambda kind, key="": DailyStat.objects.filter(kind=kind, key=key).values_list("count", flat=True).first()
+        self.assertEqual(stat("visit"), 1)
+        self.assertEqual(stat("view", str(product.id)), 1)
+        self.assertEqual(stat("search", "unicorn kettle"), 1)
+        self.assertEqual(stat("search_zero", "unicorn kettle"), 1)
+        self.assertEqual(stat("cart"), 1)
+        self.assertEqual(stat("checkout"), 1)
+        for country in ("GB", "GB", "DE"):
+            o = Order.objects.create(user=buyer, email="rb@example.com", full_name="R", address="a", city="c", postal_code="1", country=country,
+                                     phone="1", payment_method="card", payment_status="paid", status="confirmed", shipping_amount=Decimal("5"))
+            OrderItem.objects.create(order=o, product=product, product_name="Report lamp", price=Decimal("20.00"), quantity=1)
+        Order.objects.create(user=buyer, email="rb@example.com", full_name="R", address="a", city="c", postal_code="1", country="GB",
+                             phone="1", payment_method="card", payment_status="refunded", status="cancelled")
+        admin = User.objects.create_superuser("repadmin", "ra@example.com", "pass12345")
+        c.force_login(admin)
+        page = c.get(reverse("manage_reports") + "?range=7")
+        r = page.context["r"]
+        self.assertEqual((r["orders"], r["revenue"], r["aov"]), (3, Decimal("75.00"), Decimal("25.00")))
+        self.assertEqual(r["by_country"][0]["name"], "United Kingdom")
+        self.assertEqual(r["repeat_rate"], 100.0)
+        self.assertEqual(r["funnel"][0]["n"], 1)
+        self.assertContains(page, "unicorn kettle")
+        csv_resp = c.get(reverse("manage_reports") + "?range=7&export=orders")
+        self.assertEqual(csv_resp["Content-Type"], "text/csv; charset=utf-8")
+        self.assertEqual(csv_resp.content.decode("utf-8-sig").count("\n"), 5)
+        for kind in ("summary", "products", "sellers", "searches"):
+            self.assertEqual(c.get(reverse("manage_reports") + f"?range=30&export={kind}").status_code, 200)
+        self.assertEqual(c.get(reverse("manage_reports") + "?from=2026-01-01&to=2026-02-01").status_code, 200)
+        # staff browsing doesn't count
+        c.get(reverse("product_detail", args=[product.id]), **self.UA)
+        self.assertEqual(stat("view", str(product.id)), 1)
+
+
+class AutoPayoutTests(TestCase):
+    def setUp(self):
+        import os as _os
+        self.os = _os
+        owner = User.objects.create_user("payseller", "ps@example.com", "pass12345")
+        self.seller = SellerAccount.objects.create(user=owner, business_name="Pay Co", country="United Kingdom")
+        self.seller.status = "approved"
+        self.seller.save()
+        self.owner = owner
+
+    def _available(self, amount):
+        from . import seller_center as sc
+        return mock.patch.object(sc, "balance", return_value={"available": Decimal(amount), "owed": Decimal(amount), "pending": Decimal("0"),
+                                                               "earned": Decimal(amount), "paid": Decimal("0"), "requested": Decimal("0")})
+
+    def _paypal(self, item_status="SUCCESS"):
+        self.os.environ.update({"PAYPAL_CLIENT_ID": "A" * 30, "PAYPAL_CLIENT_SECRET": "B" * 30, "PAYPAL_MODE": "sandbox"})
+        for k in ("PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_MODE"):
+            self.addCleanup(self.os.environ.pop, k, None)
+        calls = []
+
+        def opener(req, timeout=None):
+            url, method = req.full_url, req.get_method()
+            calls.append((method, url, req.data))
+            if "/v1/oauth2/token" in url:
+                data = {"access_token": "tok", "expires_in": 3600}
+            elif method == "POST":
+                data = {"batch_header": {"payout_batch_id": "BATCH1", "batch_status": "PENDING"}}
+            else:
+                data = {"batch_header": {"batch_status": "SUCCESS"}, "items": [{"transaction_status": item_status, "transaction_id": "TX9",
+                                                                                 "errors": {"message": "Receiver unregistered"}}]}
+            resp = mock.MagicMock()
+            resp.__enter__.return_value = io.BytesIO(json.dumps(data).encode())
+            return resp
+        return mock.patch("urllib.request.urlopen", side_effect=opener), calls
+
+    def test_seller_sets_paypal_and_withdraws(self):
+        from .models import Payout
+        patcher, calls = self._paypal()
+        self.client.force_login(self.owner)
+        with patcher:
+            self.client.post(reverse("seller_payout_settings"), {"payout_method": "paypal", "paypal_email": "Me@PayPal.com"})
+        self.seller.refresh_from_db()
+        self.assertEqual((self.seller.payout_method, self.seller.paypal_email), ("paypal", "me@paypal.com"))
+        with patcher, self._available("40.00"), self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("seller_request_payout"), {"amount": "30"})
+        payout = Payout.objects.get()
+        self.assertEqual((payout.status, payout.amount, payout.method, payout.automatic), ("paid", Decimal("30.00"), "paypal", True))
+        self.assertEqual(payout.reference, "PayPal TX9")
+        body = json.loads([c for c in calls if c[0] == "POST" and "payouts" in c[1]][0][2])
+        self.assertEqual(body["items"][0]["receiver"], "me@paypal.com")
+        self.assertEqual(body["items"][0]["amount"], {"value": "30.00", "currency": "USD"})
+        self.seller.refresh_from_db()
+        self.assertEqual(self.seller.total_paid_out, Decimal("30.00"))
+
+    def test_cannot_withdraw_more_than_available(self):
+        from .models import Payout
+        patcher, _ = self._paypal()
+        self.seller.payout_method, self.seller.paypal_email = "paypal", "me@paypal.com"
+        self.seller.save()
+        self.client.force_login(self.owner)
+        with patcher, self._available("10.00"):
+            self.client.post(reverse("seller_request_payout"), {"amount": "50"})
+        self.assertFalse(Payout.objects.exists())
+
+    def test_failed_paypal_payout_gives_balance_back(self):
+        from . import payouts
+        patcher, _ = self._paypal(item_status="FAILED")
+        self.seller.payout_method, self.seller.paypal_email = "paypal", "me@paypal.com"
+        self.seller.save()
+        with patcher, self._available("25.00"):
+            payout = payouts.send(self.seller)
+        self.assertEqual(payout.status, "failed")
+        self.assertIn("Receiver unregistered", payout.error)
+        self.seller.refresh_from_db()
+        self.assertEqual(self.seller.total_paid_out, Decimal("0.00"))
+
+    def test_stripe_connect_and_admin_pay_all(self):
+        from . import payouts
+        from .models import Payout
+        fake = mock.MagicMock()
+        fake.Account.create.return_value = {"id": "acct_123"}
+        fake.AccountLink.create.return_value = {"url": "https://connect.stripe.com/setup/e/acct_123"}
+        fake.Account.retrieve.return_value = {"id": "acct_123", "payouts_enabled": True, "capabilities": {"transfers": "active"}}
+        fake.Transfer.create.return_value = {"id": "tr_1"}
+        self.client.force_login(self.owner)
+        with mock.patch("bees.payments.is_configured", return_value=True), mock.patch("bees.payments._stripe", return_value=fake):
+            r = self.client.post(reverse("seller_payout_settings"), {"payout_method": "stripe"})
+            self.assertRedirects(r, reverse("seller_stripe_connect"), fetch_redirect_response=False)
+            r = self.client.get(reverse("seller_stripe_connect"))
+            self.assertEqual(r.url, "https://connect.stripe.com/setup/e/acct_123")
+            self.assertEqual(fake.Account.create.call_args.kwargs["country"], "GB")
+            self.client.get(reverse("seller_stripe_return"))
+            self.seller.refresh_from_db()
+            self.assertEqual((self.seller.payout_method, self.seller.stripe_account_id, self.seller.stripe_payouts_ready), ("stripe", "acct_123", True))
+            admin = User.objects.create_superuser("payadmin", "pa@example.com", "pass12345")
+            self.client.force_login(admin)
+            with self._available("60.00"), self.captureOnCommitCallbacks(execute=True):
+                self.client.post(reverse("manage_sellers"), {"action": "pay_all"})
+        payout = Payout.objects.get()
+        self.assertEqual((payout.status, payout.reference, payout.method), ("paid", "Stripe tr_1", "stripe"))
+        self.assertEqual(fake.Transfer.create.call_args.kwargs["destination"], "acct_123")
+        self.assertEqual(fake.Transfer.create.call_args.kwargs["amount"], 6000)
+        # weekly schedule
+        site = SiteSettings.load()
+        site.auto_payouts = "weekly"
+        site.save()
+        from datetime import date
+        with mock.patch("django.utils.timezone.localdate", return_value=date(2026, 10, 12)):
+            self.assertTrue(payouts.due_today())  # a Monday
+        with mock.patch("django.utils.timezone.localdate", return_value=date(2026, 10, 13)):
+            self.assertFalse(payouts.due_today())
+
+
+@override_settings(STRIPE_SECRET_KEY="sk_test_dummy", STRIPE_WEBHOOK_SECRET="whsec_dummy")
+class PresentmentCurrencyTests(TestCase):
+    """Charging in the shopper's currency."""
+    def setUp(self):
+        cache.clear()
+        Currency.objects.all().delete()
+        Currency.objects.create(code="EUR", symbol="€", rate=Decimal("0.9"), active=True)
+        Currency.objects.create(code="KWD", symbol="KD", rate=Decimal("0.31"), active=True)
+        self.user = User.objects.create_user("eurbuyer", "eb@example.com", "pass12345")
+        self.product = make_product(price=Decimal("25.00"), stock=5)
+        self.client.force_login(self.user)
+
+    def _on(self, value=True):
+        site = SiteSettings.load()
+        site.charge_local_currency = value
+        site.save()
+
+    def _checkout(self, code="EUR"):
+        self.client.get(reverse("set_currency", args=[code]))
+        self.client.post(reverse("add_to_cart", args=[self.product.id]), {"quantity": 2})
+        fake = mock.MagicMock(id="cs_eur", url="https://checkout.stripe.com/c/pay/cs_eur")
+        with mock.patch("stripe.checkout.Session.create", return_value=fake) as create:
+            self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "card"})
+        return Order.objects.get(), create.call_args.kwargs
+
+    def test_off_by_default_charges_store_currency(self):
+        order, kwargs = self._checkout()
+        self.assertEqual(order.charge_currency, "")
+        self.assertEqual(kwargs["line_items"][0]["price_data"]["currency"], "usd")
+
+    def test_card_charged_in_euros_and_refunds_converted(self):
+        from . import payments
+        self._on()
+        order, kwargs = self._checkout()
+        self.assertEqual((order.charge_currency, order.charge_rate), ("eur", Decimal("0.900000")))
+        expected = (order.total * Decimal("0.9")).quantize(Decimal("0.01"))
+        self.assertEqual(order.charge_amount, expected)
+        self.assertEqual(len(kwargs["line_items"]), 1)
+        self.assertEqual(kwargs["line_items"][0]["price_data"]["currency"], "eur")
+        self.assertEqual(kwargs["line_items"][0]["price_data"]["unit_amount"], int(expected * 100))
+        # a USD-sized payment no longer counts; the EUR one does
+        order.stripe_session_id = "cs_eur"
+        self.assertEqual(payments.mark_order_paid(order.id, {"id": "cs_eur", "payment_status": "paid", "amount_total": order.total_cents, "currency": "usd"})[1], False)
+        _o, paid = payments.mark_order_paid(order.id, {"id": "cs_eur", "payment_status": "paid", "amount_total": order.pay_cents, "currency": "eur", "payment_intent": "pi_1"})
+        self.assertTrue(paid)
+        order.refresh_from_db()
+        with mock.patch("stripe.Refund.create") as refund:
+            payments.refund_amount(order, Decimal("10.00"), "r1")
+        self.assertEqual(refund.call_args.kwargs["amount"], 900)
+        page = self.client.get(reverse("order_success", args=[order.id]))
+        self.assertContains(page, f"{order.charge_amount} EUR")
+
+    def test_three_decimal_currency_falls_back_to_store_currency(self):
+        self._on()
+        order, kwargs = self._checkout("KWD")
+        self.assertEqual(order.charge_currency, "")
+        self.assertEqual(kwargs["line_items"][0]["price_data"]["currency"], "usd")
+
+    def test_paypal_amount_in_euros(self):
+        from . import paypal
+        self._on()
+        self.client.get(reverse("set_currency", args=["EUR"]))
+        order = Order.objects.create(user=self.user, full_name="E", address="a", city="c", postal_code="1", country="DE", phone="1",
+                                     payment_method="paypal", payment_status="pending", shipping_amount=Decimal("10"))
+        from .currency import apply_presentment, _display
+        cur = Currency.objects.get(code="EUR")
+        token = _display.set(cur)
+        try:
+            apply_presentment(order, "paypal")
+        finally:
+            _display.reset(token)
+        self.assertEqual(paypal._amount(order), {"currency_code": "EUR", "value": "9.00"})

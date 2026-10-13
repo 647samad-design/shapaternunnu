@@ -1,0 +1,40 @@
+{% extends "bees/manage/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Gift cards{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Gift cards</h1><p>{% if not enabled %}Gift card sales are <strong>off</strong> (Store settings &gt; Gift cards). {% elif not methods %}Turn on card or PayPal payments to sell gift cards. {% endif %}Redeemed cards become the customer's store credit.</p></div>
+    <div class="actions">{% if enabled and methods %}<a class="btn btn-ghost btn-sm" href="{% url 'gift_cards' %}" target="_blank" rel="noopener">Open shop page</a>{% endif %}</div></div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+    <div class="panel"><span class="muted small">Sold</span><strong style="display:block;font-size:1.4rem;">{{ totals.sold|money }}</strong></div>
+    <div class="panel"><span class="muted small">Not used yet (owed)</span><strong style="display:block;font-size:1.4rem;">{{ totals.outstanding|money }}</strong></div>
+    <div class="panel"><span class="muted small">Redeemed</span><strong style="display:block;font-size:1.4rem;">{{ totals.redeemed|money }}</strong></div>
+</div>
+<section class="panel">
+    <h2>Send a free gift card</h2>
+    <p class="muted small">For an apology, a prize or a loyal customer. It's emailed right away.</p>
+    <form method="post" class="gc-issue">{% csrf_token %}<input type="hidden" name="action" value="issue">
+        <div class="field"><label for="gi-a">Amount</label><input id="gi-a" name="amount" inputmode="decimal" required></div>
+        <div class="field"><label for="gi-e">Email</label><input id="gi-e" type="email" name="email" required></div>
+        <div class="field"><label for="gi-n">Name</label><input id="gi-n" name="name" maxlength="80"></div>
+        <div class="field"><label for="gi-m">Message</label><input id="gi-m" name="message" maxlength="300"></div>
+        <div class="field"><label for="gi-note">Note (staff only)</label><input id="gi-note" name="note" maxlength="200"></div>
+        <button class="btn btn-primary btn-sm" type="submit">Send</button>
+    </form>
+</section>
+<section class="panel" style="padding:8px 20px;">
+    <form method="get" class="toolbar" role="search" style="margin:12px 0;"><label for="gq" class="sr-only">Search</label><input class="input grow" id="gq" type="search" name="q" value="{{ q }}" placeholder="Code or email"></form>
+    <div class="table-scroll"><table class="table">
+        <thead><tr><th>Code</th><th class="num">Amount</th><th>From → to</th><th>Status</th><th>Date</th><th></th></tr></thead>
+        <tbody>
+        {% for c in cards %}
+        <tr><td data-no-translate><code>{{ c.code }}</code></td><td class="num">{{ c.amount|money }}</td>
+            <td class="small" data-no-translate>{% if c.payment_method == "staff" %}Store{% if c.issued_by %} ({{ c.issued_by.username }}){% endif %}{% else %}{{ c.purchaser_email }}{% endif %} → {{ c.recipient_email|default:c.purchaser_email }}{% if c.note %}<br><span class="muted">{{ c.note }}</span>{% endif %}</td>
+            <td>{% if c.status == "redeemed" %}<span class="pill ok">Redeemed</span>{% if c.redeemed_by %} <span class="small muted">{{ c.redeemed_by.username }}</span>{% endif %}{% elif c.status == "active" %}<span class="pill">Active</span>{% else %}<span class="pill bad">{{ c.get_status_display }}</span>{% endif %}</td>
+            <td class="small">{{ c.created_at|date:"M j, Y" }}{% if c.payment_method and c.payment_method != "staff" %} · {{ c.payment_method }}{% endif %}</td>
+            <td>{% if c.status == "active" %}<form method="post" style="display:flex;gap:4px;margin:0;">{% csrf_token %}<input type="hidden" name="id" value="{{ c.id }}"><button class="btn btn-ghost btn-sm" name="action" value="resend">Resend</button><button class="btn btn-ghost btn-sm" name="action" value="void" style="color:var(--sale);" onclick="return confirm('Cancel this gift card? It can no longer be used.');">Cancel</button></form>{% endif %}</td></tr>
+        {% empty %}<tr><td colspan="6" class="muted" style="text-align:center;padding:24px;">No gift cards yet.</td></tr>{% endfor %}
+        </tbody>
+    </table></div>
+</section>
+<style>.gc-issue { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; align-items: end; }</style>
+{% endblock %}

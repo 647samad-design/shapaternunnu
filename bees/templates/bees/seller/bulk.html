@@ -1,0 +1,7 @@
+{% extends "bees/seller/base.html" %}
+{% block page_title %}Import & export products{% endblock %}
+{% block seller %}
+<div class="adm-head"><div><a class="link small" href="{% url 'seller_products' %}">← Products</a><h1 style="margin-top:6px;">Import &amp; export</h1>
+    <p>Add or update many products at once with a spreadsheet.</p></div></div>
+{% include "bees/partials/bulk_body.html" with url_name="seller_bulk" %}
+{% endblock %}

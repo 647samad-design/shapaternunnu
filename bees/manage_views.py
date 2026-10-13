@@ -258,6 +258,14 @@ def order_detail(request, pk):
             else:
                 _log(request, f"Cancelled order #{order.id} from store admin")
                 messages.success(request, f"Order #{order.id} cancelled. Stock returned" + (" and payment refunded." if order.payment_status == "refunded" else "."))
+        elif action == "cod_refused":
+            from . import cod
+            if order.payment_method != "cod" or order.cod_collected_at or order.status == "delivered":
+                messages.error(request, "Only cash on delivery orders that weren't paid can be marked as refused.")
+            elif cod.mark_refused(order, user=request.user):
+                blocked = cod.blocked(order.contact_email, order.phone)
+                messages.success(request, f"Order #{order.id} marked as refused and cancelled. Stock returned."
+                                 + (" This customer can now only pay online." if blocked else ""))
         elif action == "item_status":
             from . import fulfilment
             item = get_object_or_404(order.items, pk=request.POST.get("item"))
@@ -461,6 +469,17 @@ def product_form(request, pk=None):
 
 @staff_required
 def sellers(request):
+    if request.method == "POST" and request.POST.get("action") == "pay_all":
+        from . import payouts as auto
+        sent, total, errors = auto.pay_all(user=request.user)
+        _log(request, f"Paid all sellers: {sent} payouts, {money(total)}")
+        if sent:
+            messages.success(request, f"Sent {sent} payout{'s' if sent != 1 else ''} ({money(total)}).")
+        elif not errors:
+            messages.info(request, "Nobody to pay right now: no seller with PayPal/Stripe payouts has an available balance above the minimum.")
+        for e in errors[:5]:
+            messages.error(request, e)
+        return redirect("manage_sellers")
     qs = SellerAccount.objects.select_related("user").annotate(product_count=Count("products")).order_by("-created_at")
     q = request.GET.get("q", "").strip()
     status = request.GET.get("status", "")
@@ -472,6 +491,7 @@ def sellers(request):
         qs = qs.filter(payouts__status="requested").distinct()
     return _render(request, "sellers.html", {
         "payout_requests": Payout.objects.filter(status="requested").count(),
+        "auto_sellers": SellerAccount.objects.filter(payout_method__in=["paypal", "stripe"]).count(),
         "pending_count": SellerAccount.objects.filter(status="pending").count(),
         "section": "sellers", "page_obj": _page(request, qs), "q": q, "status": status, "status_choices": SellerAccount.STATUS_CHOICES,
     })
@@ -568,6 +588,15 @@ def seller_detail(request, pk):
             ))
             _log(request, f"Recorded payout of {money(amount)} to seller #{seller.id}")
             messages.success(request, f"Recorded a payout of {money(amount)}.")
+        elif action == "auto_payout":
+            from . import payouts as auto
+            try:
+                payout = auto.send(seller, user=request.user, request_payout=seller.payouts.filter(status="requested").first())
+            except auto.PayoutError as exc:
+                messages.error(request, str(exc))
+            else:
+                _log(request, f"Sent automatic payout of {money(payout.amount)} to seller #{seller.id} ({payout.method})")
+                messages.success(request, f"{money(payout.amount)} {'sent' if payout.status == 'paid' else 'is on its way'} to {seller.display_name}.")
         elif action == "decline_payout":
             payout = seller.payouts.filter(status="requested").first()
             if payout:
@@ -590,6 +619,7 @@ def seller_detail(request, pk):
         "product_count": seller.products.count(),
         "payouts": seller.payouts.select_related("recorded_by")[:20],
         "payout_request": seller.payouts.filter(status="requested").first(),
+        "auto_ready": _auto_ready(seller),
         "balance": balance(seller), "method_choices": Payout.METHOD_CHOICES,
         "badge_rules": seller_badges.rules(),
         "paid_plans": SellerPlan.objects.filter(active=True, price__gt=0),
@@ -1213,6 +1243,8 @@ def keys(request):
                 changes[key] = None
                 continue
             value = request.POST.get(key, "").strip()
+            if key == "APPLE_PRIVATE_KEY":  # multi-line key stored on one line
+                value = "\\n".join(line.strip() for line in value.replace("\r", "").split("\n") if line.strip())
             if value:
                 changes[key] = value
         if request.POST.get("new_webhook_token"):
@@ -1240,10 +1272,12 @@ def keys(request):
         groups.append((title, hint, [{"key": key, "label": label, "secret": secret, "set": bool(current.get(key)),
                                       "shown": envfile.mask(current.get(key, ""), secret)} for key, label, secret, _p in rows]))
     paypal_webhook = request.build_absolute_uri(_reverse("paypal_webhook"))
+    social_redirects = {"google": request.build_absolute_uri(_reverse("social_callback", args=["google"])),
+                        "apple": request.build_absolute_uri(_reverse("social_callback", args=["apple"]))}
     token = current.get("SHIPPING_WEBHOOK_TOKEN", "")
     webhook = request.build_absolute_uri(_reverse("courier_webhook", args=[token])) if token else ""
     return _render(request, "keys.html", {
-        "section": "keys", "groups": groups, "webhook_url": webhook, "paypal_webhook": paypal_webhook, "env_exists": os.path.exists(envfile.path()),
+        "section": "keys", "groups": groups, "webhook_url": webhook, "paypal_webhook": paypal_webhook, "social_redirects": social_redirects, "env_exists": os.path.exists(envfile.path()),
         "locked": [(k, bool(current.get(k))) for k in envfile.LOCKED],
     })
 
@@ -1374,10 +1408,17 @@ class SiteSettingsForm(forms.ModelForm):
          ["auto_cancel_days", "auto_deliver_days", "claim_reply_days"]),
                 ("Contact & social", "Shown in the footer, emails and help page.",
          ["support_email", "support_phone", "company_address", "facebook_url", "instagram_url", "twitter_url", "youtube_url"]),
+        ("Seller payouts", "Sellers choose PayPal or Stripe in Seller Center > Earnings. Only money past the return window is sent. Bank-transfer sellers are still paid by hand.",
+         ["auto_payouts", "min_auto_payout"]),
+        ("Gift cards", "Sell digital gift cards on /gift-cards/. Manage and send free ones under Gift cards.", ["gift_cards_enabled"]),
         ("Referral program", "Customers invite friends with their own link. Discount codes are created automatically.",
          ["referral_enabled", "referral_friend_percent", "referral_reward_percent"]),
-        ("Security", "Protects the admin even if a staff password is stolen.", ["require_staff_2fa"]),
-        ("Language & currency", "Show a menu where shoppers pick their language (English, Arabic, Spanish, French, Urdu) and currency. Add currencies under Store settings > Currencies.", ["show_language_menu"]),
+        ("Cash on delivery", "Stops fake cash orders. Blocked customers and refused parcels: Manage > Cash on delivery protection.",
+         ["cod_phone_check", "cod_max_order", "cod_refusal_limit"]),
+        ("Text messages (SMS)", "Sent to mobile numbers through Twilio (add its keys under Keys & passwords). Customers can turn them off on their Privacy page.",
+         ["sms_customer_updates", "sms_seller_alerts"]),
+        ("Security", "Protects the admin and sellers' earnings even if a password is stolen.", ["require_staff_2fa", "require_seller_2fa"]),
+        ("Language & currency", "Show a menu where shoppers pick their language (English, Arabic, Spanish, French, Urdu) and currency. Add currencies under Store settings > Currencies.", ["show_language_menu", "charge_local_currency"]),
     ]
 
     def groups(self):
@@ -1390,7 +1431,8 @@ class SiteSettingsForm(forms.ModelForm):
                 self.fields[name].required = False  # left out = keep the current value
 
     OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent",
-                "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams", "duties_policy")
+                "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams", "duties_policy",
+                "cod_max_order", "cod_refusal_limit", "min_auto_payout", "auto_payouts")
 
     def _clean_id(self, name, pattern, example):
         import re as _re
@@ -1423,6 +1465,18 @@ class SiteSettingsForm(forms.ModelForm):
     def _keep(self, name):
         value = self.cleaned_data.get(name)
         return getattr(self.instance, name) if value is None else value
+
+    def clean_min_auto_payout(self):
+        return self._keep("min_auto_payout")
+
+    def clean_auto_payouts(self):
+        return self.cleaned_data.get("auto_payouts") or self.instance.auto_payouts or "off"
+
+    def clean_cod_max_order(self):
+        return self._keep("cod_max_order")
+
+    def clean_cod_refusal_limit(self):
+        return self._keep("cod_refusal_limit")
 
     def clean_auto_cancel_days(self):
         return self._keep("auto_cancel_days")
@@ -1937,6 +1991,19 @@ def operations_checks(dj=None):
     from .couriers import status_line
     c_state, c_text = status_line()
     add("Shipping", "Courier service", c_state != "missing", c_text, level="ok" if c_state != "missing" else "warn")
+    from . import sms, social
+    site = SiteSettings.load()
+    if sms.is_configured():
+        add("Messages", "Text messages (SMS)", True, "Twilio is connected: " + ", ".join(
+            [w for w, on in (("order updates to customers", site.sms_customer_updates), ("new-order alerts to sellers", site.sms_seller_alerts),
+                             ("cash order codes", site.cod_phone_check)) if on] or ["all SMS options are off in Store settings"]) + ".", level="ok")
+    else:
+        add("Messages", "Text messages (SMS)", False, "Off: add the Twilio keys under Keys & passwords to text customers and sellers."
+            + (" Cash order phone check is on but can't work until then - the email link is used instead." if site.cod_phone_check else ""),
+            level="warn" if site.cod_phone_check else "ok")
+    providers = [p.title() for p in social.providers()]
+    add("Security", "Sign in with Google / Apple", True,
+        ("On: " + " and ".join(providers) + ".") if providers else "Off: add Google or Apple keys under Keys & passwords for one-tap sign in.", level="ok")
     add("Languages & currencies", "AI assistant", True,
         "On: listing writer, buying guides, shopper Q&A and one-click translation use Claude." if getattr(dj, "AI_API_KEY", "")
         else "Off: add ANTHROPIC_API_KEY to .env for AI buying guides, shopper Q&A and one-click translation (built-in writer still works).", level="ok")
@@ -1955,3 +2022,126 @@ def quick_health():
         data = {"bad": len(problems), "warn": sum(1 for c in checks if c["level"] == "warn"), "names": [p["name"] for p in problems][:3]}
         cache.set("manage:health", data, 600)
     return data
+
+
+# ---------------------------------------------------------------------------
+# Cash on delivery protection (block list)
+# ---------------------------------------------------------------------------
+
+def _auto_ready(seller):
+    from . import payouts as auto
+    return auto.method_ready(seller)
+
+
+@staff_required
+def cod_protection(request):
+    from . import cod
+    from .models import CodBlock
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "add":
+            kind = request.POST.get("kind")
+            raw = request.POST.get("value", "").strip()
+            value = cod.email_key(raw) if kind == "email" else cod.phone_key(raw)
+            if kind not in ("email", "phone") or not value or (kind == "email" and "@" not in value):
+                messages.error(request, "Enter a valid email address or phone number.")
+            else:
+                CodBlock.objects.get_or_create(kind=kind, value=value, defaults={
+                    "reason": request.POST.get("reason", "").strip()[:200] or "Added by staff", "created_by": request.user})
+                _log(request, f"COD block added: {kind} {value[:4]}…")
+                messages.success(request, "Added. They can still buy, but only by paying online.")
+        elif action == "delete":
+            block = get_object_or_404(CodBlock, pk=request.POST.get("id"))
+            block.delete()
+            _log(request, f"COD block removed: {block.kind}")
+            messages.success(request, "Removed. Cash on delivery is available to them again.")
+        return redirect("manage_cod")
+    site = SiteSettings.load()
+    from . import sms
+    refused = Order.objects.filter(cod_refused=True).order_by("-created_at")[:20]
+    since = timezone.now() - timedelta(days=90)
+    cod_orders = Order.objects.filter(payment_method="cod", created_at__gte=since)
+    stats = {
+        "orders": cod_orders.count(),
+        "refused": cod_orders.filter(cod_refused=True).count(),
+        "unconfirmed": cod_orders.filter(cod_confirmed=False, status="cancelled").count(),
+    }
+    stats["rate"] = round(stats["refused"] * 100 / stats["orders"], 1) if stats["orders"] else 0
+    return _render(request, "cod.html", {
+        "section": "settings", "blocks": CodBlock.objects.select_related("created_by")[:300], "refused": refused,
+        "site": site, "sms_ready": sms.is_configured(), "stats": stats,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Business reports
+# ---------------------------------------------------------------------------
+
+REPORT_RANGES = [("7", "7 days"), ("30", "30 days"), ("90", "90 days"), ("365", "12 months")]
+
+
+def _report_dates(request):
+    from datetime import datetime
+    today = timezone.localdate()
+    try:
+        start = datetime.strptime(request.GET.get("from", ""), "%Y-%m-%d").date()
+        end = datetime.strptime(request.GET.get("to", ""), "%Y-%m-%d").date()
+        if start > end or (end - start).days > 731:
+            raise ValueError
+        return start, min(end, today), "custom"
+    except ValueError:
+        days = request.GET.get("range", "30")
+        days = days if days in dict(REPORT_RANGES) else "30"
+        return today - timedelta(days=int(days) - 1), today, days
+
+
+@staff_required
+def reports(request):
+    from . import analytics
+    start, end, chosen = _report_dates(request)
+    data = analytics.report(start, end)
+    export = request.GET.get("export")
+    if export:
+        return _report_csv(export, data, start, end)
+    return _render(request, "reports.html", {"section": "reports", "r": data, "ranges": REPORT_RANGES, "chosen": chosen,
+                                             "query": request.GET.urlencode()})
+
+
+def _report_csv(kind, data, start, end):
+    from .bulk import _safe_cell
+    resp = HttpResponse(content_type="text/csv; charset=utf-8")
+    resp["Content-Disposition"] = f'attachment; filename="report-{kind}-{start}-{end}.csv"'
+    resp.write("﻿")
+    w = csv.writer(resp)
+    if kind == "orders":
+        w.writerow(["order", "date", "status", "payment", "payment method", "country", "items", "subtotal", "discount", "shipping", "tax", "total", "currency"])
+        qs = Order.objects.filter(created_at__date__gte=start, created_at__date__lte=end).prefetch_related("items").order_by("created_at")
+        for o in qs.iterator(chunk_size=500):
+            w.writerow([o.id, timezone.localtime(o.created_at).strftime("%Y-%m-%d %H:%M"), o.status, o.payment_status, o.payment_method, o.country,
+                        sum(i.quantity for i in o.items.all()), o.subtotal, o.discount_amount, o.shipping_amount, o.tax_amount, o.grand_total, o.currency.upper()])
+    elif kind == "products":
+        w.writerow(["product", "units", "revenue"])
+        for r in data["top_products"]:
+            w.writerow([_safe_cell(r["product_name"]), r["units"], r["revenue"]])
+    elif kind == "sellers":
+        w.writerow(["seller", "units", "revenue", "commission"])
+        for r in data["by_seller"]:
+            w.writerow([_safe_cell(r["seller_account__business_name"] or "Store"), r["units"], r["revenue"], r["commission"]])
+    elif kind == "searches":
+        w.writerow(["search", "times", "no results"])
+        zero = {r["key"]: r["n"] for r in data["zero_searches"]}
+        for r in data["searches"]:
+            w.writerow([_safe_cell(r["key"]), r["n"], zero.get(r["key"], 0)])
+    else:
+        w.writerow(["metric", "value"])
+        for key in ("revenue", "orders", "aov", "items_sold", "customers", "repeat_rate", "refund_rate", "return_rate", "cancel_rate", "commission", "conversion"):
+            w.writerow([key, data[key]])
+        w.writerow([])
+        w.writerow(["date", "orders", "revenue"])
+        for s in data["series"]:
+            w.writerow([s["date"], s["orders"], s["revenue"]])
+        w.writerow([])
+        w.writerow(["country", "orders", "revenue"])
+        for r in data["by_country"]:
+            w.writerow([r["name"], r["orders"], r["revenue"]])
+    return resp

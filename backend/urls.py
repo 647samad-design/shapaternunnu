@@ -14,6 +14,8 @@ from bees import messaging as msgs
 from bees import account_views
 from bees import manage_views as mv
 from bees import seller_views as sv
+from bees import bulk_views as bv
+from bees import giftcards as gc
 from bees.sitemaps import ProductSitemap, CategorySitemap, SellerSitemap, StaticViewSitemap
 from bees.ratelimit import ratelimit
 
@@ -39,6 +41,8 @@ urlpatterns = [
     path('category/<str:category>/', views.category_products, name='category_products'),
     path('signup/', views.signup_view, name='signup'),
     path('login/', views.login_view, name='login'),
+    path('login/with/<str:provider>/', account_views.social_start, name='social_start'),
+    path('login/callback/<str:provider>/', account_views.social_callback, name='social_callback'),
     path('logout/', views.logout_view, name='logout'),
     path('demo/login/<str:role>/', views.demo_login, name='demo_login'),
 
@@ -71,6 +75,7 @@ urlpatterns = [
     path('order/<int:order_id>/track/<str:token>/', views.order_track, name='order_track'),
     path('order/<int:order_id>/confirm/<str:token>/', views.confirm_cod, name='confirm_cod'),
     path('order/<int:order_id>/confirm-again/', views.resend_cod_confirmation, name='resend_cod_confirmation'),
+    path('order/<int:order_id>/confirm-code/', views.cod_verify, name='cod_verify'),
     path('track/', views.track_lookup, name='track_lookup'),
     path('track/<str:number>/', views.track_shipment, name='track_shipment'),
     path('order/<int:order_id>/buy-again/', views.buy_again, name='buy_again'),
@@ -160,11 +165,15 @@ urlpatterns = [
     path('shipping/webhook/<str:token>/', cv.webhook, name='courier_webhook'),
     path('seller/orders/<int:order_id>/packing-slip/', sv.packing_slip, name='seller_packing_slip'),
     path('seller/products/', sv.products, name='seller_products'),
+    path('seller/products/bulk/', bv.seller_bulk, name='seller_bulk'),
     path('seller/products/<int:pk>/quick-update/', sv.quick_update, name='seller_quick_update'),
     path('seller/products/<int:pk>/duplicate/', sv.duplicate_product, name='seller_duplicate_product'),
     path('seller/earnings/', sv.earnings, name='seller_earnings'),
     path('seller/earnings/statement/', sv.monthly_statement, name='seller_statement'),
     path('seller/payouts/request/', sv.request_payout, name='seller_request_payout'),
+    path('seller/payouts/method/', sv.payout_settings, name='seller_payout_settings'),
+    path('seller/payouts/stripe/', sv.stripe_connect, name='seller_stripe_connect'),
+    path('seller/payouts/stripe/done/', sv.stripe_return, name='seller_stripe_return'),
     path('seller/payouts/<int:pk>/cancel/', sv.cancel_payout_request, name='seller_cancel_payout'),
     path('seller/returns/', sv.returns, name='seller_returns'),
     path('seller/problems/', sv.claims, name='seller_claims'),
@@ -175,6 +184,14 @@ urlpatterns = [
     path('manage/keys/', mv.keys, name='manage_keys'),
     path('manage/taxes/', mv.tax_rates, name='manage_taxes'),
     path('manage/problems/<int:pk>/', mv.claim_detail, name='manage_claim'),
+    path('manage/cash-on-delivery/', mv.cod_protection, name='manage_cod'),
+    path('manage/gift-cards/', mv.staff_required(gc.admin_page), name='manage_gift_cards'),
+    path('manage/reports/', mv.reports, name='manage_reports'),
+    path('gift-cards/', gc.buy, name='gift_cards'),
+    path('gift-cards/<int:card_id>/done/', gc.done, name='gift_card_done'),
+    path('gift-cards/<int:card_id>/paypal/', gc.paypal_return, name='gift_card_paypal_return'),
+    path('account/gift-cards/', gc.mine, name='gift_cards_mine'),
+    path('account/gift-cards/<int:card_id>/resend/', gc.resend, name='gift_card_resend'),
     path('seller/reviews/', sv.reviews, name='seller_reviews'),
     path('seller/team/', sv.team, name='seller_team'),
     path('seller/holiday/', sv.vacation, name='seller_vacation'),
@@ -202,6 +219,7 @@ urlpatterns = [
     path('manage/orders/<int:pk>/', mv.order_detail, name='manage_order'),
     path('manage/products/', mv.products, name='manage_products'),
     path('manage/products/bulk/', mv.products_bulk, name='manage_products_bulk'),
+    path('manage/products/import/', bv.manage_bulk, name='manage_bulk'),
     path('manage/products/new/', mv.product_form, name='manage_product_new'),
     path('manage/products/<int:pk>/', mv.product_form, name='manage_product_edit'),
     path('manage/sellers/', mv.sellers, name='manage_sellers'),

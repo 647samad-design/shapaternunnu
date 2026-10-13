@@ -96,7 +96,15 @@ def create_checkout_session(request, order):
     currency = settings.STORE_CURRENCY.lower()
 
     line_items = []
-    for item in order.items.all():
+    if order.charge_currency:
+        # Charged in the shopper's currency: one line with the converted total.
+        from .models import SiteSettings
+        line_items.append({"quantity": 1, "price_data": {
+            "currency": order.pay_currency, "unit_amount": order.pay_cents,
+            "product_data": {"name": f"{SiteSettings.load().site_name} order #{order.id}",
+                             "description": ", ".join(f"{i.quantity} x {i.product_name}" for i in order.items.all())[:300] or None},
+        }})
+    for item in ([] if order.charge_currency else order.items.all()):
         line_items.append({
             "quantity": item.quantity,
             "price_data": {
@@ -105,7 +113,7 @@ def create_checkout_session(request, order):
                 "product_data": {"name": item.product_name[:250]},
             },
         })
-    if order.shipping_amount:
+    if order.shipping_amount and not order.charge_currency:
         line_items.append({
             "quantity": 1,
             "price_data": {
@@ -114,7 +122,7 @@ def create_checkout_session(request, order):
                 "product_data": {"name": "Shipping"},
             },
         })
-    if order.tax_amount:
+    if order.tax_amount and not order.charge_currency:
         line_items.append({
             "quantity": 1,
             "price_data": {
@@ -518,7 +526,8 @@ def refund_order(order):
     order.refunded_at = timezone.now()
     Order.objects.filter(pk=order.pk).update(refund_id=order.refund_id, refunded_at=order.refunded_at)
     to = f" to {order.card_label}" if order.card_label else " to the original card"
-    OrderEvent.objects.create(order=order, kind="refunded", text=f"Refund of {order.total} {order.currency.upper()} sent{to}")
+    paid = f"{order.pay_amount} {order.pay_currency.upper()}"
+    OrderEvent.objects.create(order=order, kind="refunded", text=f"Refund of {paid} sent{to}")
     return True
 
 
@@ -552,7 +561,7 @@ def refund_amount(order, amount, key):
     try:
         stripe.Refund.create(
             payment_intent=order.stripe_payment_intent,
-            amount=to_cents(amount, order.currency),
+            amount=min(to_cents(order.to_charge_currency(amount), order.pay_currency), order.pay_cents),
             idempotency_key=f"refund-{key}",
         )
     except Exception:
@@ -583,10 +592,10 @@ def mark_order_paid(order_id, session):
             return order, False
         if session.get("payment_status") != "paid":
             return order, False
-        if session.get("amount_total") != order.total_cents or (session.get("currency") or "").lower() != order.currency.lower():
+        if session.get("amount_total") != order.pay_cents or (session.get("currency") or "").lower() != order.pay_currency:
             logger.error(
                 "Amount mismatch for order %s: Stripe %s %s, expected %s %s",
-                order.id, session.get("amount_total"), session.get("currency"), order.total_cents, order.currency,
+                order.id, session.get("amount_total"), session.get("currency"), order.pay_cents, order.pay_currency,
             )
             return order, False
         if order.status == "cancelled":
@@ -645,7 +654,9 @@ def release_unpaid_order(order_id, reason="failed"):
             order.payment_method = "cod"
             order.payment_status = "not_applicable"
             order.stripe_session_id = ""
-            order.save(update_fields=["cod_fallback", "payment_method", "payment_status", "stripe_session_id"])
+            order.charge_currency, order.charge_rate, order.charge_amount = "", None, None
+            order.save(update_fields=["cod_fallback", "payment_method", "payment_status", "stripe_session_id",
+                                      "charge_currency", "charge_rate", "charge_amount"])
             return order
         order.payment_status = reason
         order.status = "cancelled"

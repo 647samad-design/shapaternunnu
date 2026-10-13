@@ -33,6 +33,21 @@ GROUPS = [
         ("PAYPAL_MODE", "Mode: sandbox or live", False, r"^(sandbox|live)$"),
         ("PAYPAL_WEBHOOK_ID", "Webhook ID", False, r"^[A-Z0-9]{10,}$"),
     ]),
+    ("Sign in with Google", "console.cloud.google.com > APIs & Services > Credentials > Create OAuth client ID (Web application). Add the redirect address shown below.", [
+        ("GOOGLE_CLIENT_ID", "Client ID", False, r"^[0-9A-Za-z._-]+\.apps\.googleusercontent\.com$"),
+        ("GOOGLE_CLIENT_SECRET", "Client secret", True, r"^\S{10,}$"),
+    ]),
+    ("Sign in with Apple", "developer.apple.com > Certificates, IDs & Profiles: create a Services ID (with the redirect address below) and a Sign in with Apple key (.p8). Needs an Apple Developer account.", [
+        ("APPLE_SERVICES_ID", "Services ID (e.g. com.yourstore.web)", False, r"^[A-Za-z0-9.-]+$"),
+        ("APPLE_TEAM_ID", "Team ID", False, r"^[A-Z0-9]{10}$"),
+        ("APPLE_KEY_ID", "Key ID", False, r"^[A-Z0-9]{10}$"),
+        ("APPLE_PRIVATE_KEY", "Private key (.p8 file contents)", True, r"-----BEGIN PRIVATE KEY-----"),
+    ]),
+    ("Text messages (SMS) - Twilio", "console.twilio.com: Account SID and Auth Token, plus a Twilio phone number (+1...) or a Messaging Service SID (MG...) to send from.", [
+        ("TWILIO_ACCOUNT_SID", "Account SID", False, r"^AC[0-9a-fA-F]{32}$"),
+        ("TWILIO_AUTH_TOKEN", "Auth token", True, r"^[0-9a-fA-F]{32}$"),
+        ("TWILIO_FROM", "Send from (number or MG... service SID)", False, r"^(\+[1-9]\d{6,14}|MG[0-9a-fA-F]{32}|[A-Za-z0-9 ]{3,11})$"),
+    ]),
     ("Email", "Gmail: your address + an App Password (Google Account > Security > App passwords). Any other provider: also set the server and port.", [
         ("EMAIL_HOST_USER", "Email address / user name", False, r"^\S+$"),
         ("EMAIL_HOST_PASSWORD", "Email password / App Password", True, None),

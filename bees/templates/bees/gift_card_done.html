@@ -1,0 +1,18 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Gift card — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:640px;">
+    <div class="panel">
+        {% if card.status == "active" or card.status == "redeemed" %}
+        <h1>Gift card sent 🎁</h1>
+        <p class="muted" style="margin-top:8px;">{{ card.amount|money }} gift card {% if card.recipient_email %}emailed to <strong data-no-translate>{{ card.recipient_email }}</strong>{% else %}emailed to you at <strong data-no-translate>{{ card.purchaser_email }}</strong>{% endif %}. A receipt is on its way to you.</p>
+        {% else %}
+        <h1>Payment processing</h1>
+        <p class="muted" style="margin-top:8px;">As soon as your payment is confirmed we'll email the gift card - usually within a minute. You can close this page.</p>
+        {% endif %}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;"><a class="btn btn-primary" href="{% url 'home' %}">Continue shopping</a><a class="btn btn-secondary" href="{% url 'gift_cards' %}">Send another</a></div>
+    </div>
+</div>
+{% endblock %}

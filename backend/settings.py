@@ -115,6 +115,7 @@ MIDDLEWARE = [
     'bees.middleware.DemoGuardMiddleware',
     'bees.currency.DisplayCurrencyMiddleware',
     'bees.middleware.ReferralCaptureMiddleware',
+    'bees.analytics.VisitMiddleware',
     'bees.i18n.PageTranslationMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'bees.middleware.NoCacheMiddleware',

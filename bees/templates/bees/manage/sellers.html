@@ -2,7 +2,8 @@
 {% load bees_extras %}
 {% block page_title %}Sellers{% endblock %}
 {% block admin %}
-<div class="adm-head"><div><h1>Sellers</h1><p>Approve applications, set commission and record payouts.</p></div></div>
+<div class="adm-head"><div><h1>Sellers</h1><p>Approve applications, set commission and record payouts.</p></div>
+    {% if auto_sellers %}<div class="actions"><form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="action" value="pay_all"><button class="btn btn-secondary btn-sm" type="submit" onclick="return confirm('Send every PayPal/Stripe seller their available balance now?');">Pay available balances ({{ auto_sellers }})</button></form></div>{% endif %}</div>
 <div class="tabs" role="group" aria-label="Filter by status">
     <a href="?" class="{% if not status %}on{% endif %}">All</a>
     {% for v, l in status_choices %}<a href="?status={{ v }}" class="{% if status == v %}on{% endif %}">{% if v == 'pending' %}Applications{% if pending_count %} ({{ pending_count }}){% endif %}{% else %}{{ l }}{% endif %}</a>{% endfor %}

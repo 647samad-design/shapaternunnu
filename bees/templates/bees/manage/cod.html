@@ -1,0 +1,51 @@
+{% extends "bees/manage/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Cash on delivery protection{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><a class="link small" href="{% url 'manage_settings' %}">← Store settings</a><h1 style="margin-top:6px;">Cash on delivery protection</h1>
+    <p>Stop fake cash orders and repeat refusers. People on this list can still shop - they just have to pay online.</p></div></div>
+<div class="stat-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
+    <div class="panel"><span class="muted small">Cash orders (90 days)</span><strong style="display:block;font-size:1.5rem;">{{ stats.orders }}</strong></div>
+    <div class="panel"><span class="muted small">Refused on delivery</span><strong style="display:block;font-size:1.5rem;">{{ stats.refused }} <span class="muted small">({{ stats.rate }}%)</span></strong></div>
+    <div class="panel"><span class="muted small">Never confirmed</span><strong style="display:block;font-size:1.5rem;">{{ stats.unconfirmed }}</strong></div>
+</div>
+<section class="panel">
+    <h2>Rules</h2>
+    <ul class="small" style="margin:0;padding-inline-start:18px;line-height:1.8;">
+        <li>Phone code check: {% if site.cod_phone_check and sms_ready %}<span class="pill ok">On</span> customers confirm cash orders with a code sent by SMS.{% elif site.cod_phone_check %}<span class="pill warn">Waiting for Twilio keys</span> add them in <a class="link" href="{% url 'manage_keys' %}">Keys &amp; passwords</a>; until then the email link is used.{% else %}<span class="pill">Off</span> (cash orders are confirmed by an email link for new accounts).{% endif %}</li>
+        <li>Largest cash order: {% if site.cod_max_order %}<strong>{{ site.cod_max_order|money }}</strong>{% else %}no limit{% endif %}.</li>
+        <li>Automatic block after <strong>{{ site.cod_refusal_limit }}</strong> refused parcel{{ site.cod_refusal_limit|pluralize }}{% if not site.cod_refusal_limit %} (off){% endif %}.</li>
+    </ul>
+    <p class="muted small" style="margin:8px 0 0;">Change these in <a class="link" href="{% url 'manage_settings' %}#cash-on-delivery">Store settings &gt; Cash on delivery</a>. Mark a refused parcel from the order page ("Customer refused delivery"); with a courier connected, returned cash parcels are marked automatically.</p>
+</section>
+<section class="panel">
+    <h2>Add to the list</h2>
+    <form method="post" class="cod-form">{% csrf_token %}<input type="hidden" name="action" value="add">
+        <div class="field"><label for="cb-k">Type</label><select id="cb-k" name="kind"><option value="phone">Phone number</option><option value="email">Email</option></select></div>
+        <div class="field"><label for="cb-v">Phone or email</label><input id="cb-v" name="value" required maxlength="254"></div>
+        <div class="field"><label for="cb-r">Reason (only staff see it)</label><input id="cb-r" name="reason" maxlength="200"></div>
+        <button class="btn btn-primary btn-sm" type="submit">Add</button>
+    </form>
+</section>
+<section class="panel" style="padding:8px 20px;">
+    <div class="table-scroll"><table class="table">
+        <thead><tr><th>Type</th><th>Value</th><th>Reason</th><th>Added</th><th></th></tr></thead>
+        <tbody>
+        {% for b in blocks %}
+        <tr><td>{{ b.get_kind_display }}</td><td data-no-translate>{% if b.kind == "phone" %}…{% endif %}{{ b.value }}</td><td>{{ b.reason }}{% if b.automatic %} <span class="pill">Automatic</span>{% endif %}</td>
+            <td class="small">{{ b.created_at|date:"M j, Y" }}{% if b.created_by %} · {{ b.created_by.username }}{% endif %}</td>
+            <td><form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="id" value="{{ b.id }}"><button class="btn btn-ghost btn-sm" name="action" value="delete" style="color:var(--sale);">Remove</button></form></td></tr>
+        {% empty %}<tr><td colspan="5" class="muted" style="text-align:center;padding:24px;">Nobody is blocked.</td></tr>{% endfor %}
+        </tbody>
+    </table></div>
+</section>
+{% if refused %}
+<section class="panel" style="padding:8px 20px;">
+    <h2 style="margin-top:12px;">Recently refused</h2>
+    <div class="table-scroll"><table class="table"><thead><tr><th>Order</th><th>Customer</th><th>Phone</th><th class="num">Total</th></tr></thead><tbody>
+    {% for o in refused %}<tr><td><a class="link" href="{% url 'manage_order' o.id %}">#{{ o.id }}</a></td><td>{{ o.full_name }}<br><span class="muted small">{{ o.contact_email }}</span></td><td data-no-translate>{{ o.phone }}</td><td class="num">{{ o.total|money }}</td></tr>{% endfor %}
+    </tbody></table></div>
+</section>
+{% endif %}
+<style>.cod-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; align-items: end; }</style>
+{% endblock %}

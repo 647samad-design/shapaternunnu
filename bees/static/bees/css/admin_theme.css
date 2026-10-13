@@ -22,8 +22,8 @@ html:not([data-theme="dark"]) {
     --lm-line: #DDE2E6;
     --lm-link: #0E3B43;
     --lm-sale: #B42318;
-    --lm-ok: #1E7B4F;
-    --lm-warn: #9A5B00;
+    --lm-ok: #176B42;
+    --lm-warn: #855000;
     --lm-shadow: 0 1px 2px rgba(20, 26, 31, .04), 0 4px 16px rgba(20, 26, 31, .04);
 
     /* Django admin variables, mapped onto the tokens above */
