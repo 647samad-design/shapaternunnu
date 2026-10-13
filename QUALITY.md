@@ -23,3 +23,29 @@ Production setup (gunicorn, 3 workers, DEBUG off, SQLite) on a small 2-CPU machi
 - About 75 pages per second is roughly 6 million page views a day. Real visitors pause between pages, so this handles a few hundred people browsing at once.
 - Server time per page with no load: home 19 ms, product 32 ms, search 16 ms, cart 5 ms. Product pages went from 28 database queries to 14 (ratings are now loaded in one query).
 - For more traffic: add workers or CPU, move to Postgres (see DEPLOY.md) and put the CDN in front for images and static files.
+
+## Senior code audit (October 2026)
+Reviewed with Django's deploy checks, the Bandit security scanner, a manual read of the risky areas (payments, refunds, payouts, sign-in, uploads, outgoing requests, permissions) and profiling.
+
+| Area | Problem found | Fix |
+|---|---|---|
+| Reliability | Without Redis the cache lived inside each web worker, so Google/Apple sign-in, 2-step codes, bulk-import previews, rate limits and settings changes could randomly "expire" or lag when the next request hit another worker | Shared file cache for all workers (Redis still recommended for several servers); settings kept 5 s in memory per worker |
+| Security | Push-notification addresses could point at internal servers (SSRF) | Only real browser push services are accepted |
+| Security | Opening the cash-order email link confirmed the order - email virus scanners open links by themselves, which skipped the fake-order check | The link shows a button; only the customer's click confirms |
+| Security | Changing the account email didn't need the password (stolen session -> account takeover) | Current password required; old address is still alerted |
+| Security | No Content-Security-Policy | CSP (no plugins, no framing, no foreign scripts except the analytics you turn on), Permissions-Policy |
+| Security | Coupon codes, reviews and messages had no rate limits | Limits added (coupon guessing, review spam, message spam) |
+| Security | Rate limits could treat every visitor as one when the host's proxy hides real addresses | System check warns and tells you to set NUM_PROXIES=1 |
+| Money | A script without cookies could click a competitor's ad again and again | One paid click per campaign per address per day, max 20 paid clicks per address per day |
+| Money | Unpaid card/PayPal orders held stock until the daily task | Released every 15 minutes |
+| Legal | Seller sign-up had no terms acceptance, duplicate store names were allowed, commission text was hard-coded | Store name unique, country from list, terms accepted and recorded with time; real commission shown |
+| Legal | Terms said "14 days" and "Stripe" regardless of settings, no seller/gift card/sponsored terms; privacy page missed SMS, sign-in and statistics | Pages now follow the store settings and cover every feature (have a lawyer review them for your country) |
+| Legal | No way to report illegal/fake listings (marketplace laws such as the EU DSA expect one) | "Report this listing" + admin queue; reporters and sellers are told the decision |
+| Data | Checkout accepted any two letters as the country and empty phone numbers | Country must be from the list; phone must be callable |
+| Data | Sale start/end times were always in UTC | Store time zone setting (TIME_ZONE) shown next to the fields |
+| Speed | Every page view wrote statistics and ad impressions to the database | Counted in the cache and written every few minutes |
+| Speed | Sponsored products checked budgets and earnings on every page | Eligible ads cached for a minute (clicks still re-check exactly) |
+| Speed | Reports loaded every order object; My orders loaded all orders at once | Reports use light rows; My orders has pages |
+| Database | Missing indexes for email lookups and cash-order checks | Indexes added |
+| Upkeep | Old notifications and abandoned gift card checkouts kept growing | Cleaned up daily |
+| Monitoring | No health URL for uptime monitors | /health/ returns 200 when the site and database answer |

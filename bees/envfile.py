@@ -53,6 +53,9 @@ GROUPS = [
         ("VAPID_PRIVATE_KEY", "Private key", True, r"^[A-Za-z0-9_-]{40,45}$"),
         ("VAPID_EMAIL", "Contact email for push services", False, r"^\S+@\S+$"),
     ]),
+    ("Store time zone", "Used for sale start/end times, daily reports and payout days. Use a name like Asia/Karachi, Asia/Dubai, Europe/London or America/New_York.", [
+        ("TIME_ZONE", "Time zone", False, r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$|^UTC$"),
+    ]),
     ("Email", "Gmail: your address + an App Password (Google Account > Security > App passwords). Any other provider: also set the server and port.", [
         ("EMAIL_HOST_USER", "Email address / user name", False, r"^\S+$"),
         ("EMAIL_HOST_PASSWORD", "Email password / App Password", True, None),

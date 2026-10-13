@@ -757,3 +757,30 @@ ENTRIES.update({
     "Couldn't turn notifications on. Check your browser settings.": ('نوٹیفکیشنز آن نہیں ہو سکیں۔ براؤزر سیٹنگز چیک کریں۔', 'Notifications on nahi ho sakin. Browser settings check karein.', 'تعذّر تفعيل الإشعارات. تحقّق من إعدادات المتصفح.', 'No se pudieron activar. Revisa los ajustes del navegador.', 'Impossible d’activer les notifications. Vérifiez les réglages du navigateur.'),
     'Print return label': ('واپسی کا لیبل پرنٹ کریں', 'Wapsi ka label print karein', 'اطبع ملصق الإرجاع', 'Imprimir etiqueta de devolución', 'Imprimer l’étiquette de retour'),
 })
+
+# --- Audit: listing reports, seller signup, checks ---
+ENTRIES.update({
+    'Report this listing': ('اس لسٹنگ کی رپورٹ کریں', 'Is listing ki report karein', 'الإبلاغ عن هذا المنتج', 'Denunciar este anuncio', 'Signaler cette annonce'),
+    "What's wrong?": ('کیا مسئلہ ہے؟', 'Kya masla hai?', 'ما المشكلة؟', '¿Qué ocurre?', 'Quel est le problème ?'),
+    'Fake or counterfeit': ('جعلی یا نقلی', 'Jaali ya naqli', 'مزيف أو مقلد', 'Falso o falsificado', 'Faux ou contrefaçon'),
+    'Illegal or banned item': ('غیر قانونی یا ممنوعہ چیز', 'Ghair qanooni ya mamnooa cheez', 'سلعة غير قانونية أو محظورة', 'Artículo ilegal o prohibido', 'Article illégal ou interdit'),
+    'Unsafe product': ('غیر محفوظ پروڈکٹ', 'Ghair mehfooz product', 'منتج غير آمن', 'Producto peligroso', 'Produit dangereux'),
+    'Wrong or misleading information': ('غلط یا گمراہ کن معلومات', 'Ghalat ya gumrah kun maloomat', 'معلومات خاطئة أو مضللة', 'Información incorrecta o engañosa', 'Informations fausses ou trompeuses'),
+    'Uses my brand or copyright': ('میرا برانڈ یا کاپی رائٹ استعمال کرتا ہے', 'Mera brand ya copyright istemal karta hai', 'يستخدم علامتي أو حقوقي', 'Usa mi marca o mis derechos de autor', 'Utilise ma marque ou mes droits'),
+    'Offensive content': ('نامناسب مواد', 'Na-munasib mawad', 'محتوى مسيء', 'Contenido ofensivo', 'Contenu offensant'),
+    'Something else': ('کچھ اور', 'Kuch aur', 'شيء آخر', 'Otra cosa', 'Autre chose'),
+    'Details (optional)': ('تفصیل (اختیاری)', 'Tafseel (ikhtiyari)', 'التفاصيل (اختياري)', 'Detalles (opcional)', 'Détails (facultatif)'),
+    'Your email (to hear what we decide)': ('آپ کی ای میل (فیصلہ جاننے کے لیے)', 'Aap ki email (faisla janne ke liye)', 'بريدك (لنخبرك بقرارنا)', 'Tu correo (para saber qué decidimos)', 'Votre e-mail (pour connaître notre décision)'),
+    'Send report': ('رپورٹ بھیجیں', 'Report bhejein', 'إرسال البلاغ', 'Enviar denuncia', 'Envoyer le signalement'),
+    'Thank you. Our team will review this listing and email you what we decided.': ('شکریہ۔ ہماری ٹیم اس لسٹنگ کا جائزہ لے گی اور فیصلہ ای میل کرے گی۔', 'Shukriya. Hamari team is listing ka jaiza legi aur faisla email karegi.', 'شكراً. سيراجع فريقنا المنتج ويرسل لك قرارنا.', 'Gracias. Nuestro equipo revisará el anuncio y te enviará la decisión.', 'Merci. Notre équipe examinera l’annonce et vous enverra sa décision.'),
+    'Thank you. Our team will review this listing.': ('شکریہ۔ ہماری ٹیم اس لسٹنگ کا جائزہ لے گی۔', 'Shukriya. Hamari team is listing ka jaiza legi.', 'شكراً. سيراجع فريقنا هذا المنتج.', 'Gracias. Nuestro equipo revisará el anuncio.', 'Merci. Notre équipe examinera cette annonce.'),
+    'Please choose your country from the list.': ('براہ کرم فہرست سے اپنا ملک چنیں۔', 'Meharbani karke list se apna mulk chunein.', 'يُرجى اختيار بلدك من القائمة.', 'Elige tu país de la lista.', 'Choisissez votre pays dans la liste.'),
+    'Please enter a phone number the courier can call.': ('براہ کرم ایسا فون نمبر لکھیں جس پر کوریئر کال کر سکے۔', 'Meharbani karke aisa phone number likhein jis par courier call kar sake.', 'يُرجى إدخال رقم هاتف يمكن لشركة الشحن الاتصال به.', 'Introduce un teléfono al que pueda llamar el mensajero.', 'Indiquez un numéro que le livreur peut appeler.'),
+    'Current password': ('موجودہ پاس ورڈ', 'Mojooda password', 'كلمة المرور الحالية', 'Contraseña actual', 'Mot de passe actuel'),
+    '(only to change your email)': ('(صرف ای میل بدلنے کے لیے)', '(sirf email badalne ke liye)', '(فقط لتغيير بريدك)', '(solo para cambiar el correo)', '(seulement pour changer l’e-mail)'),
+    'To change your email, type your current password too.': ('ای میل بدلنے کے لیے اپنا موجودہ پاس ورڈ بھی لکھیں۔', 'Email badalne ke liye apna mojooda password bhi likhein.', 'لتغيير بريدك اكتب كلمة المرور الحالية أيضاً.', 'Para cambiar el correo, escribe también tu contraseña actual.', 'Pour changer d’e-mail, saisissez aussi votre mot de passe actuel.'),
+    'Confirm your cash order': ('اپنا کیش آرڈر کنفرم کریں', 'Apna cash order confirm karein', 'أكّد طلب الدفع عند الاستلام', 'Confirma tu pedido contra reembolso', 'Confirmez votre commande en espèces'),
+    'Press the button so the seller can pack it. You pay the courier in cash on delivery.': ('بٹن دبائیں تاکہ سیلر اسے پیک کر سکے۔ ادائیگی ڈیلیوری پر کوریئر کو نقد کریں۔', 'Button dabayein taake seller ise pack kar sake. Payment delivery par courier ko cash mein karein.', 'اضغط الزر ليجهّزه البائع. تدفع نقداً لشركة الشحن عند الاستلام.', 'Pulsa el botón para que el vendedor lo prepare. Pagas en efectivo al mensajero.', 'Appuyez sur le bouton pour que le vendeur la prépare. Vous payez le livreur en espèces.'),
+    'Yes, confirm my order': ('ہاں، میرا آرڈر کنفرم کریں', 'Haan, mera order confirm karein', 'نعم، أكّد طلبي', 'Sí, confirmar mi pedido', 'Oui, confirmer ma commande'),
+    'Order': ('آرڈر', 'Order', 'الطلب', 'Pedido', 'Commande'),
+})

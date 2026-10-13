@@ -111,6 +111,7 @@ def context(seller):
     return {
         "coupons": coupons, "sales": Promotion.objects.filter(**owner)[:50], "categories": Product.CATEGORY_CHOICES,
         "today": timezone.localdate(),
+        "tz_name": timezone.get_current_timezone_name(),
         "now_local": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
         "week_local": (timezone.localtime() + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M"),
     }
@@ -186,6 +187,8 @@ def seller_ads(request):
             elif action == "end":
                 AdCampaign.objects.filter(pk=campaign.pk).update(status="ended")
                 messages.success(request, "Ad ended.")
+        from django.core.cache import cache
+        cache.delete("ads:eligible")
         return redirect("seller_ads")
     campaigns = ads.totals(list(AdCampaign.objects.filter(seller_account=seller).select_related("product")))
     from . import seller_center as sc
@@ -212,6 +215,8 @@ def manage_ads(request):
             AdCampaign.objects.filter(pk=campaign.pk).update(status="active", paused_by_staff=False)
             _log(request, f"Resumed ad #{campaign.pk}")
             messages.success(request, "Ad running again.")
+        from django.core.cache import cache
+        cache.delete("ads:eligible")
         return redirect("manage_ads")
     campaigns = ads.totals(list(AdCampaign.objects.select_related("product", "seller_account").exclude(status="ended")[:200]))
     since = timezone.localdate() - timedelta(days=29)

@@ -1758,6 +1758,11 @@ class AccountSettingsTests(TestCase):
 
     def test_email_change_alerts_old_address(self):
         self.client.post(reverse("profile"), {"first_name": "A", "email": "new@example.com", "phone": ""})
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "acct@example.com")  # no password: not changed
+        self.client.post(reverse("profile"), {"first_name": "A", "email": "new@example.com", "phone": "", "current_password": "Old-pass-123"})
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "new@example.com")
         self.assertTrue(any(m.to == ["acct@example.com"] and "email address was changed" in m.subject.lower() for m in mail.outbox))
 
     # --- saved cards ----------------------------------------------------------
@@ -3720,7 +3725,7 @@ class TrustPackTests(TestCase):
         self.assertFalse(OrderItem.objects.counted().filter(pk=item.pk).exists())
         # strangers can't open the claim page
         self.client.force_login(other)
-        self.assertEqual(self.client.get(reverse("claim_detail", args=[claim.id])).status_code, 404)
+        self.assertRedirects(self.client.get(reverse("claim_detail", args=[claim.id])), reverse("my_orders"), fetch_redirect_response=False)
 
     def test_claim_reject_and_withdraw(self):
         o, (item,) = self._order()
@@ -4591,8 +4596,9 @@ class ReferralProgramTests(TestCase):
         admin = User.objects.create_superuser("radmin", "r@example.com", "pass12345")
         self.client.force_login(admin)
         self.assertContains(self.client.get(reverse("manage_referrals")), "Top referrers")
-        SiteSettings.objects.filter(pk=1).update(referral_enabled=False)
-        cache.clear()
+        site = SiteSettings.load()
+        site.referral_enabled = False
+        site.save()
         self.client.force_login(self.friend_of)
         self.assertRedirects(self.client.get(reverse("referrals")), reverse("profile"), fetch_redirect_response=False)
 
@@ -4702,7 +4708,11 @@ class CodConfirmationTests(TestCase):
         self.assertFalse(OrderItem.objects.filter(order=order, fulfillment_status="packed").exists())
         self.client.logout()
         with self.captureOnCommitCallbacks(execute=True):
-            self.client.get(reverse("confirm_cod", args=[order.id, order.access_token]))
+            page = self.client.get(reverse("confirm_cod", args=[order.id, order.access_token]))
+            self.assertContains(page, "Yes, confirm my order")  # a link scanner opening it doesn't confirm
+            order.refresh_from_db()
+            self.assertFalse(order.cod_confirmed)
+            self.client.post(reverse("confirm_cod", args=[order.id, order.access_token]))
         order.refresh_from_db()
         self.assertTrue(order.cod_confirmed and order.sellers_notified)
         self.assertTrue(Notification.objects.filter(user=self.seller.user, message__icontains="New order").exists())
@@ -5105,7 +5115,7 @@ class SecurityPackTests(TestCase):
         self.assertContains(page, "One last step")
         self.assertContains(page, 'autocomplete="one-time-code"')
         # confirm_cod email link can't bypass the phone check
-        self.client.get(reverse("confirm_cod", args=[order.id, order.access_token]))
+        self.client.post(reverse("confirm_cod", args=[order.id, order.access_token]))
         order.refresh_from_db()
         self.assertFalse(order.cod_confirmed)
         wrong = "000000" if code != "000000" else "111111"
@@ -5444,7 +5454,11 @@ class ReportsTests(TestCase):
         c.post(reverse("add_to_cart", args=[product.id]), **self.UA)
         c.get(reverse("checkout"), **self.UA)
         c.get(reverse("checkout"), **self.UA)  # refresh doesn't double count
-        stat = lambda kind, key="": DailyStat.objects.filter(kind=kind, key=key).values_list("count", flat=True).first()
+        from . import analytics
+
+        def stat(kind, key=""):
+            analytics.flush()
+            return DailyStat.objects.filter(kind=kind, key=key).values_list("count", flat=True).first()
         self.assertEqual(stat("visit"), 1)
         self.assertEqual(stat("view", str(product.id)), 1)
         self.assertEqual(stat("search", "unicorn kettle"), 1)
@@ -5767,6 +5781,7 @@ class SellerPromotionsAndAdsTests(TestCase):
         # no earnings yet: not shown
         self.assertEqual(ads.pick(), [])
         with mock.patch.object(SellerAccount, "amount_owed", new_callable=mock.PropertyMock, return_value=100.0):
+            cache.delete("ads:eligible")  # the eligible list is cached for a minute
             shopper = self.client_class()
             shopper.force_login(self.buyer)
             ua = {"HTTP_USER_AGENT": "Mozilla/5.0 Firefox/130"}
@@ -5776,15 +5791,18 @@ class SellerPromotionsAndAdsTests(TestCase):
             self.assertRedirects(shopper.get(url, **ua), reverse("product_detail", args=[self.mine.id]), fetch_redirect_response=False)
             shopper.get(url, **ua)  # same visitor, same day: free
             self.assertEqual(shopper.get(reverse("ad_click", args=[campaign.id]) + "?s=bad", **ua).status_code, 404)
+            sneaky = self.client_class()
+            sneaky.get(url, **ua)  # new session, same address: free (click-fraud guard)
             other = self.client_class()
-            other.get(url, **ua)
+            other.get(url, REMOTE_ADDR="203.0.113.7", **ua)
             third = self.client_class()
-            third.get(url, **ua)  # over the daily budget: not charged
+            third.get(url, REMOTE_ADDR="203.0.113.8", **ua)  # over the daily budget: not charged
         self.seller.refresh_from_db()
         campaign.refresh_from_db()
         self.assertEqual((self.seller.ad_spend, campaign.spent), (Decimal("1.00"), Decimal("1.00")))
+        ads.flush_impressions()
         stat = AdStat.objects.get()
-        self.assertEqual((stat.spend, stat.clicks), (Decimal("1.00"), 3))
+        self.assertEqual((stat.spend, stat.clicks), (Decimal("1.00"), 3))  # free clicks aren't counted as paid clicks
         self.assertGreaterEqual(stat.impressions, 1)
         # seller's own clicks are free
         self.client.get(url, HTTP_USER_AGENT="Mozilla/5.0 Firefox/130")
@@ -5882,6 +5900,10 @@ class WebPushTests(TestCase):
         r = self.client.post(reverse("push_subscribe"), json.dumps({"endpoint": "https://fcm.googleapis.com/fcm/send/abc", "keys": {"p256dh": p256dh, "auth": auth_b64}}),
                              content_type="application/json")
         self.assertEqual(r.json(), {"ok": True})
+        self.assertEqual(PushSubscription.objects.count(), 1)
+        bad = self.client.post(reverse("push_subscribe"), json.dumps({"endpoint": "https://169.254.169.254/latest/meta-data", "keys": {"p256dh": p256dh, "auth": auth_b64}}),
+                               content_type="application/json")
+        self.assertEqual(bad.status_code, 400)  # no requests to internal addresses
         self.assertEqual(PushSubscription.objects.count(), 1)
         calls = []
 
@@ -5982,3 +6004,60 @@ class StagingSiteTests(TestCase):
             call_command("anonymize_data", "--yes", stdout=io.StringIO())
             u.refresh_from_db()
             self.assertEqual((u.email, u.first_name, u.has_usable_password()), (f"user{u.pk}@example.test", "Test", False))
+
+
+class HardeningTests(TestCase):
+    def test_health_and_security_headers(self):
+        r = self.client.get("/health/")
+        self.assertEqual(r.json(), {"ok": True})
+        page = self.client.get("/")
+        self.assertIn("object-src 'none'", page["Content-Security-Policy"])
+        self.assertIn("frame-ancestors 'none'", page["Content-Security-Policy"])
+        self.assertIn("camera=()", page["Permissions-Policy"])
+
+    def test_coupon_guessing_is_rate_limited(self):
+        p = make_product(name="RL mug", price=Decimal("10"), stock=5)
+        self.client.post(reverse("add_to_cart", args=[p.id]))
+        for i in range(15):
+            self.client.post(reverse("apply_coupon"), {"coupon_code": f"GUESS{i}"})
+        r = self.client.post(reverse("apply_coupon"), {"coupon_code": "GUESS99"}, follow=True)
+        self.assertContains(r, "Too many coupon tries")
+
+
+class SellerApplicationTests(TestCase):
+    def test_application_is_validated_and_terms_recorded(self):
+        SellerAccount.objects.create(user=User.objects.create_user("taken", "t@example.com", "pass12345"), business_name="Sunny Shop")
+        u = User.objects.create_user("applicant", "ap@example.com", "pass12345")
+        self.client.force_login(u)
+        base = {"account_type": "individual", "business_name": "sunny shop", "phone": "+92 300 1234567", "country": "Pakistan", "agree": "1"}
+        r = self.client.post(reverse("become_seller"), base)
+        self.assertContains(r, "already taken")
+        r = self.client.post(reverse("become_seller"), {**base, "business_name": "Moon Shop", "agree": ""})
+        self.assertContains(r, "accept the seller terms")
+        r = self.client.post(reverse("become_seller"), {**base, "business_name": "Moon Shop", "country": "Atlantis"})
+        self.assertContains(r, "choose your country")
+        self.client.post(reverse("become_seller"), {**base, "business_name": "  Moon   Shop "})
+        acc = SellerAccount.objects.get(user=u)
+        self.assertEqual((acc.business_name, acc.status), ("Moon Shop", "pending"))
+        self.assertIsNotNone(acc.terms_accepted_at)
+
+
+class ListingReportTests(TestCase):
+    def test_report_and_take_down(self):
+        from django.core import mail as _mail
+        from .models import ListingReport
+        owner = User.objects.create_user("lrseller", "lr@example.com", "pass12345")
+        acc = SellerAccount.objects.create(user=owner, business_name="LR Co", status="approved")
+        p = make_product(name="Fake watch", seller_account=acc, seller_name="LR Co")
+        self.client.post(reverse("report_listing", args=[p.id]), {"reason": "counterfeit", "details": "Logo is fake", "email": "Spotter@Example.com"})
+        rep = ListingReport.objects.get()
+        self.assertEqual((rep.reason, rep.email, rep.status), ("counterfeit", "spotter@example.com", "open"))
+        admin = User.objects.create_superuser("lradmin", "lra@example.com", "pass12345")
+        self.client.force_login(admin)
+        self.assertContains(self.client.get(reverse("manage_listing_reports")), "Fake watch")
+        self.client.post(reverse("manage_listing_reports"), {"id": rep.id, "action": "remove", "note": "Brand confirmed it's fake."})
+        p.refresh_from_db()
+        rep.refresh_from_db()
+        self.assertEqual((p.approval_status, rep.status), ("rejected", "removed"))
+        self.assertTrue(any(m.to == ["spotter@example.com"] for m in _mail.outbox))
+        self.assertTrue(Notification.objects.filter(user=owner, message__icontains="taken down").exists())

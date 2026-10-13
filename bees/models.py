@@ -396,6 +396,8 @@ class Order(models.Model):
         indexes = [
             models.Index(fields=["status", "created_at"]),
             models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["email"]),  # guest orders, coupon limits, COD checks, reports
+            models.Index(fields=["payment_method", "cod_confirmed", "status"]),
         ]
 
     @property
@@ -695,7 +697,7 @@ class OrderItem(models.Model):
         ("handed_to_courier", "Handed to courier"),
         ("delivered", "Delivered"),
     ]
-    fulfillment_status = models.CharField(max_length=20, choices=FULFILLMENT_CHOICES, default="pending")
+    fulfillment_status = models.CharField(max_length=20, choices=FULFILLMENT_CHOICES, default="pending", db_index=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
     shipped_at = models.DateTimeField(null=True, blank=True)
 
@@ -1012,6 +1014,7 @@ class SellerAccount(models.Model):
     bank_details = models.CharField(max_length=255, blank=True)
     PAYOUT_METHODS = [("manual", "Bank / manual transfer"), ("paypal", "PayPal (automatic)"), ("stripe", "Stripe (automatic, to your bank)")]
     payout_method = models.CharField(max_length=10, choices=PAYOUT_METHODS, default="manual")
+    terms_accepted_at = models.DateTimeField(null=True, blank=True, help_text="When the seller accepted the seller terms.")
     ad_spend = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False,
                                    help_text="Sponsored-product clicks charged to this seller (taken from earnings).")
     paypal_email = models.EmailField(blank=True, help_text="PayPal account that receives automatic payouts.")
@@ -1445,6 +1448,9 @@ class ShippingZone(models.Model):
         return self.fee + (self.per_item_fee or 0) * extra
 
 
+_SETTINGS_MEMO = {"obj": None, "until": 0.0}
+
+
 class SiteSettings(models.Model):
     """A single-row table for site-wide settings, editable from the admin
     panel. Everything brand-related lives here so the store can be
@@ -1563,19 +1569,26 @@ class SiteSettings(models.Model):
 
     @classmethod
     def load(cls):
-        """Site settings are read on every page, so they're cached for a
-        minute and cleared whenever they're saved."""
+        """Site settings are read many times on every page, so they're kept
+        in this worker's memory for a few seconds, in the shared cache for a
+        minute, and cleared whenever they're saved."""
+        import time
         from django.core.cache import cache
+        memo = _SETTINGS_MEMO.get("obj")
+        if memo is not None and _SETTINGS_MEMO["until"] > time.monotonic():
+            return memo
         obj = cache.get(cls.CACHE_KEY)
         if obj is None:
             obj, _ = cls.objects.get_or_create(pk=1)
             cache.set(cls.CACHE_KEY, obj, 60)
+        _SETTINGS_MEMO.update(obj=obj, until=time.monotonic() + 5)
         return obj
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         from django.core.cache import cache
         cache.delete(self.CACHE_KEY)
+        _SETTINGS_MEMO.update(obj=None, until=0.0)
 
     @property
     def logo(self):
@@ -2069,3 +2082,25 @@ class PushSubscription(models.Model):
 
     def __str__(self):
         return f"Push for {self.user_id}"
+
+
+class ListingReport(models.Model):
+    """'Report this listing' from shoppers (illegal, counterfeit, unsafe,
+    misleading...). Reviewed by the store team (notice-and-action)."""
+    REASONS = [("counterfeit", "Fake or counterfeit"), ("illegal", "Illegal or banned item"), ("unsafe", "Unsafe product"),
+               ("misleading", "Wrong or misleading information"), ("ip", "Uses my brand or copyright"),
+               ("offensive", "Offensive content"), ("other", "Something else")]
+    STATUS = [("open", "Open"), ("removed", "Listing removed"), ("dismissed", "No action needed")]
+    product = models.ForeignKey("Product", on_delete=models.CASCADE, related_name="reports")
+    reason = models.CharField(max_length=20, choices=REASONS)
+    details = models.TextField(max_length=2000, blank=True)
+    reporter = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    email = models.EmailField(blank=True)
+    status = models.CharField(max_length=10, choices=STATUS, default="open", db_index=True)
+    decision_note = models.CharField(max_length=300, blank=True)
+    handled_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    handled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]

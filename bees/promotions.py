@@ -89,6 +89,10 @@ def stop(promo, status="ended"):
 
 
 def tick():
+    from .ads import flush_impressions
+    from .analytics import flush
+    flush_impressions()
+    flush()
     from .models import Promotion
     now = timezone.now()
     for promo in Promotion.objects.filter(status="active", ends_at__lte=now):
@@ -107,3 +111,14 @@ def tick_soon():
         from .campaigns import continue_sending
         after_response(tick)
         after_response(continue_sending)
+    if cache.add("unpaid:release", 1, 900):
+        # Give back stock held by card/PayPal orders that were never paid,
+        # every 15 minutes, instead of waiting for the daily task.
+        from .background import after_response
+        after_response(_release_unpaid)
+
+
+def _release_unpaid():
+    import io
+    from django.core.management import call_command
+    call_command("release_unpaid_orders", stdout=io.StringIO())

@@ -73,22 +73,52 @@ def eligible(queryset=None):
     return out
 
 
+def _eligible_cached():
+    """(campaign id, product id) of eligible ads, best bid first. Cached for a
+    minute: checking budgets and seller earnings is too slow for every page
+    (the click itself re-checks both exactly)."""
+    from django.core.cache import cache
+    rows = cache.get("ads:eligible")
+    if rows is None:
+        rows = [(c.id, c.product_id) for c in eligible()]
+        cache.set("ads:eligible", rows, 60)
+    return rows
+
+
 def pick(queryset=None, limit=None, exclude_product_ids=()):
     """Up to ``limit`` sponsored products for a page (highest bid first, one
     per product). Counts an impression for each."""
+    from .models import AdCampaign
     if not enabled():
         return []
     limit = _site().ads_slots if limit is None else limit
     if not limit:
         return []
-    chosen, seen = [], set(exclude_product_ids)
-    for c in eligible(queryset):
-        if c.product_id in seen:
+    rows = _eligible_cached()
+    if not rows:
+        return []
+    if queryset is not None:
+        allowed = set(queryset.filter(id__in=[pid for _cid, pid in rows]).values_list("id", flat=True))
+        rows = [r for r in rows if r[1] in allowed]
+    chosen_ids, seen = [], set(exclude_product_ids)
+    for cid, pid in rows:
+        if pid in seen:
             continue
-        seen.add(c.product_id)
-        chosen.append(c)
-        if len(chosen) >= limit:
+        seen.add(pid)
+        chosen_ids.append(cid)
+        if len(chosen_ids) >= limit:
             break
+    if not chosen_ids:
+        return []
+    found = {c.id: c for c in AdCampaign.objects.filter(id__in=chosen_ids, status="active")}
+    from .models import Product
+    from .views import with_ratings
+    products = {p.id: p for p in with_ratings(Product.objects.filter(id__in=[c.product_id for c in found.values()]))}
+    chosen = []
+    for i in chosen_ids:
+        if i in found and found[i].product_id in products:
+            found[i].product = products[found[i].product_id]
+            chosen.append(found[i])
     if chosen:
         from .background import after_response
         after_response(_count_impressions, [c.id for c in chosen])
@@ -98,10 +128,46 @@ def pick(queryset=None, limit=None, exclude_product_ids=()):
 
 
 def _count_impressions(ids):
-    from .models import AdStat
+    """Counts impressions in the cache (cheap); flush_impressions() writes
+    them to the database every few minutes."""
+    from django.core.cache import cache
+    day = timezone.localdate().isoformat()
+    index = cache.get("adimp:index") or []
+    changed = False
     for cid in ids:
-        _today_stat(cid)
-        AdStat.objects.filter(campaign_id=cid, date=timezone.localdate()).update(impressions=F("impressions") + 1)
+        key = f"adimp:{cid}:{day}"
+        if cache.add(key, 1, 172800):
+            index.append(key)
+            changed = True
+        else:
+            try:
+                cache.incr(key)
+            except ValueError:
+                cache.set(key, 1, 172800)
+    if changed:
+        cache.set("adimp:index", index[-5000:], 172800)
+
+
+def flush_impressions():
+    from datetime import date
+    from django.core.cache import cache
+    from .models import AdStat
+    index = cache.get("adimp:index") or []
+    if not index:
+        return 0
+    cache.delete("adimp:index")
+    done = 0
+    for key in index:
+        n = cache.get(key)
+        cache.delete(key)
+        if not n:
+            continue
+        _p, cid, day = key.split(":")
+        day = date.fromisoformat(day)
+        _today_stat(int(cid), day)
+        AdStat.objects.filter(campaign_id=int(cid), date=day).update(impressions=F("impressions") + n)
+        done += n
+    return done
 
 
 def _sign(cid):
@@ -125,6 +191,21 @@ def _free_click(request, campaign):
         if seller and seller.pk == campaign.seller_account_id:
             return True
     day = timezone.localdate().isoformat()
+    # One paid click per campaign per address per day, and at most 20 paid
+    # clicks per address per day overall, even without cookies (stops
+    # click-fraud scripts draining a competitor's budget).
+    from django.core.cache import cache
+    from .security import client_ip
+    ip = client_ip(request)
+    if not cache.add(f"adclk:{campaign.id}:{ip}:{day}", 1, 90000):
+        return True
+    total_key = f"adclk-ip:{ip}:{day}"
+    cache.add(total_key, 0, 90000)
+    try:
+        if cache.incr(total_key) > 20:
+            return True
+    except ValueError:
+        pass
     seen = request.session.get("ad_seen", {})
     if seen.get(str(campaign.id)) == day:
         return True

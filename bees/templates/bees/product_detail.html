@@ -334,6 +334,18 @@
         </div>
     </section>
 
+    <details class="report-listing" style="margin:18px 0 0;">
+        <summary class="small muted" style="cursor:pointer;">Report this listing</summary>
+        <form method="post" action="{% url 'report_listing' product.id %}" style="display:grid;gap:8px;max-width:520px;margin-top:10px;">{% csrf_token %}
+            <div class="field" style="margin:0;"><label for="rl-reason">What's wrong?</label><select id="rl-reason" name="reason" required><option value="">Choose…</option>
+                <option value="counterfeit">Fake or counterfeit</option><option value="illegal">Illegal or banned item</option><option value="unsafe">Unsafe product</option>
+                <option value="misleading">Wrong or misleading information</option><option value="ip">Uses my brand or copyright</option><option value="offensive">Offensive content</option><option value="other">Something else</option></select></div>
+            <div class="field" style="margin:0;"><label for="rl-details">Details (optional)</label><textarea id="rl-details" name="details" rows="3" maxlength="2000"></textarea></div>
+            {% if not user.is_authenticated %}<div class="field" style="margin:0;"><label for="rl-email">Your email (to hear what we decide)</label><input id="rl-email" type="email" name="email" autocomplete="email"></div>{% endif %}
+            <button class="btn btn-secondary btn-sm" type="submit" style="justify-self:start;">Send report</button>
+        </form>
+    </details>
+
     {% if also_bought %}
     <section class="section">
         <div class="section-head"><h2>Customers also bought</h2></div>

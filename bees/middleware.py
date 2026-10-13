@@ -104,3 +104,52 @@ class ErrorAlertMiddleware:
         from .alerts import SERVER_ERROR, log
         log(f"{SERVER_ERROR}: {request.method} {request.path[:80]} - {type(exception).__name__}: {str(exception)[:120]}")
         return None
+
+
+class SecurityHeadersMiddleware:
+    """Content-Security-Policy and Permissions-Policy for every page.
+
+    The CSP stops injected <script src=...>, plugins, <base> hijacking and
+    the site being framed by other sites. Inline scripts are still allowed
+    (the templates use them); external scripts only from the analytics
+    providers the owner turned on. CSP_REPORT_ONLY=True in .env only reports.
+    """
+    CSP = "; ".join([
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://connect.facebook.net",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' data: https://fonts.gstatic.com",
+        "img-src 'self' data: blob: https:",
+        "media-src 'self' https:",
+        "connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.facebook.com",
+        "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com",
+        "worker-src 'self'",
+        "manifest-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self' https:",
+        "frame-ancestors 'none'",
+        "upgrade-insecure-requests",
+    ])
+
+    def __init__(self, get_response):
+        from django.conf import settings
+        self.get_response = get_response
+        cdn = getattr(settings, "CDN_URL", "") or ""
+        csp = self.CSP
+        if cdn.startswith("https://"):
+            host = "/".join(cdn.split("/")[:3])
+            csp = csp.replace("script-src 'self'", f"script-src 'self' {host}").replace("style-src 'self'", f"style-src 'self' {host}") \
+                     .replace("font-src 'self'", f"font-src 'self' {host}")
+        if getattr(settings, "DEBUG", False):
+            csp = csp.replace("; upgrade-insecure-requests", "")
+        self.csp = csp
+        self.header = "Content-Security-Policy-Report-Only" if getattr(settings, "CSP_REPORT_ONLY", False) else "Content-Security-Policy"
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        if request.path.startswith("/admin/"):
+            return response  # Django's own admin
+        response.setdefault(self.header, self.csp)
+        response.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(self), usb=(), interest-cohort=()")
+        return response
