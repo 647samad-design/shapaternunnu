@@ -295,20 +295,26 @@
         details.menu > summary { list-style: none; }
         details.menu > summary::-webkit-details-marker { display: none; }
         .menu-panel { position: absolute; right: 0; top: calc(100% + 8px); min-width: 240px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; z-index: 300; box-shadow: 0 16px 40px rgba(20,26,31,.14); max-height: calc(100vh - 110px); max-height: calc(100dvh - 110px); overflow-y: auto; overscroll-behavior: contain; }
-        /* Thin, theme-coloured scrollbars for the few boxes that scroll on their own
-           (menus, sidebars, category strip). They only appear when there's more to see. */
-        .menu-panel, .catnav ul, .acct-tabs, .adm-nav, .suggestions, .chat-body { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; }
-        .menu-panel::-webkit-scrollbar, .catnav ul::-webkit-scrollbar, .acct-tabs::-webkit-scrollbar, .adm-nav::-webkit-scrollbar, .suggestions::-webkit-scrollbar, .chat-body::-webkit-scrollbar { width: 8px; height: 8px; }
-        .menu-panel::-webkit-scrollbar-thumb, .catnav ul::-webkit-scrollbar-thumb, .acct-tabs::-webkit-scrollbar-thumb, .adm-nav::-webkit-scrollbar-thumb, .suggestions::-webkit-scrollbar-thumb, .chat-body::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 45%, transparent); border-radius: 999px; }
-        .menu-panel::-webkit-scrollbar-track, .catnav ul::-webkit-scrollbar-track, .acct-tabs::-webkit-scrollbar-track, .adm-nav::-webkit-scrollbar-track, .suggestions::-webkit-scrollbar-track, .chat-body::-webkit-scrollbar-track { background: transparent; }
+        /* Boxes that scroll on their own (menus, side menus, category strip, search
+           suggestions, chat) scroll with the wheel, touch and keyboard, but don't
+           show a scrollbar; a soft fade at the edge shows there's more. */
+        .menu-panel, .catnav ul, .acct-tabs, .adm-nav, .suggestions, .chat-body { scrollbar-width: none; -ms-overflow-style: none; }
+        .menu-panel::-webkit-scrollbar, .catnav ul::-webkit-scrollbar, .acct-tabs::-webkit-scrollbar, .adm-nav::-webkit-scrollbar, .suggestions::-webkit-scrollbar, .chat-body::-webkit-scrollbar { display: none; width: 0; height: 0; }
+        .more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent); }
+        .more-up { -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to top, #000 calc(100% - 36px), transparent); }
+        .more-up.more-down { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 36px, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 36px, #000 calc(100% - 36px), transparent); }
+        .more-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent); }
+        .more-left { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 48px), transparent); }
+        .more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent); }
+        /* Menus have a background, so they get a fade strip inside instead of fading the box itself. */
+        .menu-panel.more-down, .menu-panel.more-up { -webkit-mask-image: none; mask-image: none; }
+        .menu-panel.more-down::after { content: ""; position: sticky; bottom: -8px; display: block; grid-column: 1 / -1; height: 34px; margin: -34px -8px -8px; background: linear-gradient(color-mix(in srgb, var(--surface) 0%, transparent), var(--surface)); pointer-events: none; }
         .menu-panel a, .menu-panel button { display: flex; width: 100%; padding: 11px 12px; border-radius: var(--radius-sm); text-decoration: none; background: none; border: 0; cursor: pointer; text-align: left; font-size: 1rem; }
         .menu-panel a:hover, .menu-panel button:hover { background: var(--surface-2); }
         .menu-panel .menu-head { padding: 8px 12px 10px; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
         .menu-panel .menu-head strong { display: block; }
         .catnav { border-top: 1px solid var(--line); }
         .catnav ul { list-style: none; display: flex; gap: 4px; overflow-x: auto; padding: 8px 0; overscroll-behavior-x: contain; }
-        /* Touch screens swipe, so the bar stays hidden there; with a mouse it shows. */
-        @media (hover: none) { .catnav ul, .acct-tabs { scrollbar-width: none; } .catnav ul::-webkit-scrollbar, .acct-tabs::-webkit-scrollbar { display: none; } }
         .catnav a { display: block; white-space: nowrap; padding: 7px 14px; border-radius: 999px; text-decoration: none; color: var(--muted); font-weight: 700; font-size: 0.95rem; }
         .catnav a:hover { color: var(--ink); background: var(--surface-2); }
         .catnav a.active { color: var(--on-brand); background: var(--brand); }
@@ -1231,6 +1237,25 @@ document.addEventListener('DOMContentLoaded', function () {
             if (el.scrollWidth > el.clientWidth + 1 && (r.right > box.right || r.left < box.left)) el.scrollLeft += r.left - box.left - (box.width - r.width) / 2;
             if (el.scrollHeight > el.clientHeight + 1 && (r.bottom > box.bottom || r.top < box.top)) el.scrollTop += r.top - box.top - (box.height - r.height) / 2;
         }
+    });
+    /* Soft fade on the side where there's more to scroll to (no scrollbar shown). */
+    function edges(el) {
+        var x = el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== 'hidden';
+        var y = el.scrollHeight > el.clientHeight + 1 && getComputedStyle(el).overflowY !== 'hidden';
+        var rtl = getComputedStyle(el).direction === 'rtl', left = Math.abs(el.scrollLeft);
+        var atStart = left < 2, atEnd = left + el.clientWidth >= el.scrollWidth - 2;
+        el.classList.toggle(rtl ? 'more-left' : 'more-right', x && !atEnd);
+        el.classList.toggle(rtl ? 'more-right' : 'more-left', x && !atStart);
+        if (rtl) { if (!x || atEnd) el.classList.remove('more-left'); if (!x || atStart) el.classList.remove('more-right'); }
+        el.classList.toggle('more-down', y && el.scrollTop + el.clientHeight < el.scrollHeight - 2);
+        el.classList.toggle('more-up', y && el.scrollTop > 2);
+    }
+    document.querySelectorAll('.menu-panel, .catnav ul, .acct-tabs, .adm-nav').forEach(function (el) {
+        edges(el);
+        el.addEventListener('scroll', function () { edges(el); }, { passive: true });
+        window.addEventListener('resize', function () { edges(el); });
+        var d = el.closest('details');
+        if (d) d.addEventListener('toggle', function () { edges(el); });
     });
     /* Panels that stay in view while the page scrolls (buy box, order summary,
        filters) only do so when they fit on the screen - otherwise their bottom
