@@ -32,7 +32,7 @@ PATHS = [
     ("/manage/reviews/", "reviews"), ("/manage/products/", "products"), ("/manage/sellers/", "sellers"),
     ("/manage/reports/", "reports"), ("/manage/gift-cards/", "gift_cards"), ("/manage/coupons/", "coupons"),
     ("/manage/plans/", "plans"), ("/manage/referrals/", "referrals"), ("/manage/campaigns/", "campaigns"),
-    ("/manage/ads/", "ads"), ("/manage/promotions/", "coupons"), ("/manage/team/", "team"), ("/manage/keys/", "keys"),
+    ("/manage/ads/", "ads"), ("/manage/listing-reports/", "products"), ("/manage/promotions/", "coupons"), ("/manage/team/", "team"), ("/manage/keys/", "keys"),
     ("/manage/settings/", "settings"), ("/manage/setup/", "settings"), ("/manage/taxes/", "settings"),
     ("/manage/currencies/", "settings"), ("/manage/translations/", "settings"), ("/manage/system/", "system"),
 ]

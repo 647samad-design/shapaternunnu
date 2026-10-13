@@ -61,6 +61,7 @@
                 {% csrf_token %}
                 <div class="field"><label for="p_name">Name</label><input type="text" id="p_name" name="first_name" value="{{ request.user.first_name }}" autocomplete="name"></div>
                 <div class="field"><label for="p_email">Email</label><input type="email" id="p_email" name="email" value="{{ request.user.email }}" autocomplete="email"><span class="hint">Changing it means verifying the new address.</span></div>
+                {% if request.user.has_usable_password %}<div class="field" id="p_pw_wrap"><label for="p_pw">Current password <span class="muted small">(only to change your email)</span></label><input type="password" id="p_pw" name="current_password" autocomplete="current-password"></div>{% endif %}
                 <div class="field"><label for="p_phone">Phone</label><input type="tel" id="p_phone" name="phone" value="{{ profile.phone }}" autocomplete="tel"></div>
                 <div class="field" style="flex-direction:row;gap:10px;flex-wrap:wrap;">
                     <button type="submit" class="btn btn-primary">Save changes</button>

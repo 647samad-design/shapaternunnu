@@ -45,8 +45,50 @@ def track(request, kind, key=""):
         return
     if request is not None and getattr(request, "user", None) is not None and request.user.is_authenticated and request.user.is_staff:
         return  # staff browsing their own shop isn't traffic
-    from .background import after_response
-    after_response(_safe_bump, kind, key)
+    _buffer(kind, key)
+
+
+def _buffer(kind, key=""):
+    """Counts in the shared cache; flush() writes the totals to the database
+    every few minutes, so busy pages never queue up database writes."""
+    from django.core.cache import cache
+    try:
+        day = timezone.localdate().isoformat()
+        ckey = f"st|{day}|{kind}|{(key or '')[:150]}"
+        if cache.add(ckey, 1, 172800):
+            index = cache.get("st|index") or []
+            index.append(ckey)
+            cache.set("st|index", index[-20000:], 172800)
+        else:
+            try:
+                cache.incr(ckey)
+            except ValueError:
+                cache.set(ckey, 1, 172800)
+    except Exception:  # statistics must never break a page
+        pass
+
+
+def flush():
+    """Writes buffered counters to DailyStat. Returns how many events."""
+    from datetime import date
+    from django.core.cache import cache
+    index = cache.get("st|index") or []
+    if not index:
+        return 0
+    cache.delete("st|index")
+    total = 0
+    for ckey in index:
+        n = cache.get(ckey)
+        cache.delete(ckey)
+        if not n:
+            continue
+        _p, day, kind, key = ckey.split("|", 3)
+        try:
+            bump(kind, key, amount=n, day=date.fromisoformat(day))
+            total += n
+        except Exception:
+            pass
+    return total
 
 
 def _safe_bump(kind, key):
@@ -85,6 +127,7 @@ def _pct(part, whole):
 
 def report(start, end):
     """All numbers for the Reports page between two dates (inclusive)."""
+    flush()
     from collections import defaultdict
     from django.db.models import Sum
     from .countries import COUNTRIES
@@ -93,20 +136,28 @@ def report(start, end):
     cats = dict(Product.CATEGORY_CHOICES)
     in_period = Order.objects.filter(created_at__date__gte=start, created_at__date__lte=end)
     counted = in_period.exclude(status="cancelled").exclude(payment_status__in=["pending", "failed", "refunded"])
-    orders = list(counted.prefetch_related("items"))
-    revenue = sum((o.grand_total for o in orders), Decimal("0"))
-    n_orders = len(orders)
+    # Light rows instead of full objects: fast even with a year of orders.
+    item_totals = dict(OrderItem.objects.filter(order__in=counted).values("order_id")
+                       .annotate(v=Sum(F("price") * F("quantity"))).values_list("order_id", "v"))
+    rows = list(counted.values_list("id", "country", "payment_method", "created_at", "discount_amount",
+                                    "shipping_amount", "tax_amount", "tax_included", "email", "guest_email"))
+    revenue = Decimal("0")
     by_country, by_method = defaultdict(lambda: [0, Decimal("0")]), defaultdict(lambda: [0, Decimal("0")])
     daily = defaultdict(lambda: [0, Decimal("0")])
-    for o in orders:
-        total = o.grand_total
-        by_country[o.country][0] += 1
-        by_country[o.country][1] += total
-        by_method[o.payment_method or "other"][0] += 1
-        by_method[o.payment_method or "other"][1] += total
-        day = timezone.localtime(o.created_at).date()
+    emails = []
+    for oid, country, method, created, discount, shipping, tax, included, email, guest_email in rows:
+        total = max((item_totals.get(oid) or Decimal("0")) - (discount or 0), Decimal("0")) + (shipping or 0) + (Decimal("0") if included else (tax or 0))
+        revenue += total
+        by_country[country][0] += 1
+        by_country[country][1] += total
+        by_method[method or "other"][0] += 1
+        by_method[method or "other"][1] += total
+        day = timezone.localtime(created).date()
         daily[day][0] += 1
         daily[day][1] += total
+        if email or guest_email:
+            emails.append((email or guest_email).lower())
+    n_orders = len(rows)
     items = OrderItem.objects.filter(order__in=counted)
     by_cat = list(items.values("product__category").annotate(units=Sum("quantity"), revenue=Sum(F("price") * F("quantity"))).order_by("-revenue")[:12])
     for row in by_cat:
@@ -118,11 +169,15 @@ def report(start, end):
                         .order_by("-revenue")[:10])
 
     # customers
-    emails = [o.contact_email.lower() for o in orders if o.contact_email]
     buyers = set(emails)
-    earlier = set(e.lower() for e in Order.objects.exclude(status="cancelled").filter(created_at__date__lt=start)
-                  .exclude(email="").values_list("email", flat=True))
-    returning = {e for e in buyers if e in earlier or emails.count(e) > 1}
+    earlier = set()
+    buyer_list = list(buyers)
+    for k in range(0, len(buyer_list), 500):
+        earlier.update(e.lower() for e in Order.objects.exclude(status="cancelled").filter(
+            created_at__date__lt=start, email__in=buyer_list[k:k + 500]).values_list("email", flat=True).distinct())
+    from collections import Counter
+    seen = Counter(emails)
+    returning = {e for e in buyers if e in earlier or seen[e] > 1}
     refunded = in_period.filter(payment_status="refunded").count()
     paid_total = in_period.exclude(payment_status__in=["pending", "failed"]).exclude(status="cancelled", payment_status="not_applicable").count()
     returns = ReturnRequest.objects.filter(created_at__date__gte=start, created_at__date__lte=end).count()
@@ -174,7 +229,7 @@ def report(start, end):
 
 
 SKIP = ("/static/", "/media/", "/manage/", "/seller/", "/admin/", "/live/", "/api/", "/shipping/webhook", "/stripe/",
-        "/paypal/", "/sw.js", "/manifest", "/favicon", "/robots.txt", "/sitemap", "/app-icon", "/offline")
+        "/paypal/", "/health/", "/sw.js", "/manifest", "/favicon", "/robots.txt", "/sitemap", "/app-icon", "/offline")
 
 
 class VisitMiddleware:

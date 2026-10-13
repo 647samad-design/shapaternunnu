@@ -1,0 +1,13 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Confirm order #{{ order.id }} — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:560px;">
+    <div class="panel">
+        <h1>Confirm your cash order</h1>
+        <p class="muted" style="margin-top:8px;"><span>Order</span> #{{ order.id }} · {{ order.total|money }}. <span>Press the button so the seller can pack it. You pay the courier in cash on delivery.</span></p>
+        <form method="post" style="margin-top:16px;">{% csrf_token %}<button class="btn btn-primary" type="submit">Yes, confirm my order</button></form>
+    </div>
+</div>
+{% endblock %}

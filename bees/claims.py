@@ -106,7 +106,11 @@ def open_claim(request, item_id):
 
 @login_required
 def claim_detail(request, pk):
-    claim = get_object_or_404(Claim.objects.select_related("order_item__order", "order_item__seller_account"), pk=pk, user=request.user)
+    claim = Claim.objects.select_related("order_item__order", "order_item__seller_account").filter(pk=pk, user=request.user).first()
+    if claim is None:
+        # Old notification links can point at a report that no longer exists.
+        messages.info(request, "That problem report isn't available any more. Your orders are below.")
+        return redirect("my_orders")
     if request.method == "POST" and request.POST.get("action") == "withdraw" and claim.is_open:
         claim.status = "withdrawn"
         claim.save(update_fields=["status", "updated_at"])

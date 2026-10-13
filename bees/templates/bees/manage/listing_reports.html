@@ -1,0 +1,22 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Reported listings{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><a class="link small" href="{% url 'manage_products' %}">← Products</a><h1 style="margin-top:6px;">Reported listings</h1><p>Shoppers' reports about fake, illegal, unsafe or misleading products. Taking a listing down hides it and tells the seller; everyone who reported it gets an email with the decision.</p></div></div>
+<div class="tabs" role="group" aria-label="Filter">{% for v, l in statuses %}<a href="?status={{ v }}" class="{% if status == v %}on{% endif %}">{{ l }}</a>{% endfor %}</div>
+{% for r in reports %}
+<section class="panel">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <div><strong data-no-translate><a class="link" href="{% url 'product_detail' r.product_id %}" target="_blank" rel="noopener">{{ r.product.name }}</a></strong>
+            <div class="muted small">{{ r.get_reason_display }} · {% if r.product.seller_account %}<span data-no-translate>{{ r.product.seller_account.display_name }}</span>{% else %}Store product{% endif %} · {{ r.created_at|date:"M j, Y H:i" }}{% if r.reporter %} · <span data-no-translate>{{ r.reporter.username }}</span>{% elif r.email %} · <span data-no-translate>{{ r.email }}</span>{% endif %}</div></div>
+        <span class="pill {% if r.status == 'open' %}warn{% elif r.status == 'removed' %}bad{% endif %}">{{ r.get_status_display }}</span>
+    </div>
+    {% if r.details %}<p style="margin-top:8px;white-space:pre-line;">“{{ r.details }}”</p>{% endif %}
+    {% if r.status == "open" %}
+    <form method="post" style="display:grid;gap:8px;margin-top:10px;">{% csrf_token %}<input type="hidden" name="id" value="{{ r.id }}">
+        <label class="sr-only" for="n{{ r.id }}">Reason for your decision</label><input class="input" id="n{{ r.id }}" name="note" maxlength="300" placeholder="Reason for your decision (sent to the reporter and seller)">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-primary btn-sm" name="action" value="remove">Take the listing down</button><button class="btn btn-ghost btn-sm" name="action" value="dismiss">No action needed</button></div>
+    </form>
+    {% elif r.decision_note %}<p class="muted small" style="margin-top:6px;">Decision: {{ r.decision_note }}</p>{% endif %}
+</section>
+{% empty %}<section class="panel"><p class="muted">No reports here.</p></section>{% endfor %}
+{% endblock %}

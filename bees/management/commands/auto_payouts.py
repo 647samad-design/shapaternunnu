@@ -25,3 +25,10 @@ class Command(BaseCommand):
         removed, _ = DailyStat.objects.filter(date__lt=timezone.localdate() - timedelta(days=760)).delete()
         if removed:
             self.stdout.write(f"  removed {removed} old statistic rows")
+        # Housekeeping so tables don't grow forever.
+        from bees.models import GiftCard, Notification
+        old = timezone.now() - timedelta(days=180)
+        n, _ = Notification.objects.filter(is_read=True, created_at__lt=old).delete()
+        g, _ = GiftCard.objects.filter(status="pending", created_at__lt=timezone.now() - timedelta(days=7)).delete()
+        if n or g:
+            self.stdout.write(f"  removed {n} old read notifications, {g} unpaid gift card checkouts")

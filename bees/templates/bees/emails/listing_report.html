@@ -1,0 +1,8 @@
+{% extends "bees/emails/_base_email.html" %}
+{% block email_body %}
+    <h1 style="margin:0 0 8px;font-size:24px;">Thanks for your report</h1>
+    <p style="margin:0 0 14px;color:#56606B;">You reported "{{ report.product.name }}" ({{ report.get_reason_display|lower }}).</p>
+    <p style="margin:0 0 14px;">{% if removed %}We reviewed it and have taken the listing down.{% else %}We reviewed it and found that the listing can stay up.{% endif %}</p>
+    {% if note %}<p style="margin:0 0 14px;color:#56606B;">{{ note }}</p>{% endif %}
+    <p style="margin:0;color:#56606B;font-size:13px;">If you disagree, reply to this email and our team will look again.</p>
+{% endblock %}

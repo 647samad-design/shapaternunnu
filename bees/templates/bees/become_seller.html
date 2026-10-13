@@ -8,14 +8,15 @@
         {% csrf_token %}
         <fieldset class="choices" style="margin-bottom:20px;">
             <legend class="sr-only">Account type</legend>
-            <label class="choice"><input type="radio" name="account_type" value="individual" checked><strong>Individual seller</strong><span>10% commission per sale</span></label>
-            <label class="choice"><input type="radio" name="account_type" value="organization"><strong>Registered business</strong><span>20% commission, team accounts</span></label>
+            <label class="choice"><input type="radio" name="account_type" value="individual" {% if form.account_type != "organization" %}checked{% endif %}><strong>Individual seller</strong><span>{{ brand.commission_individual|floatformat:"-1" }}% commission per sale</span></label>
+            <label class="choice"><input type="radio" name="account_type" value="organization" {% if form.account_type == "organization" %}checked{% endif %}><strong>Registered business</strong><span>{{ brand.commission_organization|floatformat:"-1" }}% commission, team accounts</span></label>
         </fieldset>
         <div class="form-grid">
-            <div class="field span-2"><label for="b_name">Store name</label><input type="text" id="b_name" name="business_name" maxlength="150"></div>
-            <div class="field"><label for="b_phone">Phone</label><input type="tel" id="b_phone" name="phone" placeholder="Include country code" required></div>
-            <div class="field"><label for="b_country">Country</label><input type="text" id="b_country" name="country"></div>
+            <div class="field span-2"><label for="b_name">Store name</label><input type="text" id="b_name" name="business_name" maxlength="150" required value="{{ form.business_name|default:'' }}"><span class="hint">Shown to shoppers. Must be unique.</span></div>
+            <div class="field"><label for="b_phone">Phone</label><input type="tel" id="b_phone" name="phone" placeholder="Include country code" required value="{{ form.phone|default:'' }}" autocomplete="tel"></div>
+            <div class="field"><label for="b_country">Country</label><select id="b_country" name="country" required>{% load bees_extras %}{% countries as country_list %}<option value="">Choose…</option>{% for code, cname in country_list %}<option value="{{ cname }}" {% if form.country == cname %}selected{% endif %}>{{ cname }}</option>{% endfor %}</select></div>
         </div>
+        <label class="check" style="margin-top:16px;display:flex;gap:8px;align-items:flex-start;"><input type="checkbox" name="agree" value="1" required {% if form.agree %}checked{% endif %}> <span>I agree to the <a class="link" href="{% url 'terms_page' %}" target="_blank" rel="noopener">seller terms</a> and will only sell items I'm allowed to sell.</span></label>
         <div class="field" style="margin-top:22px;"><button type="submit" class="btn btn-primary btn-block">Submit application</button></div>
     </form>
 </div></div></div>

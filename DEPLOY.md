@@ -105,3 +105,10 @@ On the test site every email goes to `STAGING_EMAIL_TO` only, SMS and seller pay
 - **Email campaigns** (Admin > Email campaigns): to newsletter subscribers only, with unsubscribe links, test send, preview, opens and clicks.
 - **Sponsored products**: sellers pay per click from their earnings (Seller Center > Sponsored). Store settings > *Sponsored products* sets the lowest bid and how many places show.
 - **Promotions**: sellers create their own discount codes and timed sales (Seller Center > Promotions); the store runs sales for its own products in Admin > Coupons > Timed sales.
+
+## 17. After the audit - settings to check
+- **NUM_PROXIES**: if System check says every visitor looks like the same address, add `NUM_PROXIES=1` to .env.
+- **TIME_ZONE**: your store's time zone (Keys & passwords > Store time zone), e.g. `Asia/Karachi`.
+- **Uptime monitoring**: add `https://YOUR-DOMAIN/health/` to UptimeRobot or Better Stack (free) to get an alert if the site goes down.
+- **More traffic**: with several servers or heavy traffic, add Redis (`REDIS_URL`) so the cache is shared and faster.
+- **Legal pages**: Terms and Privacy now describe every feature, but have a lawyer check them for the countries you sell in.

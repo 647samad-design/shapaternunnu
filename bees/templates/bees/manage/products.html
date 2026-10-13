@@ -4,7 +4,7 @@
 {% block admin %}
 <div class="adm-head">
     <div><h1>Products</h1><p>{{ page_obj.paginator.count }} product{{ page_obj.paginator.count|pluralize }}</p></div>
-    <div class="actions"><a class="btn btn-secondary" href="{% url 'manage_bulk' %}">Import / export</a><a class="btn btn-primary" href="{% url 'manage_product_new' %}">Add product</a></div>
+    <div class="actions"><a class="btn btn-ghost" href="{% url 'manage_listing_reports' %}">Reported{% if attention.products %} listings{% endif %}</a><a class="btn btn-secondary" href="{% url 'manage_bulk' %}">Import / export</a><a class="btn btn-primary" href="{% url 'manage_product_new' %}">Add product</a></div>
 </div>
 <div class="tabs" role="group" aria-label="Quick filters">
     <a href="?" class="{% if not state %}on{% endif %}">All</a>

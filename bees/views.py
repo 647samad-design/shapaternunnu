@@ -17,7 +17,7 @@ from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.core.paginator import Paginator
 from django.core.validators import validate_email
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum, Avg, Count, F
 from django.http import Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import render, get_object_or_404, redirect
@@ -283,6 +283,8 @@ def _category_tiles():
 
 
 
+@ratelimit("review", rate_limit=10, window_seconds=600,
+           message="Too many reviews in a short time. Please wait a few minutes.")
 def product_detail(request, pk):
     # Rating + review count in the same query (the page shows them several
     # times: stars, summary, structured data).
@@ -897,6 +899,13 @@ def profile_view(request):
                 validate_email(new_email)
                 if User.objects.filter(email__iexact=new_email).exclude(pk=request.user.pk).exists():
                     raise ValidationError("That email is already used by another account.")
+            if new_email != (request.user.email or "").lower():
+                if not new_email:
+                    raise ValidationError("Your account needs an email address for receipts and sign-in help.")
+                # Someone using a stolen session must not be able to take over
+                # the account by changing the email and resetting the password.
+                if request.user.has_usable_password() and not request.user.check_password(request.POST.get("current_password", "")):
+                    raise ValidationError("To change your email, type your current password too.")
         except ValidationError as exc:
             messages.error(request, " ".join(exc.messages))
             return redirect("profile")
@@ -1300,6 +1309,11 @@ def checkout_view(request):
         try:
             if missing:
                 raise ValidationError(f"Please fill in: {', '.join(missing)}.")
+            from .countries import COUNTRIES
+            if data["country"] not in dict(COUNTRIES):
+                raise ValidationError("Please choose your country from the list.")
+            if len("".join(ch for ch in data["phone"] if ch.isdigit())) < 6:
+                raise ValidationError("Please enter a phone number the courier can call.")
             validate_email(data["email"])
             if not pricing["ships"]:
                 raise ValidationError(f"Sorry, we don't deliver to {country_name(data['country'])} yet.")
@@ -1569,6 +1583,8 @@ def _restore_cart_from_order(request, order):
 
 
 @require_POST
+@ratelimit("coupon", rate_limit=15, window_seconds=600, redirect_to="checkout",
+           message="Too many coupon tries. Please wait a few minutes.")
 def apply_coupon(request):
     code = request.POST.get("coupon_code", "").strip()[:30]
     request.session["coupon_code"] = code
@@ -1651,7 +1667,8 @@ def my_orders(request):
         "items", "items__product", "items__return_requests", "items__seller_account", "items__claims"
     ).order_by("-created_at")
     reviewed = set(Review.objects.filter(user=request.user).values_list("product_id", flat=True))
-    return render(request, "bees/my_orders.html", {"orders": orders, "cancel_reasons": CANCEL_REASONS, "reviewed": reviewed})
+    page_obj = Paginator(orders, 15).get_page(request.GET.get("page"))
+    return render(request, "bees/my_orders.html", {"orders": page_obj, "page_obj": page_obj, "cancel_reasons": CANCEL_REASONS, "reviewed": reviewed})
 
 
 @login_required
@@ -2126,8 +2143,13 @@ def terms_page(request):
         "sections": [
             (f"Using {name}", f"By creating an account or placing an order on {name}, you agree to these terms. Please use the platform responsibly and in line with applicable laws."),
             ("Accounts", "You're responsible for keeping your account credentials secure. Seller accounts are reviewed and approved before going live."),
-            ("Orders and payments", "An order is confirmed once payment is received (or, for cash on delivery, once it's placed). Prices and availability may change without notice. Card payments are processed securely by Stripe."),
-            ("Returns and refunds", "Eligible items can be returned within 14 days of delivery. Approved refunds go back to the original payment method."),
+            ("Orders and payments", "An order is confirmed once payment is received (or, for cash on delivery, once you confirm it). Prices and availability may change without notice. Card payments are processed by Stripe and PayPal payments by PayPal; we never see your full card number. Some cash on delivery orders must be confirmed with a code sent to your phone."),
+            ("Marketplace sellers", f"Many products are sold by independent sellers, shown on each product. {name} runs the platform, takes payments and handles returns and problem reports between you and the seller."),
+            ("Returns and refunds", f"Eligible items can be returned within {_brand().return_days} days of delivery. Approved refunds go back to the original payment method, or as store credit if you choose it. Cash on delivery refunds are paid back directly or as store credit."),
+            ("Gift cards and store credit", "Gift cards are valid for 3 years from purchase, are added to your account as store credit, can't be exchanged for cash (except where the law requires it) and are like cash - keep the code private. Store credit is used automatically at checkout."),
+            ("Sponsored products", "Products marked \"Sponsored\" are paid placements by sellers. They're shown in addition to normal results."),
+            ("Seller terms", f"Sellers must list only items they're allowed to sell, describe them honestly, ship on time and follow the law of the countries they sell to. {name} keeps the commission shown in Seller Center on each sale. Earnings become available once an item is delivered and its return window has passed, and are paid out by bank transfer, PayPal or Stripe; sponsored-product costs are taken from earnings. {name} may hold earnings for open returns, problem reports or suspected fraud, and may suspend accounts that break these terms."),
+            ("Liability", "We do our best to keep the site running and information correct, but it's provided as-is. Nothing in these terms limits rights you have under consumer law in your country."),
         ],
     })
 
@@ -2140,6 +2162,8 @@ def privacy_page(request):
             ("What we collect", "Information you give us when you create an account, place an order or apply to sell - such as your name, email, shipping address and phone number. Card details are entered directly with Stripe and never reach our servers."),
             ("How we use it", f"To process and deliver orders, provide support, prevent fraud and improve {name}. We never sell your personal data."),
             ("Who we share it with", "Only the services needed to run the store: the seller who ships your order, payment providers (Stripe, PayPal), couriers, our email provider and hosting. Each receives only what it needs."),
+            ("Sign-in, texts and notifications", "If you sign in with Google or Apple we receive your name and email from them. With Twilio we text order updates and confirmation codes to your phone (turn them off on your Privacy page). Phone notifications are only sent to devices where you allowed them."),
+            ("Statistics", "We count visits, product views and searches as anonymous daily totals - without cookies, IP addresses or anything that identifies you."),
             ("Cookies", "Essential cookies keep you signed in, remember your cart, language and currency. Analytics or marketing cookies (if the store uses them) are only set after you accept them in the cookie banner - you can change your choice any time from 'Cookie settings' at the bottom of every page."),
             ("How long we keep it", "Account details while your account is open. Order and invoice records for as long as tax law requires (usually 6-10 years). You can close your account at any time from Account > Privacy."),
             ("Your rights (GDPR, UK GDPR, CCPA and similar laws)", "You can see, correct, download (Account > Privacy > Download your data) or delete your data, object to marketing, and withdraw consent at any time. You can also complain to your local data-protection authority. We never sell personal data."),
@@ -2173,21 +2197,39 @@ def become_seller(request):
     if existing:
         return redirect("seller_dashboard")
 
+    form = {}
     if request.method == "POST":
-        account_type = request.POST.get("account_type", "individual")
-        if account_type not in dict(SellerAccount.ACCOUNT_TYPE_CHOICES):
-            account_type = "individual"
-        SellerAccount.objects.create(
-            user=request.user,
-            account_type=account_type,
-            business_name=request.POST.get("business_name", "")[:150],
-            phone=request.POST.get("phone", "")[:30],
-            country=request.POST.get("country", "")[:100],
-        )
+        from .countries import COUNTRIES
+        form = {k: request.POST.get(k, "").strip() for k in ("account_type", "business_name", "phone", "country", "agree")}
+        account_type = form["account_type"] if form["account_type"] in dict(SellerAccount.ACCOUNT_TYPE_CHOICES) else "individual"
+        name = " ".join(form["business_name"].split())[:150]
+        error = ""
+        if len(name) < 2:
+            error = "Please enter your store name."
+        elif SellerAccount.objects.filter(Q(business_name__iexact=name) | Q(organization_name__iexact=name)).exists() \
+                or name.lower() in ("official store", "store", "admin", "support"):
+            error = "That store name is already taken. Please choose another."
+        elif len("".join(ch for ch in form["phone"] if ch.isdigit())) < 7:
+            error = "Please enter a phone number with the country code."
+        elif form["country"] not in {cname for _code, cname in COUNTRIES}:
+            error = "Please choose your country."
+        elif not form["agree"]:
+            error = "Please accept the seller terms."
+        if error:
+            messages.error(request, error)
+            return render(request, "bees/become_seller.html", {"form": form})
+        try:
+            with transaction.atomic():
+                SellerAccount.objects.create(user=request.user, account_type=account_type, business_name=name,
+                                             phone=form["phone"][:30], country=form["country"][:100], terms_accepted_at=timezone.now())
+        except IntegrityError:
+            return redirect("seller_dashboard")  # double click: the account already exists
+        from .alerts import notify_staff
+        notify_staff(f"New seller application: {name} ({form['country']}).", link="/manage/sellers/?status=pending")
         messages.success(request, "Your seller application has been submitted. We'll review it shortly.")
         return redirect("seller_dashboard")
 
-    return render(request, "bees/become_seller.html")
+    return render(request, "bees/become_seller.html", {"form": form})
 
 
 @login_required
@@ -2584,7 +2626,8 @@ def _is_owner(user):
 @login_required
 def seller_document(request, seller_id, field):
     """Staff-only access to private seller verification documents."""
-    if not request.user.is_staff:
+    from .staff_roles import can
+    if not request.user.is_staff or not can(request.user, "sellers"):
         return HttpResponseForbidden("Staff access only.")
     if field not in ("business_certificate", "id_document"):
         raise Http404
@@ -2879,8 +2922,11 @@ def confirm_cod(request, order_id, token):
     if not order.cod_confirmed and order.cod_otp_hash:
         messages.info(request, f"Please confirm order #{order.id} with the code we texted to your phone.")
         return redirect("order_success", order_id=order.id) if _can_see_order(request, order) else redirect("home")
-    if not order.cod_confirmed:
-        Order.objects.filter(pk=order.pk).update(cod_confirmed=True)
+    if not order.cod_confirmed and request.method != "POST":
+        # Email scanners open links automatically, so the link only shows a
+        # button; the customer's own click (POST) confirms the order.
+        return render(request, "bees/confirm_cod.html", {"order": order, "token": token})
+    if not order.cod_confirmed and Order.objects.filter(pk=order.pk, cod_confirmed=False).update(cod_confirmed=True):
         order.cod_confirmed = True
         OrderEvent.objects.create(order=order, kind="note", text="Cash on delivery order confirmed by the customer")
         if order.user_id:
@@ -3047,3 +3093,18 @@ def ai_product_question(request, pk):
     if not answer:
         return JsonResponse({"error": "The assistant can't answer right now. Ask the seller instead."}, status=503)
     return JsonResponse({"answer": answer})
+
+
+def health(request):
+    """For uptime monitors (UptimeRobot, Better Stack...): 200 when the site
+    and its database answer, 503 otherwise. No private details."""
+    from django.db import connection
+    try:
+        with connection.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+    except Exception:
+        return JsonResponse({"ok": False, "database": "down"}, status=503)
+    resp = JsonResponse({"ok": True})
+    resp["Cache-Control"] = "no-store"
+    return resp

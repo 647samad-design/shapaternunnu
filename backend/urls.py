@@ -20,6 +20,7 @@ from bees import promo_views as pv
 from bees import ads as ads_views
 from bees import campaigns as camp
 from bees import webpush
+from bees import reports_listing
 from bees.sitemaps import ProductSitemap, CategorySitemap, SellerSitemap, StaticViewSitemap
 from bees.ratelimit import ratelimit
 
@@ -37,6 +38,9 @@ urlpatterns = [
     path('app-icon-<int:size>.png', pwa.icon, name='pwa_icon'),
     path('sw.js', pwa.service_worker, name='service_worker'),
     path('offline/', pwa.offline, name='offline'),
+    path('health/', views.health, name='health'),
+    path('product/<int:pk>/report/', reports_listing.report, name='report_listing'),
+    path('manage/listing-reports/', mv.staff_required(reports_listing.admin_page), name='manage_listing_reports'),
     path('robots.txt', TemplateView.as_view(template_name="robots.txt", content_type="text/plain"), name='robots'),
     path('', views.home, name='home'),
     path('search/', views.search_products, name='search_products'),

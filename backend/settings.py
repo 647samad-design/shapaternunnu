@@ -58,6 +58,7 @@ ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', '*' if DEBUG else 'localhost,127.0.0.1
 # Number of reverse proxies in front of Django (Render/Railway/Heroku/Fly = 1).
 # Used to read the real client IP for rate limiting. Leave 0 if unsure.
 NUM_PROXIES = int(os.environ.get('NUM_PROXIES', '0'))
+CSP_REPORT_ONLY = env_bool('CSP_REPORT_ONLY', False)
 
 if not DEBUG:
     SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', True)
@@ -105,6 +106,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'bees.background.AfterResponseMiddleware',
     'bees.staging.StagingMiddleware',
+    'bees.middleware.SecurityHeadersMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.locale.LocaleMiddleware',
@@ -208,7 +210,14 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# The store's own time zone (e.g. Asia/Karachi, Asia/Dubai, Europe/London):
+# used for sale start/end times, daily reports and payout days.
+TIME_ZONE = os.environ.get('TIME_ZONE', 'UTC').strip() or 'UTC'
+try:
+    import zoneinfo as _zi
+    _zi.ZoneInfo(TIME_ZONE)
+except Exception:
+    TIME_ZONE = 'UTC'
 
 USE_I18N = True
 
@@ -219,6 +228,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+CDN_URL = os.environ.get('CDN_URL', '').strip()
 # Optional CDN (Cloudflare, BunnyCDN, CloudFront...) in front of /static/:
 # point the CDN at this site, then set CDN_URL=https://cdn.example.com
 if os.environ.get('CDN_URL', '').startswith('https://'):
@@ -374,13 +384,22 @@ if STAGING:
 if os.environ.get('REDIS_URL'):
     CACHES = {'default': {'BACKEND': 'django.core.cache.backends.redis.RedisCache', 'LOCATION': os.environ['REDIS_URL']}}
     CACHES['live'] = CACHES['default']
-else:
+elif 'test' in sys.argv:
     CACHES = {
         'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'},
-        # Who is online / typing: shared by every web worker on this server.
-        'live': ({'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'live'} if 'test' in sys.argv else
-                 {'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
-                  'LOCATION': str(BASE_DIR / '.live-cache'), 'OPTIONS': {'MAX_ENTRIES': 5000}}),
+        'live': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'live'},
+    }
+else:
+    # Without Redis, the cache must still be SHARED by every web worker:
+    # store settings, sign-in links (Google/Apple), 2-step codes, rate limits
+    # and bulk-import previews are kept here, and a per-process memory cache
+    # would make them randomly "expire" when the next request lands on
+    # another worker. Files on this server are shared by all its workers.
+    CACHES = {
+        'default': {'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
+                    'LOCATION': str(BASE_DIR / '.cache'), 'OPTIONS': {'MAX_ENTRIES': 20000}},
+        'live': {'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
+                 'LOCATION': str(BASE_DIR / '.live-cache'), 'OPTIONS': {'MAX_ENTRIES': 5000}},
     }
 
 # Error monitoring (Sentry). Only activates if SENTRY_DSN is set as an

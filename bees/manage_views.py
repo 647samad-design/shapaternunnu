@@ -51,6 +51,11 @@ def staff_required(view):
     return wrapped
 
 
+def _open_listing_reports():
+    from .models import ListingReport
+    return ListingReport.objects.filter(status="open").count()
+
+
 def attention_counts(force=False):
     """Numbers shown as badges in the admin sidebar and header icon.
     Cached for 30 seconds so they don't add queries to every page."""
@@ -59,7 +64,7 @@ def attention_counts(force=False):
         unread_user_msgs = ChatMessage.objects.filter(thread=OuterRef("pk"), sender="user", is_read=False)
         data = {
             "orders": Order.objects.filter(status__in=["pending", "confirmed"]).exclude(payment_status__in=["pending", "failed"]).count(),
-            "products": Product.objects.filter(approval_status="pending").count(),
+            "products": Product.objects.filter(approval_status="pending").count() + _open_listing_reports(),
             "sellers": SellerAccount.objects.filter(status="pending").count() + Payout.objects.filter(status="requested").count(),
             "returns": ReturnRequest.objects.filter(status="requested").count(),
             "questions": Question.objects.filter(answer="").count(),
@@ -987,6 +992,15 @@ def system_check(request):
         add("Security", "Demo mode", False, "DEMO_MODE is on: anyone can sign in as the demo admin. Only use it on a separate demo copy.", level="warn")
     staff = User.objects.filter(is_staff=True, is_active=True)
     without = [u.username for u in staff if not getattr(getattr(u, "profile", None), "totp_enabled", False)]
+    import ipaddress
+    remote = request.META.get("REMOTE_ADDR", "")
+    try:
+        private = ipaddress.ip_address(remote).is_private or ipaddress.ip_address(remote).is_loopback
+    except ValueError:
+        private = False
+    if private and request.META.get("HTTP_X_FORWARDED_FOR") and not getattr(dj, "NUM_PROXIES", 0):
+        add("Security", "Visitor addresses", False, "Every visitor looks like the same address (the hosting's proxy), so sign-in and checkout limits "
+            "would block everyone at once. Set NUM_PROXIES=1 in the .env file and reload.")
     add("Security", "Staff two-step sign-in", not without, "All staff use it." if not without else f"Not set up: {', '.join(without[:5])}.",
         level=None if not without else "warn")
 

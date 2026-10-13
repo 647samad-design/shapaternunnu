@@ -27,8 +27,8 @@
         <div class="field"><label for="ps-name">Name</label><input id="ps-name" name="name" maxlength="80" placeholder="Weekend sale" required></div>
         <div class="field"><label for="ps-pct">% off</label><input id="ps-pct" name="percent_off" type="number" min="1" max="90" value="15" required></div>
         <div class="field"><label for="ps-cat">Products</label><select id="ps-cat" name="category"><option value="">All {% if store %}store {% endif %}products</option>{% for code, label in categories %}<option value="{{ code }}">{{ label }}</option>{% endfor %}</select></div>
-        <div class="field"><label for="ps-start">Starts</label><input id="ps-start" name="starts_at" type="datetime-local" value="{{ now_local }}" required></div>
-        <div class="field"><label for="ps-end">Ends</label><input id="ps-end" name="ends_at" type="datetime-local" value="{{ week_local }}" required></div>
+        <div class="field"><label for="ps-start">Starts <span class="muted small">({{ tz_name }})</span></label><input id="ps-start" name="starts_at" type="datetime-local" value="{{ now_local }}" required></div>
+        <div class="field"><label for="ps-end">Ends <span class="muted small">({{ tz_name }})</span></label><input id="ps-end" name="ends_at" type="datetime-local" value="{{ week_local }}" required></div>
         <button class="btn btn-primary btn-sm" type="submit">Schedule sale</button>
     </form>
     <div class="table-scroll" style="margin-top:12px;"><table class="table"><thead><tr><th>Sale</th><th>When</th><th>Status</th><th></th></tr></thead><tbody>

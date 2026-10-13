@@ -17,6 +17,7 @@ from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from .ratelimit import ratelimit
 from django.utils.timesince import timesince
 from django.views.decorators.http import require_POST
 
@@ -231,6 +232,7 @@ def conversation(request, pk):
 
 @login_required
 @require_POST
+@ratelimit("message_send", rate_limit=40, window_seconds=300)
 def send_view(request, pk):
     conv = get_object_or_404(Conversation.objects.select_related("seller__user", "buyer"), pk=pk)
     side = side_for(request.user, conv)

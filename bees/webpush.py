@@ -25,6 +25,18 @@ logger = logging.getLogger(__name__)
 TIMEOUT = 10
 
 
+# Only real browser push services are accepted as endpoints, so nobody can
+# make the server send requests to other (internal) addresses.
+PUSH_HOSTS = ("fcm.googleapis.com", "updates.push.services.mozilla.com", "push.services.mozilla.com",
+              "web.push.apple.com", "notify.windows.com", "push.apple.com", "android.googleapis.com")
+
+
+def allowed_endpoint(url):
+    parts = urlparse(url or "")
+    host = (parts.hostname or "").lower()
+    return parts.scheme == "https" and not parts.port and any(host == h or host.endswith("." + h) for h in PUSH_HOSTS)
+
+
 def b64u(data):
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
@@ -92,6 +104,8 @@ def _vapid_header(endpoint):
 
 def send(subscription, title, body="", url="/", tag=""):
     """Pushes one message. Returns 'ok', 'gone' (delete it) or 'error'."""
+    if not allowed_endpoint(subscription.endpoint):
+        return "gone"
     payload = json.dumps({"title": title[:120], "body": body[:300], "url": url or "/", "tag": tag[:60]}).encode()
     try:
         data = encrypt(payload, subscription.p256dh, subscription.auth)
@@ -159,7 +173,7 @@ def subscribe_view(request):
         return JsonResponse({"ok": True})
     endpoint = (data.get("endpoint") or "")[:500]
     keys = data.get("keys") or {}
-    if not endpoint.startswith("https://") or not keys.get("p256dh") or not keys.get("auth"):
+    if not allowed_endpoint(endpoint) or not keys.get("p256dh") or not keys.get("auth"):
         return JsonResponse({"ok": False}, status=400)
     try:
         if len(b64u_decode(keys["p256dh"])) != 65 or len(b64u_decode(keys["auth"])) != 16:
