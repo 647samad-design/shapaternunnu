@@ -179,7 +179,7 @@
         .page { padding-top: 32px; padding-bottom: 56px; }
         .page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; margin-bottom: 24px; }
         .page-head p { color: var(--muted); margin-top: 6px; }
-        .acct-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--line); margin: -8px 0 24px; scrollbar-width: none; }
+        .acct-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--line); margin: -8px 0 24px; }
         .acct-tabs a { flex: none; padding: 10px 14px; font-weight: 700; color: var(--muted); text-decoration: none; border-bottom: 3px solid transparent; margin-bottom: -1px; white-space: nowrap; }
         .acct-tabs a:hover { color: var(--ink); }
         .acct-tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--brand); }
@@ -294,14 +294,21 @@
         details.menu { position: relative; }
         details.menu > summary { list-style: none; }
         details.menu > summary::-webkit-details-marker { display: none; }
-        .menu-panel { position: absolute; right: 0; top: calc(100% + 8px); min-width: 240px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; z-index: 300; box-shadow: 0 16px 40px rgba(20,26,31,.14); }
+        .menu-panel { position: absolute; right: 0; top: calc(100% + 8px); min-width: 240px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; z-index: 300; box-shadow: 0 16px 40px rgba(20,26,31,.14); max-height: calc(100vh - 110px); max-height: calc(100dvh - 110px); overflow-y: auto; overscroll-behavior: contain; }
+        /* Thin, theme-coloured scrollbars for the few boxes that scroll on their own
+           (menus, sidebars, category strip). They only appear when there's more to see. */
+        .menu-panel, .catnav ul, .acct-tabs, .adm-nav, .suggestions, .chat-body { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; }
+        .menu-panel::-webkit-scrollbar, .catnav ul::-webkit-scrollbar, .acct-tabs::-webkit-scrollbar, .adm-nav::-webkit-scrollbar, .suggestions::-webkit-scrollbar, .chat-body::-webkit-scrollbar { width: 8px; height: 8px; }
+        .menu-panel::-webkit-scrollbar-thumb, .catnav ul::-webkit-scrollbar-thumb, .acct-tabs::-webkit-scrollbar-thumb, .adm-nav::-webkit-scrollbar-thumb, .suggestions::-webkit-scrollbar-thumb, .chat-body::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 45%, transparent); border-radius: 999px; }
+        .menu-panel::-webkit-scrollbar-track, .catnav ul::-webkit-scrollbar-track, .acct-tabs::-webkit-scrollbar-track, .adm-nav::-webkit-scrollbar-track, .suggestions::-webkit-scrollbar-track, .chat-body::-webkit-scrollbar-track { background: transparent; }
         .menu-panel a, .menu-panel button { display: flex; width: 100%; padding: 11px 12px; border-radius: var(--radius-sm); text-decoration: none; background: none; border: 0; cursor: pointer; text-align: left; font-size: 1rem; }
         .menu-panel a:hover, .menu-panel button:hover { background: var(--surface-2); }
         .menu-panel .menu-head { padding: 8px 12px 10px; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
         .menu-panel .menu-head strong { display: block; }
         .catnav { border-top: 1px solid var(--line); }
-        .catnav ul { list-style: none; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; padding: 8px 0; }
-        .catnav ul::-webkit-scrollbar { display: none; }
+        .catnav ul { list-style: none; display: flex; gap: 4px; overflow-x: auto; padding: 8px 0; overscroll-behavior-x: contain; }
+        /* Touch screens swipe, so the bar stays hidden there; with a mouse it shows. */
+        @media (hover: none) { .catnav ul, .acct-tabs { scrollbar-width: none; } .catnav ul::-webkit-scrollbar, .acct-tabs::-webkit-scrollbar { display: none; } }
         .catnav a { display: block; white-space: nowrap; padding: 7px 14px; border-radius: 999px; text-decoration: none; color: var(--muted); font-weight: 700; font-size: 0.95rem; }
         .catnav a:hover { color: var(--ink); background: var(--surface-2); }
         .catnav a.active { color: var(--on-brand); background: var(--brand); }
@@ -1205,6 +1212,44 @@
     </script>
     <script>if ('serviceWorker' in navigator && location.protocol === 'https:') { window.addEventListener('load', function () { navigator.serviceWorker.register('{% url "service_worker" %}').catch(function () {}); }); }</script>
     {% block extra_js %}{% endblock %}
+<script>
+/* Side-scrolling strips (categories, account tabs): the mouse wheel scrolls them
+   sideways, and the current tab is brought into view. */
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.catnav ul, .acct-tabs, .adm-nav').forEach(function (el) {
+        el.addEventListener('wheel', function (e) {
+            if (getComputedStyle(el).overflowX === 'visible' || el.scrollWidth <= el.clientWidth + 1) return;
+            if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                var before = el.scrollLeft;
+                el.scrollLeft += e.deltaY;
+                if (el.scrollLeft !== before) e.preventDefault();
+            }
+        }, { passive: false });
+        var on = el.querySelector('a.on, a[aria-current="page"], a.active');
+        if (on) {
+            var box = el.getBoundingClientRect(), r = on.getBoundingClientRect();
+            if (el.scrollWidth > el.clientWidth + 1 && (r.right > box.right || r.left < box.left)) el.scrollLeft += r.left - box.left - (box.width - r.width) / 2;
+            if (el.scrollHeight > el.clientHeight + 1 && (r.bottom > box.bottom || r.top < box.top)) el.scrollTop += r.top - box.top - (box.height - r.height) / 2;
+        }
+    });
+    /* Panels that stay in view while the page scrolls (buy box, order summary,
+       filters) only do so when they fit on the screen - otherwise their bottom
+       part (e.g. the Pay button) could never be reached. */
+    var sticky = document.querySelectorAll('.buybox, .co-summary, .filters');
+    function fit() {
+        sticky.forEach(function (el) {
+            el.style.position = '';
+            var cs = getComputedStyle(el);
+            if (cs.position === 'sticky' && el.offsetHeight > window.innerHeight - (parseFloat(cs.top) || 0) - 16) el.style.position = 'static';
+        });
+    }
+    if (sticky.length) {
+        fit();
+        window.addEventListener('resize', fit);
+        if (window.ResizeObserver) { var ro = new ResizeObserver(function () { fit(); }); sticky.forEach(function (el) { ro.observe(el); }); }
+    }
+});
+</script>
 <script>
 /* Scrollable tables can be scrolled with the keyboard (WCAG 2.1.1). */
 document.addEventListener('DOMContentLoaded', function () {

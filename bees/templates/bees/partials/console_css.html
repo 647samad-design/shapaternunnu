@@ -8,7 +8,8 @@
     .adm-top .links a, .adm-top .links button { color: var(--on-brand); text-decoration: none; font-weight: 700; padding: 8px 12px; border-radius: var(--radius-sm); background: none; border: 0; cursor: pointer; font-size: 0.95rem; }
     .adm-top .links a:hover, .adm-top .links button:hover { background: color-mix(in srgb, var(--on-brand) 12%, transparent); }
     .adm { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 28px; align-items: start; padding-block: 28px 64px; }
-    .adm-nav { position: sticky; top: 84px; display: grid; gap: 2px; }
+    /* The side menu stays in view; when it's taller than the screen it scrolls on its own. */
+    .adm-nav { position: sticky; top: 84px; display: grid; gap: 2px; max-height: calc(100vh - 100px); max-height: calc(100dvh - 100px); overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
     .adm-nav a { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius-sm); text-decoration: none; color: var(--muted); font-weight: 700; }
     .adm-nav a svg { width: 20px; height: 20px; flex-shrink: 0; }
     .adm-nav a:hover { background: var(--surface); color: var(--ink); }
@@ -54,7 +55,7 @@
     .bulkbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); }
     @media (max-width: 960px) {
         .adm { grid-template-columns: minmax(0, 1fr); padding-top: 12px; gap: 16px; }
-        .adm-nav { position: static; display: flex; overflow-x: auto; gap: 4px; padding-bottom: 6px; scrollbar-width: thin; }
+        .adm-nav { position: static; display: flex; overflow-x: auto; overflow-y: hidden; max-height: none; gap: 4px; padding-bottom: 6px; }
         .adm-nav a { white-space: nowrap; background: var(--surface); border: 1px solid var(--line); }
         .adm-nav a.on { box-shadow: none; border-color: var(--brand); }
         .adm-nav hr { display: none; }
