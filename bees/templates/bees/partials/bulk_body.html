@@ -3,7 +3,7 @@
 {% if preview %}
 <section class="panel">
     <h2>Check before saving</h2>
-    <p class="muted">From <strong data-no-translate>{{ file_name }}</strong>: <strong>{{ preview.counts.create }}</strong> new, <strong>{{ preview.counts.update }}</strong> to update, {{ preview.counts.same }} unchanged{% if preview.counts.error %}, <strong style="color:var(--sale);">{{ preview.counts.error }} with problems (skipped)</strong>{% endif %}. Nothing is saved until you press Save.</p>
+    <p class="muted">From <strong data-no-translate>{{ file_name }}</strong>: <strong>{{ preview.counts.create }}</strong> new, <strong>{{ preview.counts.update }}</strong> to update,{% if preview.counts.options %} sizes/colours for <strong>{{ preview.counts.options }}</strong>,{% endif %} {{ preview.counts.same }} unchanged{% if preview.counts.error %}, <strong style="color:var(--sale);">{{ preview.counts.error }} with problems (skipped)</strong>{% endif %}. Nothing is saved until you press Save.</p>
     <div class="table-scroll" style="max-height:60vh;overflow:auto;margin-top:12px;"><table class="table">
         <thead><tr><th>Line</th><th>Product</th><th>What happens</th></tr></thead>
         <tbody>
@@ -13,11 +13,15 @@
                 {% else %}<span class="pill {% if r.action == 'create' %}ok{% endif %}">{% if r.action == "create" %}New{% else %}Update{% endif %}</span>
                 <span class="small" data-no-translate>{{ r.changes|join:" · " }}</span>{% if r.review %} <span class="pill warn">Review</span>{% endif %}{% if r.note %} <span class="muted small">({{ r.note }})</span>{% endif %}{% endif %}</td></tr>
         {% endif %}{% endfor %}
+        {% for r in preview.options %}
+        <tr><td class="num">{{ r.line }}</td><td data-no-translate>{% if r.id %}#{{ r.id }} {% endif %}{{ r.name|default:"—" }}</td>
+            <td>{% if r.action == "error" %}<span class="pill bad">Skipped</span> {{ r.errors|join:"; " }}{% else %}<span class="pill">Sizes/colours</span> <span class="small" data-no-translate>{{ r.changes|join:" · " }}</span>{% endif %}</td></tr>
+        {% endfor %}
         </tbody>
     </table></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">
-        {% if preview.counts.create or preview.counts.update %}
-        <form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="action" value="confirm">{% if scope %}<input type="hidden" name="scope" value="{{ scope }}">{% endif %}<button class="btn btn-primary" type="submit">Save {{ preview.counts.create|add:preview.counts.update }} product{{ preview.counts.create|add:preview.counts.update|pluralize }}</button></form>
+        {% if preview.counts.create or preview.counts.update or preview.counts.options %}
+        <form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="action" value="confirm">{% if scope %}<input type="hidden" name="scope" value="{{ scope }}">{% endif %}<button class="btn btn-primary" type="submit">Save changes</button></form>
         {% endif %}
         <a class="btn btn-secondary" href="{% url url_name %}{% if scope %}?scope={{ scope }}{% endif %}">Cancel</a>
     </div>
@@ -40,7 +44,7 @@
         <div class="field"><label for="bulk-file">CSV or Excel file (up to 2,000 rows)</label><input id="bulk-file" type="file" name="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></div>
         <button class="btn btn-primary btn-sm" type="submit">Check file</button>
     </form>
-    <p class="muted small" style="margin-top:8px;">Rows with an <code>id</code> update that product; rows without one add a new product{% if not store %} (new products and name/photo/description changes go live after review){% endif %}. You'll see every change before anything is saved.</p>
+    <p class="muted small" style="margin-top:8px;">Rows with an <code>id</code> update that product; rows without one add a new product. Sizes and colours go on the Excel file's "options" sheet (or a CSV with product, size, color, stock columns){% if not store %} (new products and name/photo/description changes go live after review){% endif %}. You'll see every change before anything is saved.</p>
 </section>
 </div>
 <section class="panel">

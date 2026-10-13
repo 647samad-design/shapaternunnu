@@ -19,8 +19,11 @@ def _handle(request, products, *, seller=None, store=False, back, render):
                 messages.error(request, "Choose a CSV or Excel file first.")
                 return redirect(back)
             try:
-                rows = bulk.read_rows(upload)
+                rows, option_rows = bulk.read_file(upload)
                 result = bulk.plan(rows, products, seller=seller, store=store)
+                result["options"] = bulk.plan_options(option_rows, products, result)
+                result["counts"]["options"] = sum(1 for e in result["options"] if e["action"] == "options")
+                result["counts"]["error"] += sum(1 for e in result["options"] if e["action"] == "error")
             except bulk.BulkError as exc:
                 messages.error(request, str(exc))
                 return redirect(back)

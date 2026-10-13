@@ -129,6 +129,13 @@
         </div>
     </section>
 
+    {% if sponsored %}
+    <section class="section" id="sponsored" aria-labelledby="sponsored-h">
+        <div class="section-head"><h2 id="sponsored-h">Sponsored picks</h2></div>
+        <div class="grid-products">{% for ad in sponsored %}{% with product=ad.product %}{% include "bees/partials/product_card.html" %}{% endwith %}{% endfor %}</div>
+    </section>
+    {% endif %}
+
     <section class="section" id="new">
         <div class="section-head">
             <h2>New arrivals</h2>

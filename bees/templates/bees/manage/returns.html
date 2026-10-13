@@ -24,7 +24,8 @@
             <label for="note{{ r.id }}" class="sr-only">Note to customer</label>
             <input class="input" id="note{{ r.id }}" name="note" value="{{ r.admin_note }}" placeholder="Note to the customer (optional, e.g. return address or reason)">
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                {% if r.status == 'requested' %}<button class="btn btn-primary btn-sm" name="action" value="approve">Approve return</button>{% endif %}
+                {% if r.status == 'requested' %}<button class="btn btn-primary btn-sm" name="action" value="approve">Approve return</button>{% if courier_on %}<button class="btn btn-primary btn-sm" name="action" value="approve_label">Approve + send prepaid label</button>{% endif %}{% endif %}
+                {% if r.status == 'approved' and courier_on %}{% with lb=r.labels.first %}{% if lb and lb.label_url %}<a class="btn btn-ghost btn-sm" href="{{ lb.label_url }}" target="_blank" rel="noopener">Return label ({{ lb.get_status_display }})</a>{% else %}<button class="btn btn-secondary btn-sm" name="action" value="return_label">Send prepaid return label</button>{% endif %}{% endwith %}{% endif %}
                 <button class="btn btn-secondary btn-sm" name="action" value="refund">{% if r.plan.card %}Refund {{ r.plan.card|money }} to card{% if r.plan.credit %} + {{ r.plan.credit|money }} credit{% endif %}{% elif r.plan.credit %}Give {{ r.plan.credit|money }} store credit{% else %}Mark paid back ({{ r.plan.manual|money }}){% endif %}</button>
                 {% if r.plan.card or r.plan.manual %}<button class="btn btn-ghost btn-sm" name="action" value="refund_credit">Refund as store credit instead</button>{% endif %}
                 {% if r.status == 'requested' %}<button class="btn btn-ghost btn-sm" name="action" value="reject" style="color:var(--sale);">Reject</button>{% endif %}

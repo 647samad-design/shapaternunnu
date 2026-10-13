@@ -86,7 +86,9 @@ def _page(request, qs, per_page=25):
 
 
 def _render(request, template, context):
+    from . import staff_roles
     context.setdefault("attention", attention_counts())
+    context.setdefault("staff_areas", staff_roles.areas(request.user))
     return render(request, f"bees/manage/{template}", context)
 
 
@@ -1138,10 +1140,19 @@ def returns(request):
         note = request.POST.get("note", "").strip()[:255]
         if note:
             rr.admin_note = note
-        if action == "approve":
+        if action in ("approve", "approve_label"):
             rr.status = "approved"
             rr.save()
             messages.success(request, "Return approved. The customer has been notified.")
+        if action in ("approve_label", "return_label"):
+            from . import couriers
+            try:
+                label = couriers.return_label(rr, user=request.user)
+            except couriers.CourierError as exc:
+                messages.error(request, f"Couldn't book the return label: {exc}")
+            else:
+                messages.success(request, f"Prepaid return label emailed to the customer ({label.carrier} {label.tracking_number}"
+                                 + (f", {label.cost} {label.cost_currency}" if label.cost else "") + ").")
         elif action == "reject":
             rr.status = "rejected"
             rr.save()
@@ -1165,7 +1176,9 @@ def returns(request):
     for r in page_obj:
         if r.status in ("requested", "approved"):
             r.plan = r.refund_plan()
-    return _render(request, "returns.html", {"section": "returns", "page_obj": page_obj, "status": status, "status_choices": ReturnRequest.STATUS_CHOICES})
+    from . import couriers
+    return _render(request, "returns.html", {"section": "returns", "page_obj": page_obj, "status": status, "status_choices": ReturnRequest.STATUS_CHOICES,
+                                             "courier_on": couriers.active() is not None})
 
 
 # ---------------------------------------------------------------------------
@@ -1249,6 +1262,9 @@ def keys(request):
                 changes[key] = value
         if request.POST.get("new_webhook_token"):
             changes["SHIPPING_WEBHOOK_TOKEN"] = _secrets.token_urlsafe(24)
+        if request.POST.get("new_push_keys"):
+            from .webpush import generate_keys
+            changes["VAPID_PUBLIC_KEY"], changes["VAPID_PRIVATE_KEY"] = generate_keys()
         if not changes:
             messages.info(request, "Nothing to change.")
             return redirect("manage_keys")
@@ -1277,7 +1293,7 @@ def keys(request):
     token = current.get("SHIPPING_WEBHOOK_TOKEN", "")
     webhook = request.build_absolute_uri(_reverse("courier_webhook", args=[token])) if token else ""
     return _render(request, "keys.html", {
-        "section": "keys", "groups": groups, "webhook_url": webhook, "paypal_webhook": paypal_webhook, "social_redirects": social_redirects, "env_exists": os.path.exists(envfile.path()),
+        "section": "keys", "groups": groups, "webhook_url": webhook, "paypal_webhook": paypal_webhook, "social_redirects": social_redirects, "push_ready": bool(current.get("VAPID_PRIVATE_KEY")), "env_exists": os.path.exists(envfile.path()),
         "locked": [(k, bool(current.get(k))) for k in envfile.LOCKED],
     })
 
@@ -1410,6 +1426,8 @@ class SiteSettingsForm(forms.ModelForm):
          ["support_email", "support_phone", "company_address", "facebook_url", "instagram_url", "twitter_url", "youtube_url"]),
         ("Seller payouts", "Sellers choose PayPal or Stripe in Seller Center > Earnings. Only money past the return window is sent. Bank-transfer sellers are still paid by hand.",
          ["auto_payouts", "min_auto_payout"]),
+        ("Sponsored products", "Sellers pay per click to show products at the top of search, category pages and the homepage. Manage under Sponsored products.",
+         ["ads_enabled", "ads_min_bid", "ads_slots"]),
         ("Gift cards", "Sell digital gift cards on /gift-cards/. Manage and send free ones under Gift cards.", ["gift_cards_enabled"]),
         ("Referral program", "Customers invite friends with their own link. Discount codes are created automatically.",
          ["referral_enabled", "referral_friend_percent", "referral_reward_percent"]),
@@ -1432,7 +1450,7 @@ class SiteSettingsForm(forms.ModelForm):
 
     OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent",
                 "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams", "duties_policy",
-                "cod_max_order", "cod_refusal_limit", "min_auto_payout", "auto_payouts")
+                "cod_max_order", "cod_refusal_limit", "min_auto_payout", "auto_payouts", "ads_min_bid", "ads_slots")
 
     def _clean_id(self, name, pattern, example):
         import re as _re
@@ -1465,6 +1483,15 @@ class SiteSettingsForm(forms.ModelForm):
     def _keep(self, name):
         value = self.cleaned_data.get(name)
         return getattr(self.instance, name) if value is None else value
+
+    def clean_ads_min_bid(self):
+        return self._keep("ads_min_bid")
+
+    def clean_ads_slots(self):
+        value = self._keep("ads_slots")
+        if value is not None and value > 6:
+            raise ValidationError("Use 0 to 6.")
+        return value
 
     def clean_min_auto_payout(self):
         return self._keep("min_auto_payout")
@@ -2145,3 +2172,87 @@ def _report_csv(kind, data, start, end):
         for r in data["by_country"]:
             w.writerow([r["name"], r["orders"], r["revenue"]])
     return resp
+
+
+# ---------------------------------------------------------------------------
+# Store team (staff accounts and roles)
+# ---------------------------------------------------------------------------
+
+@staff_required
+def team(request):
+    from . import staff_roles
+    if not request.user.is_superuser:
+        messages.error(request, "Only the store owner can manage the team.")
+        return redirect("manage_dashboard")
+    roles = dict(staff_roles.ROLES)
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "add":
+            email = request.POST.get("email", "").strip().lower()
+            role = request.POST.get("role", "")
+            if role not in roles:
+                messages.error(request, "Choose a role.")
+                return redirect("manage_team")
+            try:
+                from django.core.validators import validate_email
+                validate_email(email)
+            except ValidationError:
+                messages.error(request, "Enter a valid email address.")
+                return redirect("manage_team")
+            user = User.objects.filter(email__iexact=email).order_by("id").first()
+            created = False
+            if user is None:
+                base = "".join(ch for ch in email.split("@")[0] if ch.isalnum() or ch in "._-")[:20] or "staff"
+                username, n = base, 1
+                while User.objects.filter(username__iexact=username).exists():
+                    n += 1
+                    username = f"{base}{n}"
+                user = User(username=username, email=email)
+                user.set_unusable_password()
+                user.save()
+                created = True
+            if user.is_superuser:
+                messages.info(request, f"{email} is already a store owner.")
+                return redirect("manage_team")
+            user.is_staff = True
+            user.save(update_fields=["is_staff"])
+            Profile.objects.get_or_create(user=user)
+            Profile.objects.filter(user=user).update(staff_role="" if role == "manager" else role)
+            _send_team_invite(request, user, roles[role], created)
+            _log(request, f"Added {user.username} to the team as {role}")
+            messages.success(request, f"{email} added as {roles[role].split(' - ')[0]}." + (" We emailed them a link to set a password." if created else " They can sign in with their account."))
+        elif action in ("role", "remove"):
+            member = get_object_or_404(User, pk=request.POST.get("user"), is_staff=True, is_superuser=False)
+            if action == "remove":
+                member.is_staff = False
+                member.save(update_fields=["is_staff"])
+                Profile.objects.filter(user=member).update(staff_role="")
+                _log(request, f"Removed {member.username} from the team")
+                messages.success(request, f"{member.username} no longer has admin access.")
+            else:
+                role = request.POST.get("role", "")
+                if role in roles:
+                    Profile.objects.get_or_create(user=member)
+                    Profile.objects.filter(user=member).update(staff_role="" if role == "manager" else role)
+                    _log(request, f"{member.username}: team role -> {role}")
+                    messages.success(request, f"{member.username} is now {roles[role].split(' - ')[0]}.")
+        return redirect("manage_team")
+    members = list(User.objects.filter(is_staff=True).select_related("profile").order_by("-is_superuser", "username"))
+    for m in members:
+        m.role = staff_roles.role_of(m)
+        m.two_fa = Profile.objects.filter(user=m, totp_enabled=True).exists()
+    return _render(request, "team.html", {"section": "team", "members": members, "roles": staff_roles.ROLES,
+                                          "role_help": staff_roles.ROLE_HELP})
+
+
+def _send_team_invite(request, user, role_label, created):
+    from django.contrib.auth.tokens import default_token_generator
+    from django.utils.encoding import force_bytes
+    from django.utils.http import urlsafe_base64_encode
+    from .views import _send_html_email
+    if created:
+        url = request.build_absolute_uri(reverse("password_reset_confirm", args=[urlsafe_base64_encode(force_bytes(user.pk)), default_token_generator.make_token(user)]))
+    else:
+        url = request.build_absolute_uri(reverse("manage_dashboard"))
+    _send_html_email(f"You've been added to the {SiteSettings.load().site_name} team", "bees/emails/team_invite.html",
+                     {"user": user, "role": role_label, "url": url, "created": created, "inviter": request.user}, user.email)

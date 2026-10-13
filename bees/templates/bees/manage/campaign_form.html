@@ -1,0 +1,39 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}{% if campaign %}{{ campaign.subject }}{% else %}New campaign{% endif %}{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><a class="link small" href="{% url 'manage_campaigns' %}">← Email campaigns</a><h1 style="margin-top:6px;">{% if campaign %}{{ campaign.subject }}{% else %}New campaign{% endif %}</h1>
+    {% if campaign and campaign.status != "draft" %}<p>{{ campaign.get_status_display }}: {{ campaign.sent_count }} of {{ campaign.recipients|length }} sent{% if campaign.failed_count %}, {{ campaign.failed_count }} failed{% endif %} · {{ campaign.opens }} opens · {{ campaign.clicks }} clicks</p>{% else %}<p>Write it, send yourself a test, then send it.</p>{% endif %}</div></div>
+<div class="camp-grid">
+<section class="panel">
+    <form method="post" class="camp-form">{% csrf_token %}
+        {% with locked=campaign.status|default:"draft" %}
+        <fieldset {% if locked != "draft" %}disabled{% endif %} style="border:0;padding:0;margin:0;display:grid;gap:10px;">
+        <div class="field"><label for="c-s">Subject</label><input id="c-s" name="subject" maxlength="150" required value="{{ f.subject|default:'' }}" placeholder="New arrivals + 15% off this weekend"></div>
+        <div class="field"><label for="c-h">Heading</label><input id="c-h" name="heading" maxlength="150" required value="{{ f.heading|default:'' }}"></div>
+        <div class="field"><label for="c-b">Message</label><textarea id="c-b" name="body" rows="7" required>{{ f.body|default:'' }}</textarea><span class="hint">Leave a blank line between paragraphs.</span></div>
+        <div class="field"><label for="c-cc">Coupon code to show (optional)</label><input id="c-cc" name="coupon_code" maxlength="30" value="{{ f.coupon_code|default:'' }}"></div>
+        <div class="field"><label for="c-p">Products to show (ids, up to 4)</label><input id="c-p" name="product_ids" value="{{ ids }}" placeholder="12, 18, 25"><span class="hint">The number in a product's link: /product/<strong>12</strong>/</span></div>
+        <div class="two"><div class="field"><label for="c-bt">Button text</label><input id="c-bt" name="button_text" maxlength="40" value="{{ f.button_text|default:'' }}"></div>
+        <div class="field"><label for="c-bu">Button link</label><input id="c-bu" name="button_url" maxlength="300" value="{{ f.button_url|default:'' }}" placeholder="/category/skincare/"></div></div>
+        <div class="field"><label for="c-a">Send to</label><select id="c-a" name="audience">{% for v, l in audiences %}<option value="{{ v }}" {% if v == audience %}selected{% endif %}>{{ l }} ({% for k, n in counts.items %}{% if k == v %}{{ n }}{% endif %}{% endfor %})</option>{% endfor %}</select></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-sm" name="action" value="save">Save draft</button>
+            <button class="btn btn-secondary btn-sm" name="action" value="test">Send me a test</button>
+            <button class="btn btn-primary btn-sm" name="action" value="send" onclick="return confirm('Send this campaign now? It can\'t be undone.');">Send now</button>
+            {% if campaign %}<button class="btn btn-ghost btn-sm" name="action" value="delete" formnovalidate style="color:var(--sale);" onclick="return confirm('Delete this draft?');">Delete</button>{% endif %}
+        </div>
+        </fieldset>
+        {% endwith %}
+    </form>
+</section>
+<section class="panel">
+    <h2>Preview</h2>
+    {% if preview %}<iframe title="Email preview" srcdoc="{{ preview|force_escape }}" style="width:100%;height:640px;border:1px solid var(--line);border-radius:10px;background:#fff;"></iframe>
+    {% else %}<p class="muted">Save the draft to see how it looks.</p>{% endif %}
+</section>
+</div>
+<style>
+.camp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px; align-items: start; }
+.camp-form .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+</style>
+{% endblock %}

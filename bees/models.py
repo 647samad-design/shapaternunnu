@@ -770,6 +770,9 @@ class Coupon(models.Model):
     # Referral coupons belong to one customer (shown on their referrals page).
     owner = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="owned_coupons")
     purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES, blank=True, default="")
+    # A seller's own code: only their products get cheaper, and the seller
+    # pays for it (their line prices are reduced). Empty = store-wide code.
+    seller_account = models.ForeignKey("SellerAccount", null=True, blank=True, on_delete=models.CASCADE, related_name="coupons")
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     percent_off = models.PositiveIntegerField(default=10)
     active = models.BooleanField(default=True)
@@ -792,6 +795,24 @@ class Coupon(models.Model):
 
     def __str__(self):
         return f"{self.code} (-{self.percent_off}%)"
+
+    def unit_after(self, price):
+        """A seller-coupon line price after the discount."""
+        from decimal import Decimal, ROUND_HALF_UP
+        return (Decimal(price) * Decimal(100 - self.percent_off) / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    def applies_to(self, product):
+        return not self.seller_account_id or product.seller_account_id == self.seller_account_id
+
+    def discount_for(self, lines):
+        """(eligible subtotal, discount) for [(product, unit_price, qty)]."""
+        from decimal import Decimal, ROUND_HALF_UP
+        eligible = sum((Decimal(price) * qty for product, price, qty in lines if self.applies_to(product)), Decimal("0"))
+        if self.seller_account_id:
+            off = sum(((Decimal(price) - self.unit_after(price)) * qty for product, price, qty in lines if self.applies_to(product)), Decimal("0"))
+        else:
+            off = (eligible * Decimal(self.percent_off) / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return eligible, off
 
     def times_used(self):
         return Order.objects.filter(coupon_code__iexact=self.code).exclude(status="cancelled").count()
@@ -843,6 +864,7 @@ class Profile(models.Model):
     loyalty_points = models.PositiveIntegerField(default=0)
     language = models.CharField(max_length=8, blank=True, help_text="Language for emails (the one picked on the site).")
     sms_updates = models.BooleanField(default=True, help_text="Text messages about orders.")
+    staff_role = models.CharField(max_length=12, blank=True, help_text="Store team role (only for staff). Empty = manager.")
     price_drop_alerts = models.BooleanField(default=True, help_text="Email when something in the wishlist gets cheaper.")
     store_credit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     # Stripe customer that holds this person's saved cards. Card numbers
@@ -990,6 +1012,8 @@ class SellerAccount(models.Model):
     bank_details = models.CharField(max_length=255, blank=True)
     PAYOUT_METHODS = [("manual", "Bank / manual transfer"), ("paypal", "PayPal (automatic)"), ("stripe", "Stripe (automatic, to your bank)")]
     payout_method = models.CharField(max_length=10, choices=PAYOUT_METHODS, default="manual")
+    ad_spend = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False,
+                                   help_text="Sponsored-product clicks charged to this seller (taken from earnings).")
     paypal_email = models.EmailField(blank=True, help_text="PayPal account that receives automatic payouts.")
     stripe_account_id = models.CharField(max_length=64, blank=True, editable=False)
     stripe_payouts_ready = models.BooleanField(default=False, editable=False)
@@ -1086,8 +1110,9 @@ class SellerAccount(models.Model):
 
     @property
     def amount_owed(self):
-        """Net earnings not yet paid out to the seller. Never negative."""
-        owed = float(self.net_earnings) - float(self.total_paid_out)
+        """Net earnings not yet paid out to the seller (minus sponsored-product
+        costs, which are paid from earnings). Never negative."""
+        owed = float(self.net_earnings) - float(self.total_paid_out) - float(self.ad_spend or 0)
         return round(max(owed, 0), 2)
 
     @property
@@ -1459,6 +1484,9 @@ class SiteSettings(models.Model):
     min_auto_payout = models.DecimalField(max_digits=10, decimal_places=2, default=20, help_text="Only send automatic payouts of at least this amount.")
     charge_local_currency = models.BooleanField("Charge in the shopper's currency", default=False,
                                                 help_text="Card and PayPal payments are taken in the currency the shopper picked (at today's rate in Currencies), so their bank shows exactly that amount. Your Stripe/PayPal account converts it back.")
+    ads_enabled = models.BooleanField("Sponsored products", default=True, help_text="Sellers can pay per click to show products at the top of search and category pages. Paid from their earnings.")
+    ads_min_bid = models.DecimalField("Lowest cost per click", max_digits=6, decimal_places=2, default="0.10")
+    ads_slots = models.PositiveSmallIntegerField("Sponsored places per page", default=2)
     gift_cards_enabled = models.BooleanField(default=True, help_text="Sell digital gift cards (needs card or PayPal payments). Redeemed as store credit.")
     require_seller_2fa = models.BooleanField(default=False, help_text="Sellers must turn on two-step sign-in before using Seller Center.")
     cookie_banner = models.BooleanField(default=True, help_text="Ask visitors before using analytics/marketing cookies (required in the EU/UK).")
@@ -1807,6 +1835,8 @@ class Shipment(models.Model):
     order = models.ForeignKey("Order", related_name="shipments", on_delete=models.CASCADE)
     seller = models.ForeignKey(SellerAccount, null=True, blank=True, on_delete=models.SET_NULL, related_name="shipments")
     item_ids = models.JSONField(default=list)
+    is_return = models.BooleanField(default=False)
+    return_request = models.ForeignKey("ReturnRequest", null=True, blank=True, on_delete=models.SET_NULL, related_name="labels")
     provider = models.CharField(max_length=20)
     external_id = models.CharField(max_length=100, blank=True)
     transaction_id = models.CharField(max_length=100, blank=True)
@@ -1938,3 +1968,104 @@ class DailyStat(models.Model):
 
     def __str__(self):
         return f"{self.date} {self.kind} {self.key}: {self.count}"
+
+
+class Promotion(models.Model):
+    """A timed sale: a seller (or the store, for its own products) puts
+    products X% off between two times. Prices are lowered when it starts
+    (old price shown crossed out) and put back when it ends."""
+    STATUS = [("scheduled", "Scheduled"), ("active", "Running"), ("ended", "Ended"), ("cancelled", "Cancelled")]
+    seller_account = models.ForeignKey("SellerAccount", null=True, blank=True, on_delete=models.CASCADE, related_name="promotions")
+    name = models.CharField(max_length=80)
+    percent_off = models.PositiveSmallIntegerField()
+    category = models.CharField(max_length=30, blank=True, help_text="Empty = all products.")
+    product_ids = models.JSONField(default=list, blank=True, help_text="Empty = every product (in the category).")
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    status = models.CharField(max_length=10, choices=STATUS, default="scheduled", db_index=True)
+    saved_prices = models.JSONField(default=dict, blank=True, editable=False)
+    created_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-starts_at"]
+
+    def __str__(self):
+        return f"{self.name} (-{self.percent_off}%)"
+
+
+class AdCampaign(models.Model):
+    """A seller pays per click to show one product as "Sponsored"."""
+    STATUS = [("active", "Running"), ("paused", "Paused"), ("ended", "Ended")]
+    seller_account = models.ForeignKey("SellerAccount", on_delete=models.CASCADE, related_name="ad_campaigns")
+    product = models.ForeignKey("Product", on_delete=models.CASCADE, related_name="ad_campaigns")
+    bid = models.DecimalField("Cost per click", max_digits=6, decimal_places=2)
+    daily_budget = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=8, choices=STATUS, default="active", db_index=True)
+    paused_by_staff = models.BooleanField(default=False)
+    spent = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Ad #{self.pk} {self.product_id} @ {self.bid}"
+
+
+class AdStat(models.Model):
+    campaign = models.ForeignKey(AdCampaign, on_delete=models.CASCADE, related_name="stats")
+    date = models.DateField()
+    impressions = models.PositiveIntegerField(default=0)
+    clicks = models.PositiveIntegerField(default=0)
+    spend = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    orders = models.PositiveIntegerField(default=0)
+    sales = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    class Meta:
+        unique_together = ("campaign", "date")
+
+
+class EmailCampaign(models.Model):
+    """A marketing email to newsletter subscribers (people who opted in)."""
+    AUDIENCES = [("all", "All subscribers"), ("buyers", "Subscribers who have ordered"),
+                 ("new", "Subscribers who haven't ordered yet"), ("lapsed", "Customers who haven't ordered for 90 days")]
+    STATUS = [("draft", "Draft"), ("sending", "Sending"), ("sent", "Sent")]
+    subject = models.CharField(max_length=150)
+    heading = models.CharField(max_length=150)
+    body = models.TextField(help_text="Plain text. Blank lines start a new paragraph.")
+    button_text = models.CharField(max_length=40, blank=True)
+    button_url = models.CharField(max_length=300, blank=True)
+    product_ids = models.JSONField(default=list, blank=True)
+    coupon_code = models.CharField(max_length=30, blank=True)
+    audience = models.CharField(max_length=10, choices=AUDIENCES, default="all")
+    status = models.CharField(max_length=10, choices=STATUS, default="draft", db_index=True)
+    recipients = models.JSONField(default=list, blank=True, editable=False)
+    sent_count = models.PositiveIntegerField(default=0)
+    failed_count = models.PositiveIntegerField(default=0)
+    opens = models.PositiveIntegerField(default=0)
+    clicks = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.subject
+
+
+class PushSubscription(models.Model):
+    """A browser/phone that agreed to get notifications (web push)."""
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="push_subscriptions")
+    endpoint = models.URLField(max_length=500, unique=True)
+    p256dh = models.CharField(max_length=120)
+    auth = models.CharField(max_length=60)
+    user_agent = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Push for {self.user_id}"

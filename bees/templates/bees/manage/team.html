@@ -1,0 +1,37 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Team{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Team</h1><p>Give staff their own sign-in with only the parts of the admin they need. Every change they make is in the activity log.</p></div></div>
+<section class="panel">
+    <h2>Add someone</h2>
+    <form method="post" class="team-add">{% csrf_token %}<input type="hidden" name="action" value="add">
+        <div class="field"><label for="tm-e">Email</label><input id="tm-e" type="email" name="email" required autocomplete="off"></div>
+        <div class="field"><label for="tm-r">Role</label><select id="tm-r" name="role">{% for v, l in roles %}<option value="{{ v }}" {% if v == "support" %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+        <button class="btn btn-primary btn-sm" type="submit">Add to team</button>
+    </form>
+    <p class="muted small" style="margin-top:8px;">New people get an email to set their password. Turn on "Staff must use two-step sign-in" in Store settings &gt; Security for extra safety.</p>
+    <details style="margin-top:10px;"><summary class="small" style="font-weight:700;cursor:pointer;">What each role can open</summary>
+        <ul class="small" style="margin:8px 0 0;padding-inline-start:18px;line-height:1.7;">{% for v, l in roles %}<li><strong>{{ l }}</strong>: {% for k, h in role_help.items %}{% if k == v %}{{ h }}{% endif %}{% endfor %}</li>{% endfor %}
+        <li><strong>Owner</strong>: everything, including Keys &amp; passwords and this Team page.</li></ul>
+    </details>
+</section>
+<section class="panel" style="padding:8px 20px;">
+    <div class="table-scroll"><table class="table">
+        <thead><tr><th>Person</th><th>Role</th><th>Two-step</th><th>Last sign-in</th><th></th></tr></thead>
+        <tbody>
+        {% for m in members %}
+        <tr><td><strong data-no-translate>{{ m.get_full_name|default:m.username }}</strong><br><span class="muted small" data-no-translate>{{ m.email }}</span></td>
+            <td>{% if m.role == "owner" %}<span class="pill ok">Owner</span>{% else %}
+                <form method="post" style="display:flex;gap:6px;margin:0;">{% csrf_token %}<input type="hidden" name="action" value="role"><input type="hidden" name="user" value="{{ m.id }}">
+                    <label class="sr-only" for="role-{{ m.id }}">Role for {{ m.username }}</label>
+                    <select class="input" id="role-{{ m.id }}" name="role" onchange="this.form.submit()">{% for v, l in roles %}<option value="{{ v }}" {% if v == m.role %}selected{% endif %}>{{ l|truncatechars:24 }}</option>{% endfor %}</select>
+                    <noscript><button class="btn btn-ghost btn-sm">Save</button></noscript></form>{% endif %}</td>
+            <td>{% if m.two_fa %}<span class="pill ok">On</span>{% else %}<span class="pill warn">Off</span>{% endif %}</td>
+            <td class="small">{{ m.last_login|date:"M j, Y"|default:"Never" }}</td>
+            <td>{% if m.role != "owner" %}<form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="action" value="remove"><input type="hidden" name="user" value="{{ m.id }}"><button class="btn btn-ghost btn-sm" style="color:var(--sale);" onclick="return confirm('Remove admin access for {{ m.username|escapejs }}?');">Remove</button></form>{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+</section>
+<style>.team-add { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; align-items: end; }</style>
+{% endblock %}

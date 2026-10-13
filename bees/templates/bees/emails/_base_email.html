@@ -12,7 +12,7 @@
         {% block email_body %}{% endblock %}
     </td></tr>
     <tr><td style="padding:18px 32px;color:#56606B;font-size:13px;border-top:1px solid #DDE2E6;">
-        &copy; {% now "Y" %} {{ b.site_name }}{% if b.company_address %}, {{ b.company_address }}{% endif %}{% if b.support_email %}<br>Questions? Email <a href="mailto:{{ b.support_email }}" style="color:#56606B;">{{ b.support_email }}</a>{% endif %}
+        &copy; {% now "Y" %} {{ b.site_name }}{% if b.company_address %}, {{ b.company_address }}{% endif %}{% if b.support_email %}<br>Questions? Email <a href="mailto:{{ b.support_email }}" style="color:#56606B;">{{ b.support_email }}</a>{% endif %}{% if unsubscribe_url %}<br>You get this because you subscribed to our news. <a href="{{ unsubscribe_url }}" style="color:#56606B;">Unsubscribe</a>{% endif %}
     </td></tr>
 </table>
 </td></tr>

@@ -201,6 +201,7 @@
         .table th { text-align: left; font-weight: 700; color: var(--muted); padding: 10px 12px; border-bottom: 1.5px solid var(--line); }
         .table td { padding: 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
         .table-scroll { overflow-x: auto; }
+        .pcard-sponsored { display: inline-block; margin: 2px 0; font-size: .72rem; font-weight: 700; letter-spacing: .02em; color: var(--muted); }
         .stars { color: #B07400; letter-spacing: 1px; }
         html[data-theme="dark"] .stars { color: var(--accent); }
 
@@ -270,7 +271,13 @@
         .suggestions { display: none; position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); z-index: 260; overflow: hidden; box-shadow: 0 12px 32px rgba(20,26,31,.12); }
         .suggestions.show { display: block; }
         .suggestions a { display: block; padding: 12px 18px; text-decoration: none; }
-        .suggestions a:hover, .suggestions a:focus { background: var(--surface-2); }
+        .suggestions a:hover, .suggestions a:focus, .suggestions a.on { background: var(--surface-2); }
+        .suggestions { max-height: min(70vh, 520px); overflow-y: auto; }
+        .suggestions a { display: flex; align-items: center; gap: 10px; padding: 10px 16px; color: var(--ink); }
+        .suggestions a img { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; flex: none; }
+        .suggestions .sg-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .suggestions .sg-price { font-weight: 700; font-size: .9rem; }
+        .suggestions .sg-head { padding: 8px 16px 4px; font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
         .header-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
         .icon-btn { position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 46px; padding: 0 12px; border-radius: var(--radius-sm); text-decoration: none; color: var(--ink); background: none; border: 0; cursor: pointer; font-weight: 700; }
         .icon-btn:hover { background: var(--surface-2); }
@@ -497,6 +504,7 @@
     <a class="skip-link" href="#main">Skip to content</a>
 
     <div class="navbar-progress" id="nav-progress" aria-hidden="true"></div>
+    {% if staging %}<div class="demo-ribbon" style="background:#F2C94C;color:#1B1B1B;" role="status">TEST SITE - orders, emails and payments here aren't real. Emails go to the test inbox only.</div>{% endif %}
     {% if demo_mode %}<div class="demo-ribbon">Live demo: data resets every day. {% if user.is_authenticated %}Signed in as <strong>{{ user.first_name|default:user.username }}</strong>.{% endif %} <a href="{% url 'login' %}">Switch demo role</a></div>{% endif %}
     {% block site_header %}
     {% if site_banner %}
@@ -519,7 +527,8 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
                     </button>
                 </form>
-                <div id="search-suggestions" class="suggestions" role="listbox"></div>
+                <div id="search-suggestions" class="suggestions" role="listbox" aria-label="Suggestions"></div>
+                <span hidden id="sg-words"><span data-w="products">Products</span><span data-w="popular">Popular searches</span><span data-w="cats">Categories</span><span data-w="fix">Did you mean</span></span>
             </div>
 
             <nav class="header-actions" aria-label="Account">
@@ -828,33 +837,59 @@
             try { localStorage.setItem('theme', dark ? 'light' : 'dark'); } catch (e) {}
         }
 
-        // Search suggestions (text is inserted with textContent, never as HTML).
+        // Search-as-you-type: products with photo and price, categories,
+        // popular searches and typo fixes. Arrow keys + Enter work; text is
+        // always inserted with textContent, never as HTML.
         (function () {
             const input = document.getElementById('search-input');
             const box = document.getElementById('search-suggestions');
             if (!input || !box) return;
-            let timer;
-            input.addEventListener('input', function () {
-                clearTimeout(timer);
-                const q = input.value.trim();
-                if (q.length < 2) { box.classList.remove('show'); box.replaceChildren(); return; }
-                timer = setTimeout(() => {
-                    fetch('{% url "search_suggest" %}?q=' + encodeURIComponent(q))
-                        .then(r => r.json())
-                        .then(data => {
-                            box.replaceChildren();
-                            (data.results || []).forEach(name => {
-                                const a = document.createElement('a');
-                                a.href = '{% url "search_products" %}?q=' + encodeURIComponent(name);
-                                a.textContent = name;
-                                a.setAttribute('role', 'option');
-                                box.appendChild(a);
-                            });
-                            box.classList.toggle('show', box.children.length > 0);
-                        });
-                }, 220);
+            const URL_S = '{% url "search_suggest" %}', URL_Q = '{% url "search_products" %}?q=';
+            const W = k => { const el = document.querySelector('#sg-words [data-w="' + k + '"]'); return el ? el.textContent : k; };
+            const L = { products: W('products'), popular: W('popular'), cats: W('cats'), fix: W('fix') };
+            input.setAttribute('role', 'combobox'); input.setAttribute('aria-autocomplete', 'list');
+            input.setAttribute('aria-controls', 'search-suggestions'); input.setAttribute('aria-expanded', 'false');
+            let timer, active = -1, last = null;
+            function items() { return Array.from(box.querySelectorAll('[role="option"]')); }
+            function close() { box.classList.remove('show'); input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); active = -1; }
+            function head(text) { const h = document.createElement('div'); h.className = 'sg-head'; h.textContent = text; box.appendChild(h); }
+            function option(href, text, extra) {
+                const a = document.createElement('a'); a.href = href; a.setAttribute('role', 'option'); a.id = 'sg-' + box.children.length;
+                if (extra && extra.image) { const img = document.createElement('img'); img.src = extra.image; img.alt = ''; img.width = 36; img.height = 36; img.loading = 'lazy'; a.appendChild(img); }
+                const span = document.createElement('span'); span.className = 'sg-text'; span.textContent = text; a.appendChild(span);
+                if (extra && extra.price) { const pr = document.createElement('span'); pr.className = 'sg-price'; pr.textContent = extra.price; a.appendChild(pr); }
+                box.appendChild(a);
+            }
+            function render(data) {
+                box.replaceChildren();
+                if (data.did_you_mean) option(URL_Q + encodeURIComponent(data.did_you_mean), L.fix + ': ' + data.did_you_mean);
+                (data.terms || []).forEach(t => option(URL_Q + encodeURIComponent(t), t));
+                if ((data.categories || []).length) { head(L.cats); data.categories.forEach(c => option(c.url, c.label)); }
+                if ((data.products || []).length) { head(L.products); data.products.forEach(p => option(p.url, p.name, p)); }
+                if (!input.value.trim() && (data.terms || []).length) box.insertBefore(Object.assign(document.createElement('div'), { className: 'sg-head', textContent: L.popular }), box.firstChild);
+                const any = items().length > 0;
+                box.classList.toggle('show', any); input.setAttribute('aria-expanded', any ? 'true' : 'false'); active = -1;
+            }
+            function load(q) {
+                if (last === q) { if (items().length) { box.classList.add('show'); input.setAttribute('aria-expanded', 'true'); } return; }
+                last = q;
+                fetch(URL_S + '?q=' + encodeURIComponent(q)).then(r => r.json()).then(d => { if (input.value.trim() === q) render(d); }).catch(() => {});
+            }
+            input.addEventListener('input', function () { clearTimeout(timer); const q = input.value.trim(); timer = setTimeout(() => load(q), q.length < 2 ? 0 : 180); });
+            input.addEventListener('focus', function () { if (!input.value.trim()) load(''); });
+            input.addEventListener('keydown', function (e) {
+                const list = items();
+                if (e.key === 'Escape') { close(); return; }
+                if (!list.length || !box.classList.contains('show')) return;
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    active = (active + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length;
+                    list.forEach((el, i) => el.classList.toggle('on', i === active));
+                    input.setAttribute('aria-activedescendant', list[active].id);
+                    list[active].scrollIntoView({ block: 'nearest' });
+                } else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); location.href = list[active].href; }
             });
-            document.addEventListener('click', e => { if (!box.contains(e.target) && e.target !== input) box.classList.remove('show'); });
+            document.addEventListener('click', e => { if (!box.contains(e.target) && e.target !== input) close(); });
         })();
 
         // Help chat: instant answers from the help assistant, plus real

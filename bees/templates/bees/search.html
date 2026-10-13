@@ -3,7 +3,8 @@
 {% block robots_meta %}noindex, follow{% endblock %}
 {% block content %}
 {% if query %}
-{% with title="Results for “"|add:query|add:"”" %}
+{% if corrected %}<div class="wrap" style="margin-top:16px;"><p class="callout" style="margin:0;"><span>Showing results for</span> <strong data-no-translate>{{ corrected }}</strong>. <a class="link" href="?q={{ query|urlencode }}&amp;exact=1"><span>Search instead for</span> <span data-no-translate>{{ query }}</span></a></p></div>{% endif %}
+{% with title="Results for “"|add:shown_query|add:"”" %}
 {% include "bees/partials/listing.html" with listing_title=title empty_title="No matches found" empty_text="Check the spelling or try a shorter, more general search term." %}
 {% endwith %}
 {% else %}

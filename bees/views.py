@@ -253,7 +253,9 @@ def home(request):
         return redirect(f"{reverse('search_products')}?{urlencode({'q': query})}")
     flash_sale_products = with_ratings(Product.objects.flash())[:10]
     just_for_you_products = with_ratings(Product.objects.live()).order_by("-created_at")[:15]
+    from . import ads
     return render(request, "bees/index.html", {
+        "sponsored": ads.pick(limit=4) if not is_speculative(request) else [],
         "flash_sale_products": flash_sale_products,
         "just_for_you_products": just_for_you_products,
         "categories": _category_tiles(),
@@ -318,7 +320,10 @@ def product_detail(request, pk):
     ship_country = request.session.get("ship_country", "")
     if not ship_country and request.user.is_authenticated:
         ship_country = Address.objects.filter(user=request.user, is_default=True).values_list("country", flat=True).first() or ""
-    related_products = with_ratings(Product.objects.live().filter(category=product.category).exclude(pk=product.pk))[:6]
+    from .recommend import also_bought
+    also = also_bought([product.id], limit=6)
+    related_products = with_ratings(Product.objects.live().filter(category=product.category).exclude(pk=product.pk)
+                                    .exclude(pk__in=[p.id for p in also]))[:6]
     questions = product.questions.all()
 
     recent_ids = request.session.get("recently_viewed", [])
@@ -355,6 +360,7 @@ def product_detail(request, pk):
         "ai_enabled": bool(settings.AI_API_KEY),
         "review_summary": ai_tools.review_summary(product),
         "related_products": related_products,
+        "also_bought": also,
         "questions": questions,
         "recently_viewed": recently_viewed,
     })
@@ -428,8 +434,12 @@ def category_products(request, category):
     labels = dict(Product.CATEGORY_CHOICES)
     if category not in labels:
         raise Http404("Unknown category.")
-    context = _listing(request, Product.objects.live().filter(category=category), 12)
+    base = Product.objects.live().filter(category=category)
+    context = _listing(request, base, 12)
     context.update({"category": category, "category_label": labels[category]})
+    if request.GET.get("page", "1") == "1" and not is_speculative(request):
+        from . import ads
+        context["sponsored"] = ads.pick(base)
     return render(request, "bees/category.html", context)
 
 
@@ -440,12 +450,25 @@ def search_products(request):
         if not created:
             SearchLog.objects.filter(pk=log.pk).update(count=F("count") + 1)
     base_qs, smart = _smart_search(query)
+    corrected = ""
+    if query and not request.GET.get("exact") and not base_qs.exists():
+        from .autocomplete import correct
+        fixed = correct(query)
+        if fixed:
+            fixed_qs, fixed_smart = _smart_search(fixed)
+            if fixed_qs.exists():
+                base_qs, smart, corrected = fixed_qs, fixed_smart, fixed
     if smart.get("cheap") and not request.GET.get("sort"):
         request.GET = request.GET.copy()
         request.GET["sort"] = "price_asc"
     context = _listing(request, base_qs, 12)
     context["query"] = query
     context["smart"] = smart
+    context["corrected"] = corrected
+    context["shown_query"] = corrected or query
+    if query and request.GET.get("page", "1") == "1" and not is_speculative(request):
+        from . import ads
+        context["sponsored"] = ads.pick(base_qs)
     if query and not is_speculative(request) and request.GET.get("page", "1") == "1":
         from . import analytics
         key = " ".join(query.lower().split())[:150]
@@ -515,11 +538,12 @@ def product_quick_view(request, pk):
 
 
 def search_suggest(request):
-    q = request.GET.get("q", "").strip()
-    if not q or len(q) < 2:
-        return JsonResponse({"results": []})
-    names = list(Product.objects.live().filter(name__icontains=q).values_list("name", flat=True)[:6])
-    return JsonResponse({"results": names})
+    from .autocomplete import suggest
+    data = suggest(request.GET.get("q", "").strip())
+    data["results"] = [p["name"] for p in data["products"]]  # older clients
+    resp = JsonResponse(data)
+    resp["Cache-Control"] = "private, max-age=60"
+    return resp
 
 
 def store_page(request, seller_name):
@@ -1091,7 +1115,13 @@ def update_cart_item(request, key):
 
 def cart_view(request):
     items, total, count = _get_cart_items(request)
+    recs = []
+    if items:
+        from .recommend import also_bought
+        in_cart = {i["product"].id for i in items}
+        recs = [p for p in also_bought(sorted(in_cart), limit=8) if p.id not in in_cart][:4]
     return render(request, "bees/cart.html", {
+        "recommended": recs,
         "items": items,
         "total": total,
         "count": count,
@@ -1164,14 +1194,16 @@ def _payment_methods():
     return methods
 
 
-def _price_cart(subtotal, coupon=None, country=None, items=1):
+def _price_cart(subtotal, coupon=None, country=None, items=1, lines=None):
     """Returns the full price breakdown for a cart subtotal. Shipping
     depends on the destination country; ``shipping`` is None while the
     country isn't known, and ``ships`` is False if we don't deliver there."""
     from . import shipping as shipping_rules
     brand = _brand()
     discount = Decimal("0")
-    if coupon:
+    if coupon and lines is not None:
+        discount = coupon.discount_for(lines)[1]
+    elif coupon:
         discount = (subtotal * Decimal(coupon.percent_off) / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     discounted = max(subtotal - discount, Decimal("0"))
     # Free-shipping thresholds are checked against what the customer
@@ -1195,14 +1227,29 @@ def _price_cart(subtotal, coupon=None, country=None, items=1):
     }
 
 
-def _session_coupon(request, subtotal):
+def _cart_lines(items):
+    return [(i["product"], i["unit_price"], i["qty"]) for i in items]
+
+
+def _coupon_check(coupon, user, lines, email=None):
+    """Store codes check the whole cart; a seller's code needs their products in it."""
+    eligible, _off = coupon.discount_for(lines)
+    if coupon.seller_account_id and not eligible:
+        return False, f"That code is for products from {coupon.seller_account.display_name} only."
+    return coupon.is_valid_for(user, eligible, email=email)
+
+
+def _session_coupon(request, subtotal, items=None):
     code = request.session.get("coupon_code", "")
     if not code:
         return None, None
     coupon = Coupon.objects.filter(code__iexact=code).first()
     if not coupon:
         return None, "That coupon code no longer exists."
-    is_valid, error = coupon.is_valid_for(request.user, subtotal)
+    if items is not None:
+        is_valid, error = _coupon_check(coupon, request.user, _cart_lines(items))
+    else:
+        is_valid, error = coupon.is_valid_for(request.user, subtotal)
     return (coupon, None) if is_valid else (None, error)
 
 
@@ -1224,9 +1271,9 @@ def checkout_view(request):
         messages.info(request, "Please sign in or create a free account to place your order. Your cart is saved.")
         return redirect(f"{reverse('login')}?{urlencode({'next': reverse('checkout')})}")
 
-    coupon, coupon_error = _session_coupon(request, subtotal)
+    coupon, coupon_error = _session_coupon(request, subtotal, items)
     default_address = Address.objects.filter(user=request.user, is_default=True).first() if request.user.is_authenticated else None
-    pricing = _price_cart(subtotal, coupon, default_address.country if default_address else None, count)
+    pricing = _price_cart(subtotal, coupon, default_address.country if default_address else None, count, lines=_cart_lines(items))
     methods = _payment_methods()
     cod_note = ""
     if "cod" in methods:
@@ -1249,7 +1296,7 @@ def checkout_view(request):
         data = {f: request.POST.get(f, "").strip() for f in CHECKOUT_REQUIRED + ("state",)}
         data["country"] = data["country"].upper()[:2]
         missing = [f.replace("_", " ") for f in CHECKOUT_REQUIRED if not data[f]]
-        pricing = _price_cart(subtotal, coupon, data["country"], count)
+        pricing = _price_cart(subtotal, coupon, data["country"], count, lines=_cart_lines(items))
         try:
             if missing:
                 raise ValidationError(f"Please fill in: {', '.join(missing)}.")
@@ -1284,6 +1331,8 @@ def checkout_view(request):
         request.session["coupon_code"] = ""
         if not order.user_id:
             _remember_guest_order(request, order)
+        from . import ads
+        ads.attribute_order(request, order)
         request.session.modified = True
 
         if payment_method in ("card", "paypal") and order.total_cents > 0:
@@ -1430,11 +1479,18 @@ def _place_order(request, items, data, payment_method, use_credit=False):
         if code:
             coupon = Coupon.objects.select_for_update().filter(code__iexact=code).first()
             if coupon:
-                is_valid, error = coupon.is_valid_for(request.user, subtotal, email=data["email"])
+                is_valid, error = _coupon_check(coupon, request.user, [(p, price, qty) for p, _v, price, qty in lines], email=data["email"])
                 if not is_valid:
                     raise CheckoutError(error)
 
-        pricing = _price_cart(subtotal, coupon, data["country"], sum(qty for _p, _v, _price, qty in lines))
+        if coupon and coupon.seller_account_id:
+            # A seller's code lowers that seller's line prices (the seller
+            # pays for it); the order itself has no store discount.
+            lines = [(p, v, coupon.unit_after(price) if coupon.applies_to(p) else price, qty) for p, v, price, qty in lines]
+            subtotal = sum((price * qty for _p, _v, price, qty in lines), Decimal("0"))
+            pricing = _price_cart(subtotal, None, data["country"], sum(qty for _p, _v, _price, qty in lines))
+        else:
+            pricing = _price_cart(subtotal, coupon, data["country"], sum(qty for _p, _v, _price, qty in lines))
         if not pricing["ships"]:
             raise CheckoutError("Sorry, we don't deliver to that country yet.")
         is_card = payment_method in ("card", "paypal")  # paid online before it ships
@@ -1523,13 +1579,14 @@ def apply_coupon(request):
             request.session["coupon_code"] = ""
             messages.error(request, "That coupon code isn't valid.")
         else:
-            _, total, _ = _get_cart_items(request)
-            is_valid, error = coupon.is_valid_for(request.user, total)
+            cart_items, total, _ = _get_cart_items(request)
+            is_valid, error = _coupon_check(coupon, request.user, _cart_lines(cart_items))
             if not is_valid:
                 request.session["coupon_code"] = ""
                 messages.error(request, error)
             else:
-                messages.success(request, f"Coupon applied: {coupon.percent_off}% off.")
+                messages.success(request, f"Coupon applied: {coupon.percent_off}% off"
+                                 + (f" products from {coupon.seller_account.display_name}." if coupon.seller_account_id else "."))
     return redirect("checkout")
 
 

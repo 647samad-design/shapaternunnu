@@ -4,7 +4,9 @@
     <button type="button" class="btn btn-ghost btn-sm" data-sound-test>Test sound</button>
     <button type="button" class="btn btn-secondary btn-sm" data-desktop-on hidden>Show alerts on my screen</button>
     <span class="muted small" data-desktop-note hidden></span>
-    <span hidden><span data-w="on">Screen alerts are on.</span><span data-w="blocked">Screen alerts are blocked in your browser settings.</span><span data-w="ready">Alerts are on</span><span data-w="ready_body">You will see new messages and orders here.</span></span>
+    {% if push_public_key %}<button type="button" class="btn btn-secondary btn-sm" data-push-on hidden data-key="{{ push_public_key }}">Notify me on this device, even when the site is closed</button>
+    <button type="button" class="btn btn-ghost btn-sm" data-push-off hidden>Stop notifications on this device</button>{% endif %}
+    <span hidden><span data-w="on">Screen alerts are on.</span><span data-w="blocked">Screen alerts are blocked in your browser settings.</span><span data-w="ready">Alerts are on</span><span data-w="ready_body">You will see new messages and orders here.</span><span data-w="push_on">Notifications are on for this device.</span><span data-w="push_fail">Couldn't turn notifications on. Check your browser settings.</span></span>
 </div>
 <style>
     .alert-set { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); margin-bottom: 14px; }
@@ -29,5 +31,26 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     d.addEventListener('click', function () { Notification.requestPermission().then(function () { paint(); LumenAlert.desktop(W('ready'), W('ready_body')); }); });
     paint();
+    var pOn = box.querySelector('[data-push-on]'), pOff = box.querySelector('[data-push-off]');
+    if (pOn && 'serviceWorker' in navigator && 'PushManager' in window) {
+        function csrf() { var m = document.cookie.match(/csrftoken=([^;]+)/); return m ? m[1] : ''; }
+        function post(body) { return fetch('{% url "push_subscribe" %}', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() }, body: JSON.stringify(body), credentials: 'same-origin' }); }
+        function key(b64) { var p = '='.repeat((4 - b64.length % 4) % 4), raw = atob((b64 + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(raw, function (c) { return c.charCodeAt(0); }); }
+        navigator.serviceWorker.getRegistration().then(function (reg) {
+            if (!reg) return;
+            reg.pushManager.getSubscription().then(function (sub) { pOn.hidden = !!sub; pOff.hidden = !sub; if (sub) post(sub.toJSON()); });
+            pOn.addEventListener('click', function () {
+                Notification.requestPermission().then(function (perm) {
+                    if (perm !== 'granted') { note.hidden = false; note.textContent = W('push_fail'); return; }
+                    return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key(pOn.dataset.key) }).then(function (sub) {
+                        return post(sub.toJSON()).then(function () { pOn.hidden = true; pOff.hidden = false; note.hidden = false; note.textContent = W('push_on'); paint(); fetch('{% url "push_test" %}', { method: 'POST', headers: { 'X-CSRFToken': csrf() }, credentials: 'same-origin' }); });
+                    });
+                }).catch(function () { note.hidden = false; note.textContent = W('push_fail'); });
+            });
+            pOff.addEventListener('click', function () {
+                reg.pushManager.getSubscription().then(function (sub) { if (!sub) return; post({ unsubscribe: true, endpoint: sub.endpoint }); return sub.unsubscribe(); }).then(function () { pOn.hidden = false; pOff.hidden = true; });
+            });
+        });
+    }
 });
 </script>

@@ -40,6 +40,15 @@ HELP = {
     "seo_description": "Optional (max 160).",
 }
 REVIEWED = ("name", "category", "image_url", "description")
+OPTION_COLUMNS = ["product", "size", "color", "price", "stock", "sku"]
+OPTION_HELP = {
+    "product": "The product's id, or its exact name (also for a new product in the products sheet).",
+    "size": "e.g. S, M, L or 42. Leave empty if only colours differ.",
+    "color": "e.g. Red. Leave empty if only sizes differ.",
+    "price": "Optional - empty uses the product price.",
+    "stock": "Whole number for this size/colour.",
+    "sku": "Optional stock code.",
+}
 
 
 class BulkError(Exception):
@@ -49,6 +58,30 @@ class BulkError(Exception):
 # ---------------------------------------------------------------------------
 # Reading files
 # ---------------------------------------------------------------------------
+
+def read_file(upload):
+    """(product rows, option rows) from a CSV or XLSX upload. An Excel file
+    may have a "products" sheet and an "options" sheet (sizes/colours); a
+    CSV is either a products file or an options file (it has a "product"
+    column and size/color columns)."""
+    if upload.size > MAX_BYTES:
+        raise BulkError("That file is too big (5 MB max). Split it into smaller files.")
+    name = (upload.name or "").lower()
+    raw = upload.read()
+    if name.endswith((".xlsx", ".xlsm")) or raw[:2] == b"PK":
+        products, options = _read_xlsx(raw, with_options=True)
+    elif name.endswith((".csv", ".txt")) or not name:
+        products, options = _read_csv(raw), []
+        if products and "product" in products[0] and ("size" in products[0] or "color" in products[0]):
+            products, options = [], products
+    else:
+        raise BulkError("Upload a .csv or .xlsx file (Excel: File > Save as > CSV or Excel Workbook).")
+    if not products and not options:
+        raise BulkError("The file has no product rows.")
+    if len(products) > MAX_ROWS or len(options) > MAX_ROWS * 5:
+        raise BulkError(f"Up to {MAX_ROWS} products per file, please.")
+    return products, options
+
 
 def read_rows(upload):
     """Returns a list of dicts (lower-case column names) from a CSV or XLSX upload."""
@@ -85,7 +118,7 @@ def _read_csv(raw):
     return _to_dicts(list(reader))
 
 
-def _read_xlsx(raw):
+def _read_xlsx(raw, with_options=False):
     try:
         from openpyxl import load_workbook
     except ImportError:  # pragma: no cover
@@ -94,23 +127,31 @@ def _read_xlsx(raw):
         wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
     except Exception:
         raise BulkError("We couldn't open that Excel file. Save it again as .xlsx or CSV and retry.") from None
+    def sheet(ws, limit):
+        table = []
+        for i, row in enumerate(ws.iter_rows(values_only=True)):
+            if i > limit + 1:
+                table.append(["x"])  # enough to trigger the size message
+                break
+            table.append(["" if v is None else (format(v, "f").rstrip("0").rstrip(".") if isinstance(v, float) else str(v)) for v in row])
+        return table
     ws = wb["products"] if "products" in wb.sheetnames else wb.worksheets[0]
-    table = []
-    for i, row in enumerate(ws.iter_rows(values_only=True)):
-        if i > MAX_ROWS + 1:
-            table.append([])  # enough to trigger the size message
-            continue
-        table.append(["" if v is None else (format(v, "f").rstrip("0").rstrip(".") if isinstance(v, float) else str(v)) for v in row])
+    products = _to_dicts(sheet(ws, MAX_ROWS))
+    options = []
+    if with_options and "options" in wb.sheetnames:
+        options = _to_dicts(sheet(wb["options"], MAX_ROWS * 5), need=("product",))
     wb.close()
-    return _to_dicts(table)
+    return (products, options) if with_options else products
 
 
-def _to_dicts(table):
+def _to_dicts(table, need=None):
     table = [r for r in table if any(str(c).strip() for c in r)]
     if not table:
         return []
-    header = [str(h).strip().lower().replace(" ", "_") for h in table[0]]
-    if "name" not in header and "id" not in header:
+    header = [str(h).strip().lower().replace(" ", "_").replace("colour", "color") for h in table[0]]
+    if need and not all(n in header for n in need):
+        raise BulkError("The options sheet needs a 'product' column (product id or name), plus size, color and stock.")
+    if not need and "name" not in header and "id" not in header and "product" not in header:
         raise BulkError("The first row must be the column names (id, name, category, price, stock, ...). Download the template to see them.")
     rows = []
     for r in table[1:]:
@@ -273,6 +314,78 @@ def _show(value):
     return text if len(text) <= 40 else text[:37] + "…"
 
 
+def plan_options(rows, products, product_plan=None):
+    """Sizes/colours per product. Each product's options in the file replace
+    its current ones (matched by size + colour, so order history stays)."""
+    new_names = {}
+    for e in (product_plan or {}).get("rows", []):
+        if e["action"] == "create":
+            new_names[e["data"]["name"].strip().lower()] = e["data"]["name"]
+    groups, order = {}, []
+    errors = []
+    for n, row in enumerate(rows, start=2):
+        ref = (row.get("product") or "").strip()
+        try:
+            if not ref:
+                raise BulkError("product is empty")
+            key = None
+            if ref.isdigit():
+                product = products.filter(pk=int(ref)).first()
+                if product is None:
+                    raise BulkError(f"product {ref} isn't yours or doesn't exist")
+                key = ("id", product.id, product.name)
+            elif ref.lower() in new_names:
+                key = ("new", new_names[ref.lower()], new_names[ref.lower()])
+            else:
+                matches = list(products.filter(name__iexact=ref)[:2])
+                if len(matches) != 1:
+                    raise BulkError(f"no single product called '{ref[:40]}'" if not matches else f"several products are called '{ref[:40]}' - use the id")
+                key = ("id", matches[0].id, matches[0].name)
+            size, color = (row.get("size") or "").strip()[:40], (row.get("color") or "").strip()[:40]
+            if not size and not color:
+                raise BulkError("add a size or a colour")
+            stock = _int(row.get("stock"), "Stock")
+            if stock is None:
+                raise BulkError("stock is empty")
+            price = _dec(row.get("price"), "Price", Decimal("0.01"))
+            option = {"size": size, "color": color, "stock": stock, "price": str(price) if price is not None else None,
+                      "sku": (row.get("sku") or "").strip()[:60]}
+        except BulkError as exc:
+            errors.append({"line": n, "action": "error", "name": ref[:80], "changes": [], "errors": [str(exc)], "review": False, "data": {}})
+            continue
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        if any(o["size"].lower() == size.lower() and o["color"].lower() == color.lower() for o in groups[key]):
+            errors.append({"line": n, "action": "error", "name": ref[:80], "changes": [], "errors": [f"{size or ''} {color or ''} is listed twice"], "review": False, "data": {}})
+            continue
+        groups[key].append(option)
+    out = []
+    for key in order:
+        kind, ident, name = key
+        opts = groups[key]
+        label = ", ".join(" ".join(x for x in (o["size"], o["color"]) if x) for o in opts[:6]) + (f" +{len(opts) - 6}" if len(opts) > 6 else "")
+        out.append({"line": "", "action": "options", "name": name[:80], "id": ident if kind == "id" else None,
+                    "new_name": ident if kind == "new" else None, "errors": [], "review": False,
+                    "changes": [f"{len(opts)} size/colour option{'s' if len(opts) != 1 else ''}: {label} · stock {sum(o['stock'] for o in opts)}"],
+                    "data": {"options": opts}})
+    return out + errors
+
+
+def apply_options(product, options):
+    from .models import ProductVariant
+    existing = {(v.size.lower(), v.color.lower()): v for v in product.variants.all()}
+    keep = set()
+    for position, o in enumerate(options):
+        v = existing.get((o["size"].lower(), o["color"].lower())) or ProductVariant(product=product)
+        v.size, v.color, v.stock, v.sku, v.position = o["size"], o["color"], o["stock"], o["sku"], position
+        v.price = Decimal(o["price"]) if o.get("price") else None
+        v.save()
+        keep.add(v.id)
+    ProductVariant.objects.filter(product=product).exclude(id__in=keep).delete()
+    product.sync_variants()
+
+
 # ---------------------------------------------------------------------------
 # Saving
 # ---------------------------------------------------------------------------
@@ -283,6 +396,8 @@ def stash(user, result):
     payload = [{"id": e.get("id"), "action": e["action"], "review": e["review"],
                 "data": {k: str(v) if isinstance(v, Decimal) else v for k, v in e["data"].items()}}
                for e in result["rows"] if e["action"] in ("create", "update")]
+    payload += [{"id": e.get("id"), "new_name": e.get("new_name"), "action": "options", "review": False, "data": e["data"]}
+                for e in result.get("options", []) if e["action"] == "options"]
     cache.set(key, json.dumps(payload), 1800)
 
 
@@ -299,13 +414,16 @@ def apply(entries, products, seller=None, store=False, user=None):
     from .models import AuditLog, Product
     created = updated = review = 0
     decimals = ("price", "old_price")
+    made = {}
     with transaction.atomic():
         for e in entries:
+            if e["action"] == "options":
+                continue
             data = {k: (Decimal(v) if k in decimals and v is not None else v) for k, v in e["data"].items()}
             if e["action"] == "create":
                 if seller is not None and not seller.can_add_product:
                     break
-                Product.objects.create(
+                made[data["name"].strip().lower()] = Product.objects.create(
                     **data,
                     seller_account=seller,
                     seller_name=seller.display_name if seller else "Official Store",
@@ -326,8 +444,16 @@ def apply(entries, products, seller=None, store=False, user=None):
                 review += 1
             product.save()  # back-in-stock / price-drop signals run as usual
             updated += 1
+        with_options = 0
+        for e in entries:
+            if e["action"] != "options":
+                continue
+            product = made.get((e.get("new_name") or "").strip().lower()) if e.get("new_name") else products.filter(pk=e["id"]).first()
+            if product is not None:
+                apply_options(product, e["data"]["options"])
+                with_options += 1
         if user is not None:
-            AuditLog.objects.create(user=user, action=f"Bulk import: {created} added, {updated} updated"[:255])
+            AuditLog.objects.create(user=user, action=f"Bulk import: {created} added, {updated} updated, options for {with_options}"[:255])
     return created, updated, review
 
 
@@ -378,11 +504,17 @@ def _rows_for(products, request=None):
                p.get_approval_status_display(), "yes" if p.has_variants else "", link]
 
 
+def _option_rows(products):
+    from .models import ProductVariant
+    for v in ProductVariant.objects.filter(product__in=products).select_related("product").order_by("product_id", "position", "id"):
+        yield [v.product_id, v.size, v.color, v.price if v.price is not None else "", v.stock, v.sku]
+
+
 def export(products, fmt, filename, request=None):
     header = COLUMNS + EXPORT_ONLY
     rows = list(_rows_for(products, request))
     if fmt == "xlsx":
-        return _xlsx_response([header] + rows, filename, with_help=False)
+        return _xlsx_response([header] + rows, filename, with_help=False, options=[OPTION_COLUMNS] + list(_option_rows(products)))
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(header)
@@ -397,7 +529,8 @@ def template(fmt):
     example = ["", "Ceramic mug 350ml", "grocery", "12.50", "15.00", "40", "Hand-glazed stoneware mug.",
                "https://images.example.com/mug.jpg", "450", "", ""]
     if fmt == "xlsx":
-        return _xlsx_response([COLUMNS, example], "products-template", with_help=True)
+        return _xlsx_response([COLUMNS, example], "products-template", with_help=True,
+                              options=[OPTION_COLUMNS, ["Ceramic mug 350ml", "", "White", "", "25", "MUG-W"], ["Ceramic mug 350ml", "", "Black", "13.50", "15", "MUG-B"]])
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(COLUMNS)
@@ -414,7 +547,7 @@ def _safe_cell(value):
     return value
 
 
-def _xlsx_response(table, filename, with_help):
+def _xlsx_response(table, filename, with_help, options=None):
     from openpyxl import Workbook
     from openpyxl.styles import Font
     from .models import Product
@@ -428,11 +561,24 @@ def _xlsx_response(table, filename, with_help):
     ws.freeze_panes = "A2"
     for col, width in zip("ABCDEFGHIJKLMN", (8, 34, 16, 10, 10, 8, 40, 40, 12, 24, 30, 14, 10, 30)):
         ws.column_dimensions[col].width = width
+    if options:
+        opt = wb.create_sheet("options")
+        for row in options:
+            opt.append([float(c) if isinstance(c, Decimal) else _safe_cell(c) for c in row])
+        for cell in opt[1]:
+            cell.font = Font(bold=True)
+        opt.freeze_panes = "A2"
+        for col, width in zip("ABCDEF", (30, 10, 14, 10, 8, 16)):
+            opt.column_dimensions[col].width = width
     if with_help:
         info = wb.create_sheet("how to fill")
         info.append(["column", "what to put"])
         for key in COLUMNS:
             info.append([key, HELP[key]])
+        info.append([])
+        info.append(["options sheet", "Sizes / colours. One row per option; a product's options in the file replace its current ones."])
+        for key in OPTION_COLUMNS:
+            info.append([f"options: {key}", OPTION_HELP[key]])
         info.column_dimensions["A"].width = 18
         info.column_dimensions["B"].width = 80
     cats = wb.create_sheet("categories")

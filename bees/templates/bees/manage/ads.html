@@ -1,0 +1,26 @@
+{% extends "bees/manage/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Sponsored products{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Sponsored products</h1><p>Sellers pay per click from their earnings. Change the minimum bid and how many sponsored places show in <a class="link" href="{% url 'manage_settings' %}#sponsored-products">Store settings</a>.</p></div></div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+    <div class="panel"><span class="muted small">Ad income (30 days)</span><strong style="display:block;font-size:1.4rem;">{{ income.s|default:0|money }}</strong></div>
+    <div class="panel"><span class="muted small">Clicks</span><strong style="display:block;font-size:1.4rem;">{{ income.c|default:0 }}</strong></div>
+    <div class="panel"><span class="muted small">Times shown</span><strong style="display:block;font-size:1.4rem;">{{ income.i|default:0 }}</strong></div>
+    <div class="panel"><span class="muted small">Sales from ads</span><strong style="display:block;font-size:1.4rem;">{{ income.o|default:0|money }}</strong></div>
+</div>
+<section class="panel" style="padding:8px 20px;">
+    <div class="table-scroll"><table class="table">
+        <thead><tr><th>Product</th><th>Seller</th><th class="num">Bid</th><th class="num">Clicks</th><th class="num">Spent</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+        {% for c in campaigns %}
+        <tr><td data-no-translate><a class="link" href="{% url 'product_detail' c.product_id %}" target="_blank" rel="noopener">{{ c.product.name|truncatechars:36 }}</a></td>
+            <td data-no-translate><a class="link" href="{% url 'manage_seller' c.seller_account_id %}">{{ c.seller_account.display_name }}</a></td>
+            <td class="num">{{ c.bid|money }}</td><td class="num">{{ c.clicks }}</td><td class="num">{{ c.spend_total|money }}</td>
+            <td>{% if c.status == "active" %}<span class="pill ok">Running</span>{% else %}<span class="pill warn">Paused{% if c.paused_by_staff %} by staff{% endif %}</span>{% endif %}</td>
+            <td><form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="id" value="{{ c.id }}">{% if c.status == "active" %}<button class="btn btn-ghost btn-sm" name="action" value="pause">Pause</button>{% else %}<button class="btn btn-ghost btn-sm" name="action" value="resume">Resume</button>{% endif %}</form></td></tr>
+        {% empty %}<tr><td colspan="7" class="muted" style="text-align:center;padding:24px;">No ads running.</td></tr>{% endfor %}
+        </tbody>
+    </table></div>
+</section>
+{% endblock %}

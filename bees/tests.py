@@ -4073,6 +4073,39 @@ class CourierAndKeysTests(TestCase):
         shipment.refresh_from_db()
         self.assertEqual(shipment.status, "in_transit")
 
+    def test_prepaid_return_label(self):
+        from django.core import mail as _mail
+        from .models import ReturnRequest
+        self._provider("easypost")
+        self.os.environ["EASYPOST_API_KEY"] = "EZTK_testkey123"
+        Order.objects.filter(pk=self.order.pk).update(status="delivered", delivered_at=timezone.now())
+        rr = ReturnRequest.objects.create(order_item=self.item, user=self.buyer, reason="Wrong colour")
+        patcher, calls = self._fake([
+            ("POST", "/v2/shipments/shp_r/buy", {"id": "shp_r", "tracking_code": "RET1", "postage_label": {"label_pdf_url": "https://labels.example/r.pdf"},
+                                                  "tracker": {"id": "trk_r"}, "selected_rate": {"carrier": "USPS", "service": "First", "rate": "9.10", "currency": "USD"}}),
+            ("POST", "/v2/shipments", {"id": "shp_r", "rates": [
+                {"id": "r_exp", "carrier": "DHL", "service": "X", "rate": "30.00", "currency": "USD"},
+                {"id": "r_cheap", "carrier": "USPS", "service": "First", "rate": "9.10", "currency": "USD"}]}),
+            ("GET", "/v2/trackers/trk_r", {"id": "trk_r", "status": "delivered"}),
+        ])
+        self.client.force_login(self.boss)
+        with patcher:
+            self.client.post(reverse("manage_returns"), {"id": rr.id, "action": "approve_label"})
+            label = Shipment.objects.get(is_return=True)
+            body = calls[0][2]["shipment"]
+            self.assertEqual((body["from_address"]["country"], body["to_address"]["country"]), ("GB", "PK"))  # customer -> seller
+            self.assertEqual(calls[1][2], {"rate": {"id": "r_cheap"}})
+            self.assertEqual((label.return_request, label.label_url, label.status), (rr, "https://labels.example/r.pdf", "booked"))
+            self.assertTrue(any("return label" in m.subject.lower() for m in _mail.outbox))
+            self.client.force_login(self.buyer)
+            self.assertContains(self.client.get(reverse("my_orders")), "Print return label")
+            from bees import couriers
+            couriers.refresh(label)
+        self.item.refresh_from_db()
+        self.assertNotEqual(self.item.fulfillment_status, "handed_to_courier")
+        label.refresh_from_db()
+        self.assertEqual(label.status, "delivered")
+
     def test_courier_errors_are_friendly(self):
         from bees import couriers
         self._provider("easypost")
@@ -4097,7 +4130,7 @@ class CourierAndKeysTests(TestCase):
         with mock.patch.object(envfile, "path", return_value=env), mock.patch.object(envfile, "reload_app", return_value=False):
             staff = User.objects.create_user("ckstaff", "ckst@example.com", "pass12345", is_staff=True)
             self.client.force_login(staff)
-            self.assertRedirects(self.client.get(reverse("manage_keys")), reverse("manage_settings"), fetch_redirect_response=False)
+            self.assertRedirects(self.client.get(reverse("manage_keys")), reverse("manage_dashboard"), fetch_redirect_response=False)
             self.client.force_login(self.boss)
             page = self.client.get(reverse("manage_keys")).content.decode()
             self.assertIn("••••1234", page)
@@ -5226,6 +5259,41 @@ class BulkProductTests(TestCase):
         csv_resp = self.client.get(reverse("seller_bulk") + "?download=csv&what=template")
         self.assertIn(b"id,name,category,price", csv_resp.content)
 
+    def test_sizes_and_colours_from_excel_and_csv(self):
+        from openpyxl import Workbook, load_workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "products"
+        ws.append(["name", "category", "price", "image_url"])
+        ws.append(["Tee shirt", "fashion", 15, "https://img.example.com/t.jpg"])
+        opt = wb.create_sheet("options")
+        opt.append(["product", "size", "colour", "price", "stock"])
+        opt.append(["Tee shirt", "S", "Red", "", 3])
+        opt.append(["Tee shirt", "M", "Red", 17, 4])
+        opt.append(["Tee shirt", "M", "red", "", 1])  # duplicate
+        opt.append(["Nope", "S", "", "", 1])
+        buf = io.BytesIO()
+        wb.save(buf)
+        r = self._upload(buf.getvalue(), name="p.xlsx")
+        self.assertContains(r, "2 size/colour options")
+        self.assertContains(r, "listed twice")
+        self.client.post(reverse("seller_bulk"), {"action": "confirm"})
+        tee = Product.objects.get(name="Tee shirt")
+        self.assertTrue(tee.has_variants)
+        self.assertEqual(tee.stock, 7)
+        self.assertEqual(sorted((v.size, v.color, v.price) for v in tee.variants.all()), [("M", "Red", Decimal("17.00")), ("S", "Red", None)])
+        v_s = tee.variants.get(size="S")
+        # CSV for an existing product: keeps S (same id), drops M, adds L
+        self._upload(f"product,size,color,stock\n{tee.id},S,Red,9\n{tee.id},L,Red,2\n")
+        self.client.post(reverse("seller_bulk"), {"action": "confirm"})
+        tee.refresh_from_db()
+        self.assertEqual(tee.stock, 11)
+        self.assertEqual(tee.variants.get(size="S").pk, v_s.pk)
+        self.assertFalse(tee.variants.filter(size="M").exists())
+        out = load_workbook(io.BytesIO(self.client.get(reverse("seller_bulk") + "?download=xlsx").content))
+        self.assertIn("options", out.sheetnames)
+        self.assertEqual(len(list(out["options"].iter_rows(values_only=True))), 3)
+
     def test_bulk_price_change(self):
         self.client.post(reverse("seller_bulk"), {"action": "change", "mode": "price_pct", "value": "-10"})
         self.mine.refresh_from_db()
@@ -5595,3 +5663,322 @@ class PresentmentCurrencyTests(TestCase):
         finally:
             _display.reset(token)
         self.assertEqual(paypal._amount(order), {"currency_code": "EUR", "value": "9.00"})
+
+
+class StaffRoleTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_superuser("owner1", "o@example.com", "pass12345")
+
+    def test_owner_adds_support_agent_with_limited_access(self):
+        from django.core import mail as _mail
+        from .models import Profile
+        self.client.force_login(self.owner)
+        self.client.post(reverse("manage_team"), {"action": "add", "email": "agent@example.com", "role": "support"})
+        agent = User.objects.get(email="agent@example.com")
+        self.assertTrue(agent.is_staff and not agent.has_usable_password())
+        self.assertEqual(Profile.objects.get(user=agent).staff_role, "support")
+        self.assertTrue(any("agent@example.com" in m.to for m in _mail.outbox))
+        self.client.force_login(agent)
+        self.assertEqual(self.client.get(reverse("manage_orders")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("manage_support")).status_code, 200)
+        for blocked in ("manage_settings", "manage_reports", "manage_sellers", "manage_keys", "manage_team", "manage_gift_cards"):
+            r = self.client.get(reverse(blocked))
+            self.assertRedirects(r, reverse("manage_dashboard"), fetch_redirect_response=False, msg_prefix=blocked)
+        page = self.client.get(reverse("manage_dashboard"))
+        self.assertNotContains(page, reverse("manage_settings"))
+        self.assertContains(page, reverse("manage_support"))
+        # POSTs are blocked too
+        self.client.post(reverse("manage_settings"), {"site_name": "Hacked"})
+        self.assertNotEqual(SiteSettings.load().site_name, "Hacked")
+
+    def test_change_role_and_remove(self):
+        from .models import Profile
+        member = User.objects.create_user("m1", "m1@example.com", "pass12345", is_staff=True)
+        self.client.force_login(self.owner)
+        self.client.post(reverse("manage_team"), {"action": "role", "user": member.id, "role": "finance"})
+        self.assertEqual(Profile.objects.get(user=member).staff_role, "finance")
+        self.client.force_login(member)
+        self.assertEqual(self.client.get(reverse("manage_reports")).status_code, 200)
+        self.client.force_login(self.owner)
+        self.client.post(reverse("manage_team"), {"action": "remove", "user": member.id})
+        member.refresh_from_db()
+        self.assertFalse(member.is_staff)
+        # managers (default) can't manage the team
+        manager = User.objects.create_user("mg", "mg@example.com", "pass12345", is_staff=True)
+        self.client.force_login(manager)
+        self.assertEqual(self.client.get(reverse("manage_settings")).status_code, 200)
+        self.assertRedirects(self.client.get(reverse("manage_team")), reverse("manage_dashboard"), fetch_redirect_response=False)
+
+
+class SellerPromotionsAndAdsTests(TestCase):
+    def setUp(self):
+        owner = User.objects.create_user("promoseller", "pr@example.com", "pass12345")
+        self.seller = SellerAccount.objects.create(user=owner, business_name="Promo Co")
+        self.seller.status = "approved"
+        self.seller.save()
+        self.owner = owner
+        self.mine = make_product(name="Promo lamp", price=Decimal("40.00"), stock=10, seller_account=self.seller, seller_name="Promo Co")
+        self.other = make_product(name="Other lamp", price=Decimal("20.00"), stock=10)
+        self.buyer = User.objects.create_user("promobuyer", "pb@example.com", "pass12345")
+
+    def test_seller_coupon_only_discounts_their_products_and_seller_pays(self):
+        self.client.force_login(self.owner)
+        self.client.post(reverse("seller_promotions"), {"action": "coupon", "code": "promo25", "percent_off": "25", "per_user_limit": "1"})
+        coupon = Coupon.objects.get(code="PROMO25")
+        self.assertEqual(coupon.seller_account, self.seller)
+        self.client.force_login(self.buyer)
+        self.client.post(reverse("add_to_cart", args=[self.other.id]))
+        r = self.client.post(reverse("apply_coupon"), {"coupon_code": "PROMO25"}, follow=True)
+        self.assertContains(r, "for products from Promo Co only")
+        self.client.post(reverse("add_to_cart", args=[self.mine.id]))
+        self.client.post(reverse("apply_coupon"), {"coupon_code": "PROMO25"})
+        page = self.client.get(reverse("checkout"))
+        self.assertEqual(page.context["pricing"]["discount"], Decimal("10.00"))
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        order = Order.objects.get()
+        self.assertEqual((order.discount_amount, order.coupon_code), (Decimal("0"), "PROMO25"))
+        prices = {i.product_name: i.price for i in order.items.all()}
+        self.assertEqual(prices, {"Promo lamp": Decimal("30.00"), "Other lamp": Decimal("20.00")})
+
+    def test_timed_sale_starts_and_restores_prices(self):
+        from . import promotions
+        from .models import Promotion
+        self.client.force_login(self.owner)
+        now = timezone.localtime()
+        self.client.post(reverse("seller_promotions"), {"action": "sale", "name": "Flash", "percent_off": "20",
+                                                        "starts_at": now.strftime("%Y-%m-%dT%H:%M"), "ends_at": (now + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")})
+        promo = Promotion.objects.get()
+        self.assertEqual(promo.status, "active")
+        self.mine.refresh_from_db()
+        self.other.refresh_from_db()
+        self.assertEqual((self.mine.price, self.mine.old_price, self.other.price), (Decimal("32.00"), Decimal("40.00"), Decimal("20.00")))
+        Promotion.objects.filter(pk=promo.pk).update(ends_at=timezone.now() - timedelta(minutes=1))
+        promotions.tick()
+        self.mine.refresh_from_db()
+        self.assertEqual((self.mine.price, self.mine.old_price), (Decimal("40.00"), None))
+        self.assertEqual(Promotion.objects.get().status, "ended")
+
+    def test_sponsored_product_click_is_charged_from_earnings(self):
+        from . import ads
+        from .models import AdCampaign, AdStat
+        self.client.force_login(self.owner)
+        self.client.post(reverse("seller_ads"), {"action": "create", "product": self.mine.id, "bid": "0.50", "daily_budget": "1.00"})
+        campaign = AdCampaign.objects.get()
+        # no earnings yet: not shown
+        self.assertEqual(ads.pick(), [])
+        with mock.patch.object(SellerAccount, "amount_owed", new_callable=mock.PropertyMock, return_value=100.0):
+            shopper = self.client_class()
+            shopper.force_login(self.buyer)
+            ua = {"HTTP_USER_AGENT": "Mozilla/5.0 Firefox/130"}
+            page = shopper.get(reverse("search_products") + "?q=lamp", **ua)
+            self.assertContains(page, "Sponsored")
+            url = ads.click_url(campaign)
+            self.assertRedirects(shopper.get(url, **ua), reverse("product_detail", args=[self.mine.id]), fetch_redirect_response=False)
+            shopper.get(url, **ua)  # same visitor, same day: free
+            self.assertEqual(shopper.get(reverse("ad_click", args=[campaign.id]) + "?s=bad", **ua).status_code, 404)
+            other = self.client_class()
+            other.get(url, **ua)
+            third = self.client_class()
+            third.get(url, **ua)  # over the daily budget: not charged
+        self.seller.refresh_from_db()
+        campaign.refresh_from_db()
+        self.assertEqual((self.seller.ad_spend, campaign.spent), (Decimal("1.00"), Decimal("1.00")))
+        stat = AdStat.objects.get()
+        self.assertEqual((stat.spend, stat.clicks), (Decimal("1.00"), 3))
+        self.assertGreaterEqual(stat.impressions, 1)
+        # seller's own clicks are free
+        self.client.get(url, HTTP_USER_AGENT="Mozilla/5.0 Firefox/130")
+        self.seller.refresh_from_db()
+        self.assertEqual(self.seller.ad_spend, Decimal("1.00"))
+
+
+class EmailCampaignTests(TestCase):
+    def test_campaign_to_subscribers_with_unsubscribe_and_tracking(self):
+        import re as _re
+        from django.core import mail as _mail
+        from .models import EmailCampaign, NewsletterSubscriber
+        admin = User.objects.create_superuser("mkadmin", "mk@example.com", "pass12345")
+        for e in ("a@example.com", "b@example.com"):
+            NewsletterSubscriber.objects.create(email=e)
+        p = make_product(name="Campaign mug", price=Decimal("9.00"))
+        self.client.force_login(admin)
+        self.client.post(reverse("manage_campaigns"), {"action": "save", "subject": "Big sale", "heading": "Hello!", "body": "Line one.\n\nLine two.",
+                                                        "button_text": "Shop", "button_url": "/", "product_ids": str(p.id), "audience": "all", "coupon_code": "save10"})
+        c = EmailCampaign.objects.get()
+        self.assertContains(self.client.get(reverse("manage_campaign", args=[c.id])), "srcdoc")
+        self.client.post(reverse("manage_campaign", args=[c.id]), {"action": "test", "subject": "Big sale", "heading": "Hello!", "body": "Line one.", "audience": "all"})
+        self.assertEqual(_mail.outbox[-1].to, ["mk@example.com"])
+        _mail.outbox.clear()
+        self.client.post(reverse("manage_campaign", args=[c.id]), {"action": "send", "subject": "Big sale", "heading": "Hello!", "body": "Line one.\n\nLine two.",
+                                                                    "button_text": "Shop", "button_url": "/", "product_ids": str(p.id), "audience": "all", "coupon_code": "SAVE10"})
+        c.refresh_from_db()
+        self.assertEqual((c.status, c.sent_count), ("sent", 2))
+        self.assertEqual(sorted(m.to[0] for m in _mail.outbox), ["a@example.com", "b@example.com"])
+        msg = _mail.outbox[0]
+        html = msg.alternatives[0][0]
+        self.assertIn("SAVE10", html)
+        self.assertIn("Campaign mug", html)
+        self.assertIn("List-Unsubscribe", msg.extra_headers)
+        path = lambda pat: _re.search(r'(?:href|src)="https?://[^/"]+(' + pat + r')"', html).group(1).replace("&amp;", "&")
+        unsub = path(r'/unsubscribe/\?[^"]+')
+        click = path(r'/e/\d+/c/\?[^"]+')
+        pixel = path(r'/e/\d+/o\.gif\?[^"]+')
+        anon = self.client_class()
+        self.assertEqual(anon.get(pixel).status_code, 200)
+        self.assertEqual(anon.get(click).status_code, 302)
+        self.assertEqual(anon.get(click.replace("t=", "t=x")).status_code, 404)
+        c.refresh_from_db()
+        self.assertEqual((c.opens, c.clicks), (1, 1))
+        email = msg.to[0]
+        self.assertContains(anon.get(unsub), "Stop news and offers")
+        anon.post(unsub, {"List-Unsubscribe": "One-Click"})
+        self.assertFalse(NewsletterSubscriber.objects.filter(email=email).exists())
+        self.assertEqual(anon.get(unsub.replace("t=", "t=bad")).status_code, 404)
+
+
+class WebPushTests(TestCase):
+    def setUp(self):
+        import os as _os
+        from . import webpush
+        pub, priv = webpush.generate_keys()
+        _os.environ.update({"VAPID_PUBLIC_KEY": pub, "VAPID_PRIVATE_KEY": priv})
+        for k in ("VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY"):
+            self.addCleanup(_os.environ.pop, k, None)
+        self.user = User.objects.create_user("pushy", "push@example.com", "pass12345")
+
+    def _browser_keys(self):
+        import os as _os
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from . import webpush
+        key = ec.generate_private_key(ec.SECP256R1())
+        pub = key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+        auth = _os.urandom(16)
+        return key, webpush.b64u(pub), webpush.b64u(auth), auth, pub
+
+    def test_encryption_round_trip_rfc8291(self):
+        import struct
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from . import webpush
+        key, p256dh, auth_b64, auth, ua_pub = self._browser_keys()
+        body = webpush.encrypt(b'{"title":"Hi"}', p256dh, auth_b64)
+        salt, rs, idlen = body[:16], struct.unpack("!L", body[16:20])[0], body[20]
+        as_pub = body[21:21 + idlen]
+        self.assertEqual((rs, idlen), (4096, 65))
+        shared = key.exchange(ec.ECDH(), ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), as_pub))
+        ikm = webpush._hkdf(auth, shared, b"WebPush: info\x00" + ua_pub + as_pub, 32)
+        cek = webpush._hkdf(salt, ikm, b"Content-Encoding: aes128gcm\x00", 16)
+        nonce = webpush._hkdf(salt, ikm, b"Content-Encoding: nonce\x00", 12)
+        plain = AESGCM(cek).decrypt(nonce, body[21 + idlen:], None)
+        self.assertEqual(plain, b'{"title":"Hi"}\x02')
+
+    def test_subscribe_and_notifications_are_pushed(self):
+        import jwt
+        from .models import Notification, PushSubscription
+        _key, p256dh, auth_b64, _auth, _pub = self._browser_keys()
+        self.client.force_login(self.user)
+        r = self.client.post(reverse("push_subscribe"), json.dumps({"endpoint": "https://fcm.googleapis.com/fcm/send/abc", "keys": {"p256dh": p256dh, "auth": auth_b64}}),
+                             content_type="application/json")
+        self.assertEqual(r.json(), {"ok": True})
+        self.assertEqual(PushSubscription.objects.count(), 1)
+        calls = []
+
+        def opener(req, timeout=None):
+            calls.append(req)
+            resp = mock.MagicMock()
+            resp.__enter__.return_value.status = 201
+            return resp
+        with mock.patch("urllib.request.urlopen", side_effect=opener), self.captureOnCommitCallbacks(execute=True):
+            Notification.objects.create(user=self.user, message="Order #5 is on its way.", link="/my-orders/")
+        self.assertEqual(len(calls), 1)
+        req = calls[0]
+        self.assertEqual(req.full_url, "https://fcm.googleapis.com/fcm/send/abc")
+        self.assertEqual(req.get_header("Content-encoding"), "aes128gcm")
+        auth_header = req.get_header("Authorization")
+        token = auth_header.split("t=")[1].split(",")[0]
+        claims = jwt.decode(token, options={"verify_signature": False})
+        self.assertEqual(claims["aud"], "https://fcm.googleapis.com")
+        # expired subscriptions are removed
+        import urllib.error
+        with mock.patch("urllib.request.urlopen", side_effect=urllib.error.HTTPError("u", 410, "Gone", {}, None)), self.captureOnCommitCallbacks(execute=True):
+            Notification.objects.create(user=self.user, message="Another", link="/")
+        self.assertFalse(PushSubscription.objects.exists())
+
+
+class SearchAutocompleteTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache as _c
+        _c.clear()
+        self.p = make_product(name="Hydrating Moisturizer Cream", price=Decimal("12.00"), stock=5)
+        make_product(name="Wireless Headphones", price=Decimal("50.00"), stock=5)
+
+    def test_suggest_returns_products_categories_and_fixes_typos(self):
+        r = self.client.get(reverse("search_suggest") + "?q=moistur").json()
+        self.assertEqual(r["products"][0]["name"], "Hydrating Moisturizer Cream")
+        self.assertTrue(r["products"][0]["url"].endswith(f"/product/{self.p.id}/"))
+        self.assertEqual(r["results"], ["Hydrating Moisturizer Cream"])
+        typo = self.client.get(reverse("search_suggest") + "?q=headfones").json()
+        self.assertEqual(typo["did_you_mean"], "headphones")
+        self.assertEqual(typo["products"][0]["name"], "Wireless Headphones")
+
+    def test_search_page_autocorrects_when_nothing_found(self):
+        page = self.client.get(reverse("search_products") + "?q=moisturiser")
+        self.assertContains(page, "Showing results for")
+        self.assertContains(page, "Hydrating Moisturizer Cream")
+        exact = self.client.get(reverse("search_products") + "?q=moisturiser&exact=1")
+        self.assertNotContains(exact, "Hydrating Moisturizer Cream")
+
+
+class RecommendationTests(TestCase):
+    def test_customers_also_bought(self):
+        from django.core.cache import cache as _c
+        _c.clear()
+        a = make_product(name="Tea pot", price=Decimal("20"), stock=9)
+        b = make_product(name="Tea cups", price=Decimal("10"), stock=9)
+        c = make_product(name="Unrelated bike", price=Decimal("99"), stock=9)
+        buyer = User.objects.create_user("recbuyer", "rb2@example.com", "pass12345")
+        for _ in range(2):
+            o = Order.objects.create(user=buyer, full_name="R", address="a", city="c", postal_code="1", country="GB", phone="1",
+                                     payment_method="card", payment_status="paid", status="confirmed")
+            OrderItem.objects.create(order=o, product=a, product_name=a.name, price=a.price, quantity=1)
+            OrderItem.objects.create(order=o, product=b, product_name=b.name, price=b.price, quantity=1)
+        page = self.client.get(reverse("product_detail", args=[a.id]))
+        self.assertEqual([p.id for p in page.context["also_bought"]][:1], [b.id])
+        self.assertNotIn(c.id, [p.id for p in page.context["also_bought"]])
+        self.client.post(reverse("add_to_cart", args=[a.id]))
+        cart = self.client.get(reverse("cart"))
+        self.assertContains(cart, "Goes well with your cart")
+        self.assertEqual(cart.context["recommended"][0].id, b.id)
+
+
+class StagingSiteTests(TestCase):
+    def test_staging_protects_and_redirects_everything(self):
+        import base64 as b64
+        from django.core import mail as _mail
+        from django.core.management import call_command, CommandError
+        from django.test import override_settings
+        with self.assertRaises(CommandError):
+            call_command("anonymize_data", "--yes")  # never on the live store
+        with override_settings(STAGING=True, STAGING_PASSWORD="letmein", STAGING_EMAIL_TO="qa@example.com",
+                               STAGING_REAL_EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+                               EMAIL_BACKEND="bees.staging.RedirectEmailBackend"):
+            self.assertEqual(self.client.get("/").status_code, 401)
+            auth = {"HTTP_AUTHORIZATION": "Basic " + b64.b64encode(b"team:letmein").decode()}
+            page = self.client.get("/", **auth)
+            self.assertContains(page, "TEST SITE")
+            self.assertEqual(page["X-Robots-Tag"], "noindex, nofollow")
+            self.assertContains(self.client.get("/robots.txt", **auth), "Disallow: /")
+            from django.core.mail import send_mail
+            send_mail("Your order", "hi", None, ["real.customer@gmail.com"])
+            self.assertEqual(_mail.outbox[-1].to, ["qa@example.com"])
+            self.assertIn("[TEST] Your order (to real.customer@gmail.com)", _mail.outbox[-1].subject)
+            import os as _os
+            from bees import sms
+            with mock.patch.dict(_os.environ, {"TWILIO_ACCOUNT_SID": "AC" + "a" * 32, "TWILIO_AUTH_TOKEN": "t", "TWILIO_FROM": "+15005550006"}):
+                self.assertFalse(sms.is_configured())
+            u = User.objects.create_user("realname", "real@gmail.com", "pass12345", first_name="Real")
+            call_command("anonymize_data", "--yes", stdout=io.StringIO())
+            u.refresh_from_db()
+            self.assertEqual((u.email, u.first_name, u.has_usable_password()), (f"user{u.pk}@example.test", "Test", False))

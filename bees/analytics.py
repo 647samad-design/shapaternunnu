@@ -185,6 +185,9 @@ class VisitMiddleware:
     def __call__(self, request):
         response = self.get_response(request)
         try:
+            if request.method == "GET" and not request.path.startswith(("/static/", "/media/")):
+                from .promotions import tick_soon
+                tick_soon()
             if (response.status_code == 200 and request.method == "GET" and not request.path.startswith(SKIP)
                     and "text/html" in response.get("Content-Type", "")):
                 track_visit(request)
