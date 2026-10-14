@@ -42,6 +42,7 @@ from .security import (
     safe_next_url, redirect_back, validate_image_upload, validate_document_upload, random_upload_name,
 )
 from .templatetags.bees_extras import country_name, money, price as display_price
+from .categories import all_rows as category_rows, choices as category_choices
 
 logger = logging.getLogger(__name__)
 
@@ -253,18 +254,20 @@ def home(request):
         return redirect(f"{reverse('search_products')}?{urlencode({'q': query})}")
     flash_sale_products = with_ratings(Product.objects.flash())[:10]
     just_for_you_products = with_ratings(Product.objects.live()).order_by("-created_at")[:15]
-    from . import ads
+    from . import ads, content
     return render(request, "bees/index.html", {
         "sponsored": ads.pick(limit=4) if not is_speculative(request) else [],
         "flash_sale_products": flash_sale_products,
         "just_for_you_products": just_for_you_products,
         "categories": _category_tiles(),
+        "banners": content.home_banners(),
     })
 
 
 def _category_tiles():
-    """One tile per category that has products, pictured with one of its
-    own products (so the picture always matches). Cached for 5 minutes."""
+    """One tile per top-level category that has products (its own or its
+    subcategories'), pictured with the category's own picture or one of its
+    products (so the picture always matches). Cached for 5 minutes."""
     tiles = cache.get("home:category_tiles")
     if tiles is None:
         images = {}
@@ -273,10 +276,13 @@ def _category_tiles():
             .order_by("category", "id").values_list("category", "image_url")
         ):
             images.setdefault(category, image)
-        tiles = [
-            {"slug": slug, "label": label, "image": images[slug]}
-            for slug, label in Product.CATEGORY_CHOICES if slug in images
-        ]
+        rows = category_rows()
+        tiles = []
+        for top in [r for r in rows if not r["parent"]]:
+            slugs = [top["slug"]] + [r["slug"] for r in rows if r["parent"] == top["slug"]]
+            found = next((images[x] for x in slugs if x in images), None)
+            if found:
+                tiles.append({"slug": top["slug"], "label": top["name"], "image": top["image_url"] or found})
         cache.set("home:category_tiles", tiles, 300)
     return tiles
 
@@ -433,12 +439,16 @@ def _listing(request, base_qs, per_page):
 
 
 def category_products(request, category):
-    labels = dict(Product.CATEGORY_CHOICES)
-    if category not in labels:
+    from . import categories
+    row = categories.get(category)
+    if row is None or not row["visible"]:
         raise Http404("Unknown category.")
-    base = Product.objects.live().filter(category=category)
+    base = Product.objects.live().filter(category__in=categories.with_children(category))
     context = _listing(request, base, 12)
-    context.update({"category": category, "category_label": labels[category]})
+    parent = categories.get(row["parent"]) if row["parent"] else None
+    context.update({"category": category, "category_label": row["name"], "category_info": row,
+                    "category_parent": parent, "subcategories": categories.children(category),
+                    "sibling_categories": categories.children(parent["slug"]) if parent else []})
     if request.GET.get("page", "1") == "1" and not is_speculative(request):
         from . import ads
         context["sponsored"] = ads.pick(base)
@@ -490,7 +500,7 @@ def _smart_search(query):
     if not query:
         return Product.objects.none(), {}
     parsed = ai.parse_search(query)
-    labels = dict(Product.CATEGORY_CHOICES)
+    labels = {r["slug"]: r["name"] for r in category_rows()}
 
     def word_q(word):
         stem = ai.singular(word)
@@ -723,7 +733,7 @@ def signup_view(request):
     return render(request, "bees/signup.html", {
         "next": safe_next_url(request, request.POST.get("next") or request.GET.get("next"), ""),
         "ref_code": request.GET.get("ref", "") or request.POST.get("ref", ""),
-        "categories": Product.CATEGORY_CHOICES,
+        "categories": category_choices(),
         "form": form,
     })
 
@@ -2111,9 +2121,9 @@ def help_support(request):
     return render(request, "bees/help.html", {"faqs": faqs, "store_name": name})
 
 
-def sell_on_bees(request):
+def _sell_content():
     name = _store_name()
-    return render(request, "bees/static_page.html", {
+    return {
         "page_title": f"Sell on {name}",
         "sections": [
             ("Reach more customers", f"Open your shop on {name} and put your products in front of shoppers browsing every category."),
@@ -2122,23 +2132,23 @@ def sell_on_bees(request):
         ],
         "cta_url": reverse("become_seller"),
         "cta_label": "Apply to become a seller",
-    })
+    }
 
 
-def about_us(request):
+def _about_content():
     name = _store_name()
-    return render(request, "bees/static_page.html", {
+    return {
         "page_title": f"About {name}",
         "sections": [
             ("Who we are", f"{name} is an online marketplace connecting customers with trusted brands and independent sellers across beauty, electronics, fashion, home and more."),
             ("Our promise", "Carefully reviewed sellers, secure checkout, honest reviews from verified buyers, and support that actually answers."),
         ],
-    })
+    }
 
 
-def terms_page(request):
+def _terms_content():
     name = _store_name()
-    return render(request, "bees/static_page.html", {
+    return {
         "page_title": "Terms of Service",
         "sections": [
             (f"Using {name}", f"By creating an account or placing an order on {name}, you agree to these terms. Please use the platform responsibly and in line with applicable laws."),
@@ -2151,12 +2161,12 @@ def terms_page(request):
             ("Seller terms", f"Sellers must list only items they're allowed to sell, describe them honestly, ship on time and follow the law of the countries they sell to. {name} keeps the commission shown in Seller Center on each sale. Earnings become available once an item is delivered and its return window has passed, and are paid out by bank transfer, PayPal or Stripe; sponsored-product costs are taken from earnings. {name} may hold earnings for open returns, problem reports or suspected fraud, and may suspend accounts that break these terms."),
             ("Liability", "We do our best to keep the site running and information correct, but it's provided as-is. Nothing in these terms limits rights you have under consumer law in your country."),
         ],
-    })
+    }
 
 
-def privacy_page(request):
+def _privacy_content():
     name = _store_name()
-    return render(request, "bees/static_page.html", {
+    return {
         "page_title": "Privacy Policy",
         "sections": [
             ("What we collect", "Information you give us when you create an account, place an order or apply to sell - such as your name, email, shipping address and phone number. Card details are entered directly with Stripe and never reach our servers."),
@@ -2170,7 +2180,47 @@ def privacy_page(request):
             ("International transfers", "Our service providers may process data outside your country. When they do, they use recognised safeguards such as standard contractual clauses."),
             ("Contact", f"Questions or requests: {_brand().support_email or 'use the Help page'}."),
         ],
-    })
+    }
+
+
+BUILT_IN_PAGES = {"sell": lambda: _sell_content(), "about": lambda: _about_content(),
+                  "terms": lambda: _terms_content(), "privacy": lambda: _privacy_content()}
+
+
+def _static_page(request, slug, default):
+    """Built-in information page, or the store's own version of it
+    (Manage > Pages)."""
+    from . import content
+    page = content.published_page(slug)
+    if page is not None:
+        return render(request, "bees/static_page.html", {
+            "page_title": page.title, "blocks": content.parse_body(page.body), "page": page,
+            "cta_url": default.get("cta_url"), "cta_label": default.get("cta_label")})
+    return render(request, "bees/static_page.html", default)
+
+
+def custom_page(request, slug):
+    from . import content
+    page = content.published_page(slug)
+    if page is None or page.is_built_in:
+        raise Http404("Page not found.")
+    return render(request, "bees/static_page.html", {"page_title": page.title, "blocks": content.parse_body(page.body), "page": page})
+
+
+def sell_on_bees(request):
+    return _static_page(request, "sell", _sell_content())
+
+
+def about_us(request):
+    return _static_page(request, "about", _about_content())
+
+
+def terms_page(request):
+    return _static_page(request, "terms", _terms_content())
+
+
+def privacy_page(request):
+    return _static_page(request, "privacy", _privacy_content())
 
 
 @require_POST
@@ -2307,7 +2357,7 @@ def _product_fields_from_post(request):
     if not name:
         raise ValidationError("Product name is required.")
     category = request.POST.get("category", "")
-    if category not in dict(Product.CATEGORY_CHOICES):
+    if category not in dict(category_choices()):
         raise ValidationError("Please choose a valid category.")
     price = _parse_decimal(request.POST.get("price"), "Price", minimum=Decimal("0.01"))
     old_price = _parse_decimal(request.POST.get("old_price"), "Original price", required=False)
@@ -2465,7 +2515,7 @@ def seller_add_product(request):
         except ValidationError as exc:
             messages.error(request, " ".join(exc.messages))
             return _seller_form(request, seller, role, {
-                "categories": Product.CATEGORY_CHOICES, "p": request.POST, "variant_rows": variant_rows_for_form(request),
+                "categories": category_choices(), "p": request.POST, "variant_rows": variant_rows_for_form(request),
             })
         with transaction.atomic():
             product = Product.objects.create(
@@ -2480,7 +2530,7 @@ def seller_add_product(request):
         messages.success(request, "Product submitted for review. It will go live once approved by an admin.")
         return redirect("seller_products")
     return _seller_form(request, seller, role, {
-        "categories": Product.CATEGORY_CHOICES, "p": {"stock": 10, "discount_percent": 0}, "variant_rows": [],
+        "categories": category_choices(), "p": {"stock": 10, "discount_percent": 0}, "variant_rows": [],
     })
 
 
@@ -2501,7 +2551,7 @@ def seller_edit_product(request, pk):
         except ValidationError as exc:
             messages.error(request, " ".join(exc.messages))
             return _seller_form(request, seller, role, {
-                "categories": Product.CATEGORY_CHOICES, "product": product, "p": request.POST,
+                "categories": category_choices(), "product": product, "p": request.POST,
                 "variant_rows": variant_rows_for_form(request, product),
             })
         if not fields["image_url"]:
@@ -2521,7 +2571,7 @@ def seller_edit_product(request, pk):
             save_gallery(product, *gallery)
         return redirect("seller_products")
     return _seller_form(request, seller, role, {
-        "categories": Product.CATEGORY_CHOICES,
+        "categories": category_choices(),
         "product": product, "p": product, "variant_rows": variant_rows_for_form(request, product),
     })
 
@@ -2855,7 +2905,8 @@ def ai_write_listing(request):
     if len(name) < 3:
         return JsonResponse({"error": "Type the product name first."}, status=400)
     category = request.POST.get("category", "")
-    label = dict(Product.CATEGORY_CHOICES).get(category, "")
+    label = dict(category_choices()).get(category, "")
+    label = label.split(" › ")[-1]
     text, source = ai.write_listing(name, category, request.POST.get("notes", ""), label)
     return JsonResponse({"description": text, "source": source})
 
@@ -3045,7 +3096,7 @@ def ai_buying_guide_draft(request):
     if len(name) < 3:
         return JsonResponse({"error": "Type the product name first."}, status=400)
     category = request.POST.get("category", "")
-    product = Product(name=name, category=category if category in dict(Product.CATEGORY_CHOICES) else "grocery",
+    product = Product(name=name, category=category if category in dict(category_choices()) else "grocery",
                       price=_safe_decimal(request.POST.get("price")), description=request.POST.get("description", "")[:4000])
     guide, source = ai.buying_guide(product)
     return JsonResponse({"guide": guide, "source": source})

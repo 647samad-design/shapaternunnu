@@ -1,0 +1,59 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Pages &amp; banners{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Pages &amp; banners</h1>
+    <p>Write your own About, Terms and Privacy text, add pages like a shipping policy or FAQ, and put promotion banners on the home page. The big welcome banner at the top is in <a href="{% url 'manage_settings' %}">Store settings</a>.</p></div>
+    <div class="actions"><a class="btn btn-primary btn-sm" href="{% url 'manage_page_new' %}">+ New page</a></div></div>
+
+<section class="panel" style="padding:8px 20px;">
+    <h2 style="margin:12px 0 4px;">Pages</h2>
+    <div class="table-scroll"><table class="table">
+        <thead><tr><th>Page</th><th>Address</th><th>Text</th><th>Footer</th><th></th></tr></thead>
+        <tbody>
+        {% for slug, title, own in built_in %}
+        <tr><td><strong>{% if own %}{{ own.title }}{% else %}{{ title }}{% endif %}</strong></td>
+            <td class="small"><a href="/{% if slug == 'sell' %}sell{% else %}{{ slug }}{% endif %}/" target="_blank" rel="noopener">/{% if slug == 'sell' %}sell{% else %}{{ slug }}{% endif %}/</a></td>
+            <td>{% if own and own.is_published %}<span class="pill ok">Your text</span>{% elif own %}<span class="pill">Draft - built-in text shown</span>{% else %}<span class="pill">Built-in text</span>{% endif %}</td>
+            <td>Always</td>
+            <td class="num" style="white-space:nowrap;"><a class="btn btn-ghost btn-sm" href="{% url 'manage_page_builtin' slug %}">Edit</a>{% if own %}<form method="post" style="display:inline;margin:0;">{% csrf_token %}<input type="hidden" name="action" value="delete_page"><input type="hidden" name="id" value="{{ own.id }}"><button class="btn btn-ghost btn-sm" type="submit" title="Show the built-in text again">Reset</button></form>{% endif %}</td></tr>
+        {% endfor %}
+        {% for p in custom %}
+        <tr><td><strong>{{ p.title }}</strong></td>
+            <td class="small"><a href="{% url 'custom_page' p.slug %}" target="_blank" rel="noopener">/pages/{{ p.slug }}/</a></td>
+            <td>{% if p.is_published %}<span class="pill ok">Published</span>{% else %}<span class="pill">Draft</span>{% endif %}</td>
+            <td>{% if p.show_in_footer %}Yes{% else %}No{% endif %}</td>
+            <td class="num" style="white-space:nowrap;"><a class="btn btn-ghost btn-sm" href="{% url 'manage_page_edit' p.id %}">Edit</a><form method="post" style="display:inline;margin:0;">{% csrf_token %}<input type="hidden" name="action" value="delete_page"><input type="hidden" name="id" value="{{ p.id }}"><button class="btn btn-ghost btn-sm" style="color:var(--sale);" type="submit">Delete</button></form></td></tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+</section>
+
+<section class="panel">
+    <h2>Home page banners</h2>
+    <p class="muted small" style="margin-top:4px;">Up to three show under the welcome banner, in order. Use them for sales, new collections or free-shipping offers.</p>
+    <details class="bn-add"{% if not banners %} open{% endif %}><summary class="btn btn-secondary btn-sm" style="margin-top:12px;">+ Add a banner</summary>
+        <form method="post" class="bn-form">{% csrf_token %}<input type="hidden" name="action" value="add_banner">{% include "bees/manage/_banner_fields.html" with b=None %}<div class="wide"><button class="btn btn-primary btn-sm" type="submit">Add banner</button></div></form>
+    </details>
+    {% for b in banners %}
+    <div class="bn-row">
+        <div class="bn-thumb"{% if b.image_url %} style="background-image:url('{{ b.image_url }}')"{% endif %}></div>
+        <div style="flex:1;min-width:0;"><strong>{{ b.title }}</strong> {% if not b.is_active %}<span class="pill">Off</span>{% elif b.ends_at and b.ends_at <= now %}<span class="pill">Ended</span>{% elif b.starts_at and b.starts_at > now %}<span class="pill">Starts {{ b.starts_at|date:"j M, H:i" }}</span>{% else %}<span class="pill ok">Showing</span>{% endif %}
+            <div class="muted small">{{ b.subtitle }} · <a href="{{ b.link }}" target="_blank" rel="noopener">{{ b.link|truncatechars:40 }}</a>{% if b.ends_at %} · until {{ b.ends_at|date:"j M, H:i" }}{% endif %}</div></div>
+        <details class="bn-edit"><summary class="btn btn-ghost btn-sm">Edit</summary>
+            <form method="post" class="bn-form">{% csrf_token %}<input type="hidden" name="action" value="save_banner"><input type="hidden" name="id" value="{{ b.id }}">{% include "bees/manage/_banner_fields.html" %}<div class="wide"><button class="btn btn-primary btn-sm" type="submit">Save</button></div></form>
+            <form method="post" style="margin-top:8px;">{% csrf_token %}<input type="hidden" name="action" value="delete_banner"><input type="hidden" name="id" value="{{ b.id }}"><button class="btn btn-ghost btn-sm" style="color:var(--sale);" type="submit">Delete banner</button></form>
+        </details>
+    </div>
+    {% endfor %}
+</section>
+<style>
+.bn-add > summary, .bn-edit > summary { list-style: none; display: inline-flex; }
+.bn-add > summary::-webkit-details-marker, .bn-edit > summary::-webkit-details-marker { display: none; }
+.bn-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 14px; }
+.bn-form .wide { grid-column: 1 / -1; }
+.bn-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid var(--line); margin-top: 14px; }
+.bn-row .bn-edit { flex-basis: 100%; }
+.bn-row .bn-edit:not([open]) { flex-basis: auto; }
+.bn-thumb { width: 96px; height: 54px; border-radius: 8px; background: var(--accent) center / cover no-repeat; flex: none; }
+</style>
+{% endblock %}

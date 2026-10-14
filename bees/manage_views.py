@@ -34,6 +34,7 @@ from .models import (
 from .templatetags.bees_extras import money
 from .security import safe_next_url
 from .seller_views import PLAN_MONTH_CHOICES
+from .categories import choices as category_choices
 
 
 # ---------------------------------------------------------------------------
@@ -359,8 +360,9 @@ def products(request):
     state = request.GET.get("state", "")
     if q:
         qs = qs.filter(Q(name__icontains=q) | Q(seller_name__icontains=q))
-    if category in dict(Product.CATEGORY_CHOICES):
-        qs = qs.filter(category=category)
+    if category in dict(category_choices()):
+        from .categories import with_children
+        qs = qs.filter(category__in=with_children(category))
     if state in ("pending", "approved", "rejected"):
         qs = qs.filter(approval_status=state)
     elif state == "low":
@@ -371,7 +373,7 @@ def products(request):
         qs = qs.filter(is_flash_sale=True)
     return _render(request, "products.html", {
         "section": "products", "page_obj": _page(request, qs), "q": q, "category": category, "state": state,
-        "categories": Product.CATEGORY_CHOICES,
+        "categories": category_choices(),
     })
 
 
@@ -431,7 +433,7 @@ def product_form(request, pk=None):
         except ValidationError as exc:
             messages.error(request, " ".join(exc.messages))
             return _render(request, "product_form.html", {
-                "section": "products", "product": product, "form": request.POST, "categories": Product.CATEGORY_CHOICES,
+                "section": "products", "product": product, "form": request.POST, "categories": category_choices(),
                 "approval_choices": Product.APPROVAL_CHOICES, "variant_rows": variant_rows_for_form(request, product),
             })
         approval = request.POST.get("approval_status", "approved")
@@ -464,7 +466,7 @@ def product_form(request, pk=None):
         messages.success(request, "Product saved." if not is_new else "Product created.")
         return redirect("manage_product_edit", pk=product.pk)
     return _render(request, "product_form.html", {
-        "section": "products", "product": product, "categories": Product.CATEGORY_CHOICES,
+        "section": "products", "product": product, "categories": category_choices(),
         "approval_choices": Product.APPROVAL_CHOICES,
         "variant_rows": variant_rows_for_form(request, product),
     })

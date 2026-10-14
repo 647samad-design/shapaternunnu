@@ -63,37 +63,83 @@ class ProductQuerySet(models.QuerySet):
             models.Q(flash_sale_ends__isnull=True) | models.Q(flash_sale_ends__gt=timezone.now()))
 
 
-class Product(models.Model):
-    CATEGORY_CHOICES = [
-        ("skincare", "Skin care"),
-        ("haircare", "Hair care"),
-        ("grocery", "Grocery"),
-        ("fashion", "Fashion"),
-        ("electronics", "Electronics"),
-        ("3d-printers", "3D printers"),
-        ("pasta-tools", "Pasta, Noodle & Pizza Tools"),
-        ("sim-devices", "SIM devices"),
-        ("screen-protector", "Screen protector"),
-        ("casserole-pot", "Casserole pot"),
-        ("table-lamp", "Table lamp"),
-        ("hoodies", "Hoodies & Sweatshirts"),
-        ("toy-boxes", "Toy boxes and organizers"),
-        ("sneakers", "Sneakers"),
-        ("education", "Education"),
-        ("dress-up-kits", "Dress-Up Kits"),
-        ("microphones", "Microphones"),
-        ("leashes", "Leashes and harnesses"),
-        ("donate-education", "Donate to education"),
-        ("coloring-drawing", "Coloring & Drawing"),
-        ("lotion-cream", "Lotion, Cream and Scrubs"),
-    ]
+class Category(models.Model):
+    """A shop category. Top-level categories show in the menu bar; a
+    subcategory's products also show on its parent's page. Managed in
+    Manage > Categories (the store can add, rename, nest and hide them)."""
+    slug = models.SlugField(max_length=30, unique=True, help_text="Used in the address: /category/<slug>/. Can't be changed later.")
+    name = models.CharField(max_length=60)
+    parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="children",
+                               help_text="Empty = top-level category (shown in the menu bar).")
+    position = models.PositiveSmallIntegerField(default=0, help_text="Lower numbers come first.")
+    image_url = models.CharField(max_length=500, blank=True, help_text="Optional picture for the category tile. Empty = a product photo.")
+    description = models.CharField(max_length=300, blank=True, help_text="Shown at the top of the category page and in Google results.")
+    is_active = models.BooleanField("Visible", default=True)
+    size_chart = models.TextField(blank=True, help_text="Optional size guide for products in this category, one row per line, cells separated by | (first line = headings). Example: Size | Chest (cm) | Length (cm)")
 
+    class Meta:
+        ordering = ["position", "name"]
+        verbose_name_plural = "categories"
+
+    def __str__(self):
+        return self.name
+
+
+class Page(models.Model):
+    """An information page the store writes itself (Manage > Pages):
+    About, Terms, Privacy, Sell with us (these replace the built-in text),
+    or any new page such as a shipping policy or FAQ (/pages/<slug>/).
+    Body: plain text; a line starting with "## " is a heading, a blank line
+    starts a new paragraph, lines starting with "- " are a bullet list."""
+    BUILT_IN = [("about", "About us"), ("terms", "Terms of Service"), ("privacy", "Privacy Policy"), ("sell", "Sell with us")]
+    slug = models.SlugField(max_length=60, unique=True)
+    title = models.CharField(max_length=120)
+    body = models.TextField()
+    meta_description = models.CharField(max_length=170, blank=True, help_text="Snippet in Google results. Empty = start of the page.")
+    is_published = models.BooleanField("Published", default=True)
+    show_in_footer = models.BooleanField(default=True, help_text="Link to it in the site footer.")
+    position = models.PositiveSmallIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position", "title"]
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def is_built_in(self):
+        return self.slug in dict(self.BUILT_IN)
+
+
+class HomeBanner(models.Model):
+    """A promotion card on the home page, under the big welcome banner
+    (Manage > Pages & banners). Up to three show at a time."""
+    title = models.CharField(max_length=80)
+    subtitle = models.CharField(max_length=160, blank=True)
+    image_url = models.CharField("Picture URL", max_length=500, blank=True, help_text="Wide picture, about 1200 x 600. Empty = a coloured card.")
+    link = models.CharField(max_length=300, help_text="Where it goes, e.g. /category/fashion/ or /search/?q=summer")
+    button_label = models.CharField(max_length=30, default="Shop now")
+    position = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField("Showing", default=True)
+    starts_at = models.DateTimeField(null=True, blank=True, help_text="Optional: show from this time.")
+    ends_at = models.DateTimeField(null=True, blank=True, help_text="Optional: hide after this time.")
+
+    class Meta:
+        ordering = ["position", "-id"]
+
+    def __str__(self):
+        return self.title
+
+
+class Product(models.Model):
     name = models.CharField(max_length=255)
     image_url = models.CharField(max_length=500)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     old_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     discount_percent = models.PositiveIntegerField(default=0)
-    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default="grocery", db_index=True)
+    category = models.CharField(max_length=30, default="grocery", db_index=True,
+                                help_text="Category slug (see Manage > Categories).")
     description = models.TextField(blank=True)
     is_flash_sale = models.BooleanField(default=False, db_index=True)
     flash_sale_ends = models.DateTimeField(null=True, blank=True,
@@ -138,6 +184,10 @@ class Product(models.Model):
     # True when the product is sold in sizes/colours (see ProductVariant);
     # ``stock`` is then the total of all variants.
     has_variants = models.BooleanField(default=False)
+
+    def get_category_display(self):
+        from . import categories
+        return categories.label(self.category)
 
     def sync_variants(self):
         """Keeps ``stock`` and ``has_variants`` in line with the variants."""
@@ -1774,6 +1824,19 @@ def _merge_saved_cart(sender, request, user, **kwargs):
         cart.setdefault(key, qty)
     request.session["cart"] = cart
     persist(request, user=user)
+
+
+@receiver([post_save, post_delete], sender=Page)
+@receiver([post_save, post_delete], sender=HomeBanner)
+def _content_changed(sender, **kwargs):
+    from django.core.cache import cache
+    cache.delete_many(["content:footer_pages", "content:banners"])
+
+
+@receiver([post_save, post_delete], sender=Category)
+def _categories_changed(sender, **kwargs):
+    from . import categories
+    categories.clear_cache()
 
 
 @receiver([post_save, post_delete], sender=ShippingZone)

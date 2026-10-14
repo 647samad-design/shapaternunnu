@@ -2,7 +2,7 @@
 {% load bees_extras %}
 {% block structured_data %}{% listing_jsonld products category_label as list_ld %}<script type="application/ld+json">{{ list_ld|jsonld }}</script>{% endblock %}
 {% block title %}{{ category_label }} — {{ brand.site_name }}{% endblock %}
-{% block meta_description %}Shop {{ category_label }} at {{ brand.site_name }}. Secure checkout, fast shipping and easy returns.{% endblock %}
+{% block meta_description %}{% if category_info.description %}{{ category_info.description }}{% else %}Shop {{ category_label }} at {{ brand.site_name }}. Secure checkout, fast shipping and easy returns.{% endif %}{% endblock %}
 {% block og_title %}{{ category_label }} — {{ brand.site_name }}{% endblock %}
 {% block content %}
 {% include "bees/partials/listing.html" with listing_title=category_label empty_title="No products here yet" empty_text="New items are added regularly. In the meantime, explore the rest of the store." %}

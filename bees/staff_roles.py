@@ -19,9 +19,9 @@ ROLE_HELP = {
     "manager": "Runs the store day to day: orders, products, sellers, money, marketing and settings.",
     "orders": "Orders, shipping labels, returns, problem reports, cash-on-delivery checks and customers.",
     "support": "Customer and seller messages, orders, returns, problem reports, reviews and customers.",
-    "catalog": "Product approval, store products, bulk import, reviews & questions and sellers.",
+    "catalog": "Product approval, store products, categories, bulk import, reviews & questions and sellers.",
     "finance": "Reports, seller payouts, gift cards, coupons, seller plans and orders (to check payments).",
-    "marketing": "Coupons, gift cards, email campaigns, sponsored products, referrals and reports.",
+    "marketing": "Coupons, gift cards, email campaigns, sponsored products, referrals, pages & banners and reports.",
 }
 
 # Admin area for each URL prefix (longest prefix wins).
@@ -35,13 +35,14 @@ PATHS = [
     ("/manage/ads/", "ads"), ("/manage/listing-reports/", "products"), ("/manage/promotions/", "coupons"), ("/manage/team/", "team"), ("/manage/keys/", "keys"),
     ("/manage/settings/", "settings"), ("/manage/setup/", "settings"), ("/manage/taxes/", "settings"),
     ("/manage/currencies/", "settings"), ("/manage/translations/", "settings"), ("/manage/system/", "system"),
+    ("/manage/categories/", "products"), ("/manage/pages/", "content"),
 ]
 ACCESS = {
     "orders": {"orders", "returns", "claims", "shipping", "cod", "customers"},
     "support": {"orders", "returns", "claims", "messages", "reviews", "customers"},
     "catalog": {"products", "reviews", "sellers"},
     "finance": {"reports", "sellers", "gift_cards", "coupons", "plans", "orders", "referrals"},
-    "marketing": {"coupons", "gift_cards", "campaigns", "ads", "referrals", "reports"},
+    "marketing": {"coupons", "gift_cards", "campaigns", "ads", "referrals", "reports", "content"},
 }
 OWNER_ONLY = {"keys", "team"}
 

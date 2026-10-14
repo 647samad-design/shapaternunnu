@@ -1,0 +1,22 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}{% if page.pk %}{{ page.title }}{% else %}New page{% endif %}{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><a class="link small" href="{% url 'manage_pages' %}">← Pages &amp; banners</a>
+    <h1 style="margin-top:6px;">{% if page.pk %}Edit “{{ page.title }}”{% elif page.slug %}Edit “{{ page.title }}”{% else %}New page{% endif %}</h1>
+    {% if page.is_built_in and not page.pk %}<p>This is the built-in text. Change it and save to use your own version.</p>{% endif %}</div></div>
+<section class="panel">
+    <form method="post" class="pg-form">{% csrf_token %}
+        <div class="field"><label for="pg-title">Title</label><input id="pg-title" name="title" maxlength="120" required value="{{ page.title }}"></div>
+        {% if not page.slug %}<div class="field"><label for="pg-slug">Address (optional)</label><input id="pg-slug" name="slug" maxlength="60" placeholder="made from the title" pattern="[a-z0-9\-]*"><small class="muted">The page will be at /pages/<em>address</em>/</small></div>{% endif %}
+        <div class="field"><label for="pg-body">Text</label><textarea id="pg-body" name="body" rows="22" required>{{ page.body }}</textarea>
+            <small class="muted">Write normally. A line starting with <code>## </code> is a heading, lines starting with <code>- </code> make a list, an empty line starts a new paragraph. Web addresses become links.</small></div>
+        <div class="field"><label for="pg-meta">Google description (optional)</label><input id="pg-meta" name="meta_description" maxlength="170" value="{{ page.meta_description }}"></div>
+        <div style="display:flex;flex-wrap:wrap;gap:18px;">
+            <label class="small" style="display:flex;gap:6px;align-items:center;"><input type="checkbox" name="is_published" value="1"{% if page.is_published %} checked{% endif %}> Published</label>
+            {% if not page.is_built_in %}<label class="small" style="display:flex;gap:6px;align-items:center;"><input type="checkbox" name="show_in_footer" value="1"{% if page.show_in_footer %} checked{% endif %}> Link in the footer</label>{% endif %}
+        </div>
+        <div><button class="btn btn-primary" type="submit">Save page</button></div>
+    </form>
+</section>
+<style>.pg-form { display: grid; gap: 14px; } .pg-form textarea { min-height: 360px; line-height: 1.55; }</style>
+{% endblock %}

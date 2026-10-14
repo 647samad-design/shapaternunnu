@@ -7,6 +7,7 @@ from django.urls import reverse
 from rest_framework import serializers
 
 from ..models import Order, OrderItem, Product, ProductVariant, Review, SellerAccount
+from ..categories import choices as category_choices
 
 
 def absolute(request, url):
@@ -278,7 +279,12 @@ class SellerProductWriteSerializer(serializers.Serializer):
     import: new products, and changes to name / category / photo /
     description, go to the store's review; price and stock are live at once."""
     name = serializers.CharField(max_length=255, required=False)
-    category = serializers.ChoiceField(choices=Product.CATEGORY_CHOICES, required=False)
+    category = serializers.CharField(max_length=30, required=False)
+
+    def validate_category(self, value):
+        if value not in dict(category_choices()):
+            raise serializers.ValidationError("Unknown category. See GET /api/v1/categories/.")
+        return value
     price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0.01"), required=False)
     old_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0"), required=False, allow_null=True)
     stock = serializers.IntegerField(min_value=0, max_value=1_000_000, required=False)
