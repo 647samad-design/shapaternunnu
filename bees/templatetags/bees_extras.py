@@ -233,3 +233,9 @@ def sitemap_languages():
 def social_providers():
     from bees import social
     return social.providers()
+
+
+@register.filter
+def split(value, sep=" "):
+    """'a b c'|split -> ['a', 'b', 'c']."""
+    return str(value).split(sep)

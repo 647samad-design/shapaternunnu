@@ -14,6 +14,13 @@
     .sum-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; }
     .sum-total { display: flex; justify-content: space-between; padding-top: 14px; margin-top: 8px; border-top: 1.5px solid var(--line); font-weight: 700; font-size: 1.25rem; }
     .coupon { display: flex; gap: 8px; margin: 16px 0; }
+    .deliv-choice { display: grid; gap: 8px; margin-bottom: 8px; }
+    .gift-box { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .gift-box summary { cursor: pointer; }
+    .my-vouchers { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: -6px 0 12px; }
+    .my-vouchers form { margin: 0; }
+    .v-chip { border: 1px dashed var(--ink); background: var(--surface); border-radius: 999px; padding: 4px 10px; font-weight: 700; font-size: .82rem; cursor: pointer; color: var(--ink); }
+    .v-chip.on { background: var(--ink); color: var(--surface); }
     .place { margin-top: 20px; min-height: 56px; font-size: 1.1rem; }
     .co-summary { position: sticky; top: 140px; }
     @media (max-width: 960px) { .co { grid-template-columns: 1fr; } .co-summary { position: static; order: -1; } }
@@ -35,6 +42,16 @@
 
             <section class="panel co-step">
                 <h2>{{ t.delivery_details }}</h2>
+                {% if pickups and not has_digital_only %}
+                <div class="deliv-choice" role="radiogroup" aria-label="Delivery">
+                    <label class="pay-option"><input type="radio" name="delivery" value="home" {% if form.delivery != "pickup" %}checked{% endif %} data-delivery><span><strong>Deliver to my address</strong></span></label>
+                    <label class="pay-option"><input type="radio" name="delivery" value="pickup" {% if form.delivery == "pickup" %}checked{% endif %} data-delivery><span><strong>Collect at a pickup point</strong><span class="muted">Shops and lockers near you{% if is_member %} - free for members{% endif %}</span></span></label>
+                </div>
+                <div class="field" data-pickup-only hidden style="margin:12px 0;">
+                    <label for="pickup-point">Pickup point</label>
+                    <select id="pickup-point" name="pickup_point"><option value="">Choose…</option>{% for p in pickups %}<option value="{{ p.id }}">{{ p.city }} - {{ p.name }}, {{ p.address }}{% if p.fee %} ({{ p.fee|money }}){% else %} (free){% endif %}{% if p.hours %} · {{ p.hours }}{% endif %}</option>{% endfor %}</select>
+                </div>
+                {% endif %}
                 {% if addresses %}
                 <div class="field" style="margin-bottom:16px;">
                     <label for="saved-address">Use a saved address</label>
@@ -48,12 +65,18 @@
                 {% endif %}
                 <div class="form-grid">
                     <div class="field span-2"><label for="id_full_name">{{ t.full_name }}</label><input type="text" id="id_full_name" name="full_name" autocomplete="name" value="{{ form.full_name|default:'' }}" required></div>
-                    <div class="field span-2"><label for="id_address">{{ t.street_address }}</label><input type="text" id="id_address" name="address" autocomplete="street-address" value="{{ form.address|default:'' }}" placeholder="House number, street, apartment" required></div>
-                    <div class="field"><label for="id_city">{{ t.city }}</label><input type="text" id="id_city" name="city" autocomplete="address-level2" value="{{ form.city|default:'' }}" required></div>
-                    <div class="field"><label for="id_state">State / province <span class="muted">(optional)</span></label><input type="text" id="id_state" name="state" autocomplete="address-level1" value="{{ form.state|default:'' }}"></div>
-                    <div class="field"><label for="id_postal_code">Postal / ZIP code</label><input type="text" id="id_postal_code" name="postal_code" autocomplete="postal-code" value="{{ form.postal_code|default:'' }}" required></div>
-                    <div class="field"><label for="id_country">Country</label>{% country_select selected=form.country %}</div>
+                    <div class="field span-2" data-home-only><label for="id_address">{{ t.street_address }}</label><input type="text" id="id_address" name="address" autocomplete="street-address" value="{{ form.address|default:'' }}" placeholder="House number, street, apartment" required></div>
+                    <div class="field" data-home-only><label for="id_city">{{ t.city }}</label><input type="text" id="id_city" name="city" autocomplete="address-level2" value="{{ form.city|default:'' }}" required></div>
+                    <div class="field" data-home-only><label for="id_state">State / province <span class="muted">(optional)</span></label><input type="text" id="id_state" name="state" autocomplete="address-level1" value="{{ form.state|default:'' }}"></div>
+                    <div class="field" data-home-only><label for="id_postal_code">Postal / ZIP code</label><input type="text" id="id_postal_code" name="postal_code" autocomplete="postal-code" value="{{ form.postal_code|default:'' }}" required></div>
+                    <div class="field" data-home-only><label for="id_country">Country</label>{% country_select selected=form.country %}</div>
                 </div>
+                {% if brand.gift_wrap_enabled and not has_digital_only %}
+                <details class="gift-box" {% if form.gift_wrap %}open{% endif %}><summary><strong>🎁 This is a gift</strong> <span class="muted small">free gift wrap, a message, no prices on the packing slip</span></summary>
+                    <label class="check small" style="margin-top:10px;"><input type="checkbox" name="gift_wrap" value="1" {% if form.gift_wrap %}checked{% endif %}> Gift wrap it (free)</label>
+                    <div class="field" style="margin-top:8px;"><label for="gift-msg">Gift message (optional)</label><textarea id="gift-msg" name="gift_message" rows="2" maxlength="300" placeholder="Happy birthday! Love, Sam">{{ form.gift_message|default:'' }}</textarea></div>
+                </details>
+                {% endif %}
             </section>
 
             <section class="panel co-step">
@@ -113,6 +136,8 @@
                 <input class="input" id="coupon" type="text" name="coupon_code" placeholder="{{ t.coupon_code_placeholder }}" value="{{ coupon.code|default:'' }}">
                 <button type="submit" class="btn btn-secondary">{{ t.apply }}</button>
             </form>
+            {% if my_vouchers %}<div class="my-vouchers"><span class="small muted">Your vouchers:</span>{% for v in my_vouchers %}<form method="post" action="{% url 'apply_coupon' %}">{% csrf_token %}<input type="hidden" name="coupon_code" value="{{ v.code }}"><button class="v-chip{% if coupon.code == v.code %} on{% endif %}" type="submit">{% if v.percent_off %}{{ v.percent_off }}%{% endif %}{% if v.percent_off and v.free_shipping %} + {% endif %}{% if v.free_shipping %}free ship{% endif %} · {{ v.code }}</button></form>{% endfor %}</div>
+            {% elif user.is_authenticated %}<p class="small" style="margin:-6px 0 12px;"><a class="link" href="{% url 'vouchers' %}">Find vouchers</a></p>{% endif %}
             {% if user.is_authenticated %}
             <details class="gift-redeem" style="margin:-4px 0 12px;"><summary class="small link">Have a gift card?</summary>
                 <form method="post" action="{% url 'gift_cards_mine' %}" class="coupon" style="margin-top:8px;">{% csrf_token %}<input type="hidden" name="next" value="checkout">
@@ -124,7 +149,8 @@
             {% endif %}
 
             <div class="sum-row"><span>Subtotal</span><span>{{ pricing.subtotal|money }}</span></div>
-            {% if coupon %}<div class="sum-row" style="color:var(--ok);font-weight:700;"><span>Discount ({{ coupon.code }})</span><span>−{{ pricing.discount|money }}</span></div>{% endif %}
+            {% if coupon or pricing.member_discount %}<div class="sum-row" style="color:var(--ok);font-weight:700;"><span>Discount{% if coupon %} ({{ coupon.code }}){% endif %}{% if pricing.member_discount %} incl. {{ brand.membership_name }} {{ brand.membership_discount }}%{% endif %}</span><span>−{{ pricing.discount|money }}</span></div>{% endif %}
+            {% if is_member %}<p class="small" style="color:var(--ok);font-weight:700;margin:4px 0;">✓ {{ brand.membership_name }} member: free shipping</p>{% endif %}
             <div class="sum-row"><span>Shipping</span><span id="sum-shipping">{% if pricing.shipping is None %}<span class="muted">Choose a country</span>{% elif pricing.shipping %}{{ pricing.shipping|money }}{% else %}Free{% endif %}</span></div>
             <div class="sum-row" id="tax-row" {% if not pricing.tax %}style="display:none;"{% endif %}><span id="tax-label">{% if pricing.tax_included %}Includes {% endif %}{{ pricing.tax_name }}{% if pricing.tax_rate %} {{ pricing.tax_rate|floatformat:"-2" }}%{% endif %}</span><span id="sum-tax">{{ pricing.tax|money }}</span></div>
             {% if store_credit > 0 %}<div class="sum-row" id="credit-row" style="color:var(--ok);font-weight:700;"><span>Store credit</span><span id="credit-amount">−{{ credit_applicable|money }}</span></div>{% endif %}
@@ -166,11 +192,27 @@ function fillAddress(sel) {
         const extra = Math.max((d.items || 1) - 1, 0) * num(rule.per_item);
         return { known: true, ships: true, fee: free ? 0 : num(rule.fee) + extra };
     }
+    const pickupSel = document.getElementById('pickup-point');
+    function pickupMode() {
+        const r = document.querySelector('[data-delivery]:checked');
+        return r && r.value === 'pickup';
+    }
+    function syncDelivery() {
+        const pick = pickupMode();
+        document.querySelectorAll('[data-home-only]').forEach(el => {
+            el.hidden = pick;
+            el.querySelectorAll('input,select').forEach(i => { if (i.dataset.req === undefined) i.dataset.req = i.required ? '1' : ''; i.required = !pick && i.dataset.req === '1'; });
+        });
+        document.querySelectorAll('[data-pickup-only]').forEach(el => { el.hidden = !pick; });
+        if (pickupSel) pickupSel.required = pick;
+    }
     function update() {
         const goods = Math.max(num(d.subtotal) - num(d.discount), 0);
-        const ship = shippingFor(country ? country.value : '', goods);
+        const point = pickupMode() && pickupSel && d.pickups ? d.pickups[pickupSel.value] : null;
+        let ship = point ? { known: true, ships: true, fee: num(point.fee) } : shippingFor(country ? country.value : '', goods);
+        if ((d.member || d.free_ship) && ship.known) ship = { known: true, ships: ship.ships, fee: 0 };
         const tx = d.taxes || {};
-        const code = country ? country.value : '';
+        const code = point ? point.country : (country ? country.value : '');
         const rule = (tx.countries || {})[code] || tx.default;
         let tax = 0;
         if (rule) {
@@ -199,6 +241,9 @@ function fillAddress(sel) {
     }
     if (box) box.addEventListener('change', update);
     if (country) country.addEventListener('change', update);
+    document.querySelectorAll('[data-delivery]').forEach(r => r.addEventListener('change', () => { syncDelivery(); update(); }));
+    if (pickupSel) pickupSel.addEventListener('change', update);
+    syncDelivery();
     window.checkoutUpdate = update;
     update();
 })();

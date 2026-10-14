@@ -3,6 +3,8 @@
     <a class="pcard-media" href="{% if product.ad_url %}{{ product.ad_url }}{% else %}{% url 'product_detail' product.id %}{% endif %}"{% if not product.ad_url %} onclick="return openQuickView(event, {{ product.id }})"{% else %} rel="sponsored nofollow"{% endif %} aria-label="{{ product.name }}">
         <img src="{{ product.image_url }}" alt="{{ product.name }}" loading="lazy" decoding="async" width="400" height="400">
         {% if product.stock <= 0 %}<span class="pcard-flag badge">{{ t.out_of_stock }}</span>
+        {% elif product.is_auction %}<span class="pcard-flag badge badge-accent">🔨 Auction</span>
+        {% elif product.condition != "new" %}<span class="pcard-flag badge">{{ product.get_condition_display }}</span>
         {% elif product.discount_percent %}<span class="pcard-flag badge badge-accent">Save {{ product.discount_percent }}%</span>{% endif %}
     </a>
     {% if user.is_authenticated %}
@@ -22,14 +24,18 @@
         <span class="pcard-meta"><span class="stars" aria-hidden="true">{{ product.average_rating|stars }}</span><span>{{ product.average_rating }} ({{ product.rating_count }})</span></span>
         {% endif %}
         <div class="pcard-price">
-            <span class="price">{{ product.price|price }}</span>
+            {% if product.is_auction %}<span class="muted small">Starting bid</span> <span class="price">{{ product.auction_start_price|default:product.price|price }}</span>{% else %}<span class="price">{{ product.price|price }}</span>{% endif %}
             {% if product.old_price %}<span class="price-was"><span class="sr-only">Was </span>{{ product.old_price|price }}</span>{% endif %}
         </div>
         {% if product.flash_countdown %}<span class="pcard-timer" data-ends="{{ product.flash_sale_ends|date:'c' }}">⚡ <span data-timer></span></span>{% endif %}
         {% if product.has_bulk_offer %}<span class="pcard-bulk">{{ t.bulk_offer|fill:product }}</span>{% endif %}
         {% if product.stock > 0 and product.stock <= 5 and not product.has_variants %}<span class="pcard-stock low">Only {{ product.stock }} left</span>{% endif %}
         <div class="pcard-actions">
-            {% if product.stock > 0 and product.has_variants %}
+            {% if product.stock > 0 and product.is_auction %}
+            <a href="{% url 'product_detail' product.id %}#auction" class="btn btn-secondary btn-sm btn-block">Bid now</a>
+            {% elif product.stock > 0 and product.personalization_required %}
+            <a href="{% url 'product_detail' product.id %}" class="btn btn-secondary btn-sm btn-block">Personalize</a>
+            {% elif product.stock > 0 and product.has_variants %}
             <a href="{% url 'product_detail' product.id %}" class="btn btn-secondary btn-sm btn-block">Choose options</a>
             {% elif product.stock > 0 %}
             <form method="post" action="{% url 'add_to_cart' product.id %}" class="ajax-add-cart-form">

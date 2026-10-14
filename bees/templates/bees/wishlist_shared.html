@@ -1,0 +1,10 @@
+{% extends "bees/base.html" %}
+{% block title %}{{ owner }}'s wishlist — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page">
+    <div class="page-head"><div><h1>{{ owner }}'s wishlist</h1><p>{{ items|length }} item{{ items|length|pluralize }} - perfect gift ideas.</p></div></div>
+    {% if items %}<div class="grid-products">{% for item in items %}{% with product=item.product %}{% include "bees/partials/product_card.html" %}{% endwith %}{% endfor %}</div>
+    {% else %}<div class="panel empty"><h2>This wishlist is empty</h2><a href="{% url 'all_products' %}" class="btn btn-primary">Browse products</a></div>{% endif %}
+</div>
+{% endblock %}

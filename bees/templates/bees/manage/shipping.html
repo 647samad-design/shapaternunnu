@@ -2,7 +2,7 @@
 {% load bees_extras %}
 {% block page_title %}Shipping{% endblock %}
 {% block admin %}
-<div class="adm-head"><div><h1>Shipping</h1><p>Shipping fees by destination country. Customers see the fee as soon as they pick their country at checkout.</p></div></div>
+<div class="adm-head"><div><h1>Shipping</h1><p>Shipping fees by destination country. Customers see the fee as soon as they pick their country at checkout.</p></div><div class="actions"><a class="btn btn-secondary btn-sm" href="{% url 'manage_pickup_points' %}">Collection points</a></div></div>
 {% if not zones %}
 <section class="panel" style="margin-bottom:16px;">
     <p>No zones yet, so every order uses the flat fee from Settings ({% if brand.shipping_flat_fee %}{{ brand.shipping_flat_fee|money }}{% else %}free{% endif %}) and you deliver to every country.</p>

@@ -3,6 +3,9 @@
 {% block title %}{{ t.your_cart }} — {{ brand.site_name }}{% endblock %}
 {% block robots_meta %}noindex, nofollow{% endblock %}
 {% block extra_css %}
+    .cart-note { display: grid; gap: 4px; margin: 8px 0; max-width: 420px; }
+    .cart-note span { display: flex; gap: 6px; }
+    .cart-note input { flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
     .cart-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 28px; align-items: start; }
     .line { display: grid; grid-template-columns: auto 96px minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 18px 0; border-bottom: 1px solid var(--line); }
     .line:last-child { border-bottom: 0; }
@@ -54,16 +57,18 @@
                     <a class="line-name" href="{% url 'product_detail' row.product.id %}">{{ row.product.name }}</a>
                     {% if row.label %}<div class="small" style="font-weight:700;">{{ row.label }}</div>{% endif %}
                     <div class="muted small">{% if row.bundle %}<s>{{ row.base_price|money }}</s> {% endif %}{{ row.unit_price|money }} each · <span data-no-translate>{{ row.product.seller_name }}</span>{% if row.qty > row.stock %} · <span style="color:var(--sale);">only {{ row.stock }} left</span>{% endif %}</div>
+                    {% if row.product.personalization_prompt %}<form method="post" action="{% url 'cart_note' row.key %}" class="cart-note">{% csrf_token %}<label class="small" for="note-{{ forloop.counter }}">{{ row.product.personalization_prompt }}{% if row.product.personalization_required %} *{% endif %}</label><span><input id="note-{{ forloop.counter }}" name="personalization" maxlength="{{ row.product.personalization_max }}" value="{{ row.personalization }}"{% if row.product.personalization_required %} required{% endif %}><button class="btn btn-secondary btn-sm" type="submit">Save</button></span></form>{% endif %}
                     {% if row.product.seller_account_id %}<a class="small link" href="{% url 'message_seller' row.product.id %}" rel="nofollow">💬 Ask the seller</a>{% endif %}
                     {% if row.bundle %}<div class="small" style="color:var(--ok);font-weight:700;">✓ {{ t.bulk_applied }} (−{{ row.product.bulk_percent }}%)</div>{% elif row.product.has_bulk_offer %}<div class="small muted">{{ t.bulk_offer|fill:row.product }}</div>{% endif %}
                     <div class="line-tools">
-                        {% if row.quote %}<span class="small"><strong>{{ row.qty }}</strong> pcs at the agreed price</span>{% else %}
+                        {% if row.quote or row.subscription %}<span class="small"><strong>{{ row.qty }}</strong> pcs at {% if row.quote %}the agreed{% else %}your subscription{% endif %} price</span>{% else %}
                         <div class="qty">
                             <form method="post" action="{% url 'update_cart_item' row.key %}" class="ajax-cart-update-form">{% csrf_token %}<input type="hidden" name="action" value="decrease"><button type="submit" aria-label="Decrease quantity">−</button></form>
                             <span class="qty-value" aria-live="polite">{{ row.qty }}</span>
                             <form method="post" action="{% url 'update_cart_item' row.key %}" class="ajax-cart-update-form">{% csrf_token %}<input type="hidden" name="action" value="increase"><button type="submit" aria-label="Increase quantity">+</button></form>
                         </div>{% endif %}
                         <form method="post" action="{% url 'update_cart_item' row.key %}" class="ajax-cart-update-form">{% csrf_token %}<input type="hidden" name="action" value="remove"><button class="text-btn" type="submit">{{ t.remove }}</button></form>
+                        {% if user.is_authenticated and not row.quote and not row.subscription %}<form method="post" action="{% url 'save_for_later' row.key %}">{% csrf_token %}<button class="text-btn" type="submit">Save for later</button></form>{% endif %}
                     </div>
                 </div>
                 <div class="line-total row-subtotal">{{ row.subtotal|money }}</div>

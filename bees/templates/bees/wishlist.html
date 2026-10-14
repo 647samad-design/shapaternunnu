@@ -1,13 +1,39 @@
 {% extends "bees/base.html" %}
+{% load bees_extras %}
 {% block title %}{{ t.my_wishlist }} — {{ brand.site_name }}{% endblock %}
 {% block robots_meta %}noindex, nofollow{% endblock %}
 {% block content %}
 <div class="wrap page">
-    <div class="page-head"><div><h1>{{ t.my_wishlist }}</h1><p>{{ items|length }} saved item{{ items|length|pluralize }}</p></div></div>
-    {% if items %}
-    <div class="grid-products">
-        {% for item in items %}{% with product=item.product %}{% include "bees/partials/product_card.html" %}{% endwith %}{% endfor %}
+    <div class="page-head"><div><h1>{{ t.my_wishlist }}</h1><p>{{ items|length }} saved item{{ items|length|pluralize }}</p></div>
+        {% if items %}<div class="wl-share">
+            {% if share_url %}<label class="sr-only" for="wl-link">Share link</label><input id="wl-link" readonly value="{{ share_url }}" onclick="this.select()">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('wl-link').value);this.textContent='Copied'">Copy link</button>
+            <form method="post" action="{% url 'wishlist_manage' %}">{% csrf_token %}<button class="btn btn-ghost btn-sm" name="action" value="unshare">Make private</button></form>
+            {% else %}<form method="post" action="{% url 'wishlist_manage' %}">{% csrf_token %}<button class="btn btn-secondary btn-sm" name="action" value="share">↗ Share my wishlist</button></form>{% endif %}
+        </div>{% endif %}
     </div>
+    {% if items %}
+    {% for name, rows in groups %}
+    <section class="wl-group">
+        <h2>{% if name %}{{ name }}{% else %}Wishlist{% endif %} <span class="muted small">({{ rows|length }})</span></h2>
+        <div class="wl-list">
+        {% for item in rows %}{% with p=item.product %}
+            <div class="wl-row">
+                <a href="{% url 'product_detail' p.id %}"><img src="{{ p.image_url }}" alt="" width="72" height="72" loading="lazy"></a>
+                <div class="wl-main"><a href="{% url 'product_detail' p.id %}" class="wl-name">{{ p.name }}</a>
+                    <div><strong>{{ p.price|price }}</strong>{% if item.price_seen and p.price < item.price_seen %} <span class="wl-drop">↓ was {{ item.price_seen|price }}</span>{% endif %}{% if p.stock <= 0 %} <span class="muted small">· out of stock</span>{% endif %}</div></div>
+                <div class="wl-act">
+                    {% if p.stock > 0 %}<form method="post" action="{% url 'wishlist_manage' %}">{% csrf_token %}<input type="hidden" name="id" value="{{ item.id }}"><button class="btn btn-primary btn-sm" name="action" value="to_cart">{% if p.has_variants or p.is_auction %}View{% else %}Move to cart{% endif %}</button></form>{% endif %}
+                    <form method="post" action="{% url 'wishlist_manage' %}" class="wl-move">{% csrf_token %}<input type="hidden" name="id" value="{{ item.id }}"><input type="hidden" name="action" value="move">
+                        <label class="sr-only" for="wl-l-{{ item.id }}">List</label><input id="wl-l-{{ item.id }}" name="list_name" list="wl-lists" value="{{ item.list_name }}" placeholder="List name" maxlength="40"><button class="btn btn-ghost btn-sm" type="submit">Move</button></form>
+                    <form method="post" action="{% url 'toggle_wishlist' p.id %}">{% csrf_token %}<input type="hidden" name="next" value="{% url 'wishlist' %}"><button class="btn btn-ghost btn-sm" type="submit">Remove</button></form>
+                </div>
+            </div>
+        {% endwith %}{% endfor %}
+        </div>
+    </section>
+    {% endfor %}
+    <datalist id="wl-lists">{% for n in list_names %}<option value="{{ n }}">{% endfor %}<option value="Saved for later"><option value="Gift ideas"><option value="Birthday"></datalist>
     {% else %}
     <div class="panel empty">
         <h2>Nothing saved yet</h2>
@@ -16,4 +42,22 @@
     </div>
     {% endif %}
 </div>
+<style>
+.wl-share { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.wl-share form { margin: 0; }
+.wl-share input { width: min(320px, 70vw); padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.wl-group { margin-bottom: 26px; }
+.wl-group h2 { font-size: 1.15rem; margin-bottom: 8px; }
+.wl-list { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.wl-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 14px 16px; border-top: 1px solid var(--line); }
+.wl-row:first-child { border-top: 0; }
+.wl-row img { width: 72px; height: 72px; object-fit: cover; border-radius: var(--radius-sm); }
+.wl-main { flex: 1; min-width: 180px; display: grid; gap: 4px; }
+.wl-name { font-weight: 700; color: inherit; text-decoration: none; }
+.wl-drop { color: var(--ok); font-weight: 700; font-size: .88rem; }
+.wl-act { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.wl-act form { margin: 0; }
+.wl-move { display: flex; gap: 4px; }
+.wl-move input { width: 130px; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+</style>
 {% endblock %}

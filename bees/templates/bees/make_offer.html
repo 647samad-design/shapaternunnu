@@ -1,0 +1,26 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Make an offer — {{ product.name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:640px;">
+    <a class="link small" href="{% url 'product_detail' product.id %}">← Back to the product</a>
+    <div class="page-head" style="margin-top:8px;"><div><h1>Make an offer</h1><p>Suggest your price. The seller can accept, counter or decline - if they accept, it goes to your cart at your price.</p></div></div>
+    <section class="panel">
+        <div class="rq-product"><img src="{{ product.image_url }}" alt="" width="72" height="72"><div><strong>{{ product.name }}</strong><div class="muted small">Price now: {{ product.price|price }} · <span data-no-translate>{{ product.seller_name }}</span></div></div></div>
+        <form method="post" class="rq-form">{% csrf_token %}
+            {% if variants %}<div class="field"><label for="mo-v">Size / colour</label><select id="mo-v" name="variant" required><option value="">Choose…</option>{% for v in variants %}<option value="{{ v.id }}"{% if form.variant == v.id|stringformat:"s" %} selected{% endif %}>{{ v.label }}</option>{% endfor %}</select></div>{% endif %}
+            <div class="field"><label for="mo-p">Your price (each)</label><input id="mo-p" name="price" inputmode="decimal" required value="{{ form.price|default:'' }}" placeholder="below {{ product.price|floatformat:2 }}"></div>
+            <div class="field"><label for="mo-q">Quantity</label><input id="mo-q" name="quantity" type="number" min="1" max="1000" value="{{ form.quantity|default:1 }}"></div>
+            <div class="field rq-wide"><label for="mo-m">Message (optional)</label><input id="mo-m" name="message" maxlength="1000" value="{{ form.message|default:'' }}"></div>
+            <div class="rq-wide"><button class="btn btn-primary" type="submit">Send offer</button></div>
+        </form>
+    </section>
+</div>
+<style>
+.rq-product { display: flex; gap: 14px; align-items: center; padding-bottom: 16px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.rq-product img { width: 72px; height: 72px; object-fit: cover; border-radius: var(--radius-sm); }
+.rq-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.rq-wide { grid-column: 1 / -1; }
+</style>
+{% endblock %}

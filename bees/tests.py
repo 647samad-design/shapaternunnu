@@ -6655,3 +6655,300 @@ class ApiNewFieldsTests(TestCase):
         self.assertEqual(data["order_limits"], {"min": 2, "max": None})
         cats = {c["code"]: c for c in self.client.get("/api/v1/categories/").json()}
         self.assertEqual(cats["skincare"]["parent"], "beauty")
+
+
+# ---------------------------------------------------------------------------
+# Big-marketplace features: Amazon / eBay / Etsy / Daraz parity
+# ---------------------------------------------------------------------------
+
+from .models import (Bid, CouponClaim, MembershipPayment, PickupPoint, PriceHistory, ReviewVote,  # noqa: E402
+                     Subscription, Wishlist)
+
+
+class ConditionOffersAndSellersTests(TestCase):
+    def setUp(self):
+        self.s1 = SellerAccount.objects.create(user=User.objects.create_user("s1", "s1@example.com", "x"), status="approved", business_name="One Shop")
+        self.s2_user = User.objects.create_user("s2", "s2@example.com", "pass12345")
+        self.s2 = SellerAccount.objects.create(user=self.s2_user, status="approved", business_name="Two Shop")
+        self.p = make_product(name="Retro Camera", price=Decimal("100"), seller_account=self.s1, seller_name="One Shop")
+
+    def test_used_condition_shows_and_other_seller_offer_is_grouped(self):
+        used = make_product(name="Retro Camera", price=Decimal("70"), seller_account=self.s2, seller_name="Two Shop",
+                            condition="used_good", offer_of=self.p)
+        page = self.client.get(reverse("product_detail", args=[self.p.id]))
+        self.assertContains(page, "Other sellers on")
+        self.assertContains(page, "Two Shop")
+        self.assertContains(page, "Used - good")
+        # The duplicate listing doesn't appear twice in search.
+        found = self.client.get(reverse("search_products"), {"q": "retro camera"}).context["products"]
+        self.assertEqual([x.id for x in found], [self.p.id])
+        _ = used
+
+    def test_sell_one_like_this_prefills_form(self):
+        self.client.force_login(self.s2_user)
+        form = self.client.get(reverse("seller_add_product"), {"offer_of": self.p.id})
+        self.assertContains(form, 'name="offer_of"')
+        self.assertContains(form, "Retro Camera")
+
+    def test_make_offer_and_accept_buyer_price(self):
+        Product.objects.filter(pk=self.p.pk).update(accepts_offers=True, offer_floor=Decimal("60"))
+        buyer = User.objects.create_user("ob", "ob@example.com", "pass12345")
+        self.client.force_login(buyer)
+        self.client.post(reverse("make_offer", args=[self.p.id]), {"price": "50", "quantity": "1"})
+        self.assertEqual(QuoteRequest.objects.get().status, "declined")  # below the floor
+        QuoteRequest.objects.all().delete()
+        self.client.post(reverse("make_offer", args=[self.p.id]), {"price": "85", "quantity": "1"})
+        q = QuoteRequest.objects.get()
+        self.assertEqual((q.kind, q.status, q.target_price), ("offer", "open", Decimal("85.00")))
+        self.client.force_login(self.s1.user)
+        self.client.post(reverse("seller_quotes"), {"action": "accept_target", "id": q.id})
+        q.refresh_from_db()
+        self.assertEqual((q.status, q.offer_price), ("offered", Decimal("85.00")))
+
+
+class AuctionTests(TestCase):
+    def setUp(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        seller = SellerAccount.objects.create(user=User.objects.create_user("au", "au@example.com", "x"), status="approved", business_name="Bid Co")
+        self.p = make_product(name="Vintage Watch", price=Decimal("1"), stock=1, seller_account=seller, seller_name="Bid Co", is_auction=True,
+                              auction_start_price=Decimal("10"), auction_reserve=Decimal("15"),
+                              auction_ends_at=timezone.now() + timedelta(hours=2))
+        self.a = User.objects.create_user("ba", "ba@example.com", "pass12345")
+        self.b = User.objects.create_user("bb", "bb@example.com", "pass12345")
+
+    def test_bidding_outbid_and_win(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from .market import close_auctions
+        self.client.force_login(self.a)
+        self.client.post(reverse("place_bid", args=[self.p.id]), {"amount": "9"})
+        self.assertFalse(Bid.objects.exists())  # below the start
+        self.client.post(reverse("place_bid", args=[self.p.id]), {"amount": "12"})
+        self.client.force_login(self.b)
+        self.client.post(reverse("place_bid", args=[self.p.id]), {"amount": "12.10"})
+        self.assertEqual(Bid.objects.count(), 1)  # needs the increment
+        self.client.post(reverse("place_bid", args=[self.p.id]), {"amount": "16"})
+        self.assertTrue(Notification.objects.filter(user=self.a, message__contains="outbid").exists())
+        # Can't add an auction to the cart.
+        self.client.post(reverse("add_to_cart", args=[self.p.id]))
+        self.assertEqual(self.client.session.get("cart", {}), {})
+        Product.objects.filter(pk=self.p.pk).update(auction_ends_at=timezone.now() - timedelta(minutes=1))
+        self.assertEqual(close_auctions(), 1)
+        win = QuoteRequest.objects.get(kind="auction")
+        self.assertEqual((win.buyer, win.offer_price, win.status), (self.b, Decimal("16.00"), "accepted"))
+        self.client.post(reverse("my_quotes"), {"action": "readd", "id": win.id})
+        self.assertIn(f"q{win.id}", self.client.session["cart"])
+
+    def test_reserve_not_met_no_sale_and_anti_sniping(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from .market import close_auctions
+        Product.objects.filter(pk=self.p.pk).update(auction_ends_at=timezone.now() + timedelta(seconds=30))
+        self.client.force_login(self.a)
+        self.client.post(reverse("place_bid", args=[self.p.id]), {"amount": "11"})
+        self.p.refresh_from_db()
+        self.assertGreater(self.p.auction_ends_at, timezone.now() + timedelta(seconds=90))  # extended
+        Product.objects.filter(pk=self.p.pk).update(auction_ends_at=timezone.now() - timedelta(minutes=1))
+        close_auctions()
+        self.assertFalse(QuoteRequest.objects.exists())  # 11 < reserve 15
+
+
+class PersonalizationGiftPickupTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("pg", "pg@example.com", "pass12345")
+        self.client.force_login(self.user)
+
+    def test_personalization_required_and_saved_on_order(self):
+        p = make_product(name="Engraved Pen", price=Decimal("20"), personalization_prompt="Name to engrave", personalization_required=True,
+                         personalization_max=10)
+        self.client.post(reverse("add_to_cart", args=[p.id]))
+        self.assertEqual(self.client.session.get("cart", {}), {})
+        self.client.post(reverse("add_to_cart", args=[p.id]), {"personalization": "Samad Mangrio Long"})
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod", "gift_wrap": "1", "gift_message": "Happy day"})
+        order = Order.objects.get()
+        self.assertEqual(order.items.get().personalization, "Samad Mang")
+        self.assertTrue(order.gift_wrap)
+        self.assertEqual(order.gift_message, "Happy day")
+
+    def test_pickup_point_sets_fee_and_address(self):
+        SiteSettings.objects.filter(pk=1).update(shipping_flat_fee=Decimal("7"))
+        point = PickupPoint.objects.create(name="Locker 1", address="Main Sq 1", city="Lisbon", country="PT", fee=Decimal("2"))
+        p = make_product(price=Decimal("30"))
+        self.client.post(reverse("add_to_cart", args=[p.id]))
+        page = self.client.get(reverse("checkout"))
+        self.assertContains(page, "Locker 1")
+        form = {**CHECKOUT_FORM, "address": "", "city": "", "postal_code": "", "country": "",
+                "payment_method": "cod", "delivery": "pickup", "pickup_point": point.id}
+        self.client.post(reverse("checkout"), form)
+        order = Order.objects.get()
+        self.assertEqual((order.pickup_point, order.shipping_amount, order.country), (point, Decimal("2"), "PT"))
+
+
+class VoucherAndMembershipTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("vm", "vm@example.com", "pass12345")
+        self.client.force_login(self.user)
+        SiteSettings.objects.filter(pk=1).update(shipping_flat_fee=Decimal("5"))
+
+    def test_collect_public_free_shipping_voucher(self):
+        c = Coupon.objects.create(code="SHIPFREE", percent_off=0, free_shipping=True, is_public=True, title="Free delivery")
+        Coupon.objects.create(code="HIDDEN", percent_off=50)
+        page = self.client.get(reverse("vouchers"))
+        self.assertContains(page, "Free delivery")
+        self.assertNotContains(page, "HIDDEN")
+        self.client.post(reverse("collect_voucher", args=[c.id]))
+        self.assertTrue(CouponClaim.objects.filter(user=self.user, coupon=c).exists())
+        p = make_product(price=Decimal("20"))
+        self.client.post(reverse("add_to_cart", args=[p.id]))
+        self.assertContains(self.client.get(reverse("checkout")), "SHIPFREE")
+        self.client.post(reverse("apply_coupon"), {"coupon_code": "SHIPFREE"})
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        self.assertEqual(Order.objects.get().shipping_amount, Decimal("0"))
+
+    def test_member_gets_free_shipping_and_discount(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from .models import Profile
+        SiteSettings.objects.filter(pk=1).update(membership_enabled=True, membership_discount=10)
+        Profile.objects.update_or_create(user=self.user, defaults={"member_until": timezone.now() + timedelta(days=5)})
+        p = make_product(price=Decimal("50"))
+        self.client.post(reverse("add_to_cart", args=[p.id]))
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        order = Order.objects.get()
+        self.assertEqual((order.shipping_amount, order.discount_amount), (Decimal("0"), Decimal("5.00")))
+        self.assertEqual(self.client.get(reverse("membership")).status_code, 200)
+
+    def test_membership_payment_confirmed(self):
+        from unittest import mock
+        SiteSettings.objects.filter(pk=1).update(membership_enabled=True)
+        pay = MembershipPayment.objects.create(user=self.user, amount=Decimal("4.99"), days=30, stripe_session_id="cs_1")
+        with mock.patch("bees.payments._stripe") as st:
+            st.return_value.checkout.Session.retrieve.return_value = {"id": "cs_1", "payment_status": "paid", "amount_total": 499}
+            self.client.get(reverse("membership_done", args=[pay.id]), {"session_id": "cs_1"})
+            self.client.get(reverse("membership_done", args=[pay.id]), {"session_id": "cs_1"})  # twice: no double days
+        self.user.profile.refresh_from_db()
+        from .market import is_member
+        self.assertTrue(is_member(self.user))
+        from django.utils import timezone
+        self.assertLess((self.user.profile.member_until - timezone.now()).days, 31)
+
+
+class CoinsSubscriptionsBundlesTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("cs", "cs@example.com", "pass12345")
+        self.client.force_login(self.user)
+
+    def test_daily_check_in_once_a_day_and_streak(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from .models import Profile
+        self.client.post(reverse("check_in"))
+        self.client.post(reverse("check_in"))
+        profile = Profile.objects.get(user=self.user)
+        self.assertEqual((profile.loyalty_points, profile.checkin_streak), (5, 1))
+        Profile.objects.filter(pk=profile.pk).update(last_checkin=timezone.localdate() - timedelta(days=1), checkin_streak=6)
+        self.client.post(reverse("check_in"))
+        profile.refresh_from_db()
+        self.assertEqual((profile.loyalty_points, profile.checkin_streak), (15, 7))  # day 7 = double
+
+    def test_subscribe_and_save_order_and_reminder(self):
+        from django.core.management import call_command
+        from django.utils import timezone
+        p = make_product(name="Coffee Beans", price=Decimal("20"), subscribe_percent=10)
+        self.client.post(reverse("subscribe", args=[p.id]), {"every_weeks": "4", "quantity": "2"})
+        sub = Subscription.objects.get()
+        self.assertIn(f"s{sub.id}", self.client.session["cart"])
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        item = Order.objects.get().items.get()
+        self.assertEqual((item.price, item.quantity), (Decimal("18.00"), 2))
+        Subscription.objects.filter(pk=sub.pk).update(next_date=timezone.localdate())
+        call_command("subscription_reminders", stdout=open(os.devnull, "w"))
+        self.assertTrue(Notification.objects.filter(user=self.user, message__contains="refill").exists())
+        sub.refresh_from_db()
+        self.assertGreater(sub.next_date, timezone.localdate())
+
+    def test_bought_together_add_many_and_save_for_later(self):
+        a, b = make_product(name="Tea Pot", price=Decimal("10")), make_product(name="Tea Cups", price=Decimal("6"))
+        self.client.post(reverse("add_many"), {"ids": [a.id, b.id]})
+        self.assertEqual(set(self.client.session["cart"]), {str(a.id), str(b.id)})
+        self.client.post(reverse("save_for_later", args=[str(b.id)]))
+        self.assertNotIn(str(b.id), self.client.session["cart"])
+        self.assertTrue(Wishlist.objects.filter(user=self.user, product=b, list_name="Saved for later").exists())
+
+    def test_wishlist_share_and_move_to_cart(self):
+        p = make_product(name="Lamp")
+        Wishlist.objects.create(user=self.user, product=p)
+        self.client.post(reverse("wishlist_manage"), {"action": "share"})
+        token = self.user.profile.__class__.objects.get(user=self.user).wishlist_token
+        self.client.logout()
+        self.assertContains(self.client.get(reverse("shared_wishlist", args=[token])), "Lamp")
+        self.assertEqual(self.client.get(reverse("shared_wishlist", args=["wrongtoken123"])).status_code, 404)
+
+
+class ReviewsPriceAndTraderTests(TestCase):
+    def test_review_photos_helpful_votes_and_filter(self):
+        from io import BytesIO
+        from PIL import Image
+        p = make_product(name="Desk Lamp")
+        u = User.objects.create_user("rp", "rp@example.com", "pass12345")
+        order = Order.objects.create(user=u, email="rp@example.com", full_name="R", address="1", city="X", country="US", phone="+15550100",
+                                     payment_method="cod", status="delivered")
+        OrderItem.objects.create(order=order, product=p, product_name=p.name, price=p.price, quantity=1, fulfillment_status="delivered")
+        self.client.force_login(u)
+        buf = BytesIO()
+        Image.new("RGB", (40, 40), "red").save(buf, "JPEG")
+        photo = SimpleUploadedFile("p.jpg", buf.getvalue(), content_type="image/jpeg")
+        self.client.post(reverse("product_detail", args=[p.id]), {"rating": "4", "comment": "Bright and solid", "photos": [photo]})
+        review = Review.objects.get()
+        self.assertEqual(review.photos.count(), 1)
+        if review.photos.exists():
+            self.assertContains(self.client.get(reverse("product_detail", args=[p.id]), {"with_photos": "1"}), "Bright and solid")
+        voter = User.objects.create_user("vt", "vt@example.com", "pass12345")
+        self.client.force_login(voter)
+        self.client.post(reverse("review_helpful", args=[review.id]))
+        review.refresh_from_db()
+        self.assertEqual(review.helpful_count, 1)
+        self.client.post(reverse("review_helpful", args=[review.id]))  # toggles off
+        review.refresh_from_db()
+        self.assertEqual(review.helpful_count, 0)
+        self.assertNotContains(self.client.get(reverse("product_detail", args=[p.id]), {"stars": "5"}), "Bright and solid")
+        for f in review.photos.all():
+            from django.core.files.storage import default_storage
+            name = f.image_url.split("/media/", 1)[-1]
+            if default_storage.exists(name):
+                default_storage.delete(name)
+
+    def test_lowest_price_in_30_days_shown_with_discount(self):
+        p = make_product(name="Sale Kettle", price=Decimal("40"))
+        p.price = Decimal("30")
+        p.save()
+        p.price, p.old_price, p.discount_percent = Decimal("35"), Decimal("50"), 30
+        p.save()
+        self.assertEqual(PriceHistory.objects.filter(product=p).count(), 3)
+        self.assertContains(self.client.get(reverse("product_detail", args=[p.id])), "Lowest price in the last 30 days")
+
+    def test_trader_information_shown(self):
+        seller = SellerAccount.objects.create(user=User.objects.create_user("tr", "tr@example.com", "x"), status="approved",
+                                              business_name="Trader Ltd", account_type="organization", company_registration="HRB 12345",
+                                              trader_email="legal@trader.example", business_address="Main 1", city="Berlin", country="Germany")
+        p = make_product(seller_account=seller, seller_name="Trader Ltd")
+        page = self.client.get(reverse("product_detail", args=[p.id]))
+        self.assertContains(page, "Seller information")
+        self.assertContains(page, "HRB 12345")
+
+    def test_bnpl_message(self):
+        SiteSettings.objects.filter(pk=1).update(bnpl_enabled=True, bnpl_instalments=4)
+        p = make_product(price=Decimal("100"))
+        self.assertContains(self.client.get(reverse("product_detail", args=[p.id])), "4 interest-free payments of")
+
+    def test_photo_search(self):
+        from io import BytesIO
+        from unittest import mock
+        from PIL import Image
+        make_product(name="Red Running Shoes", category="sneakers")
+        buf = BytesIO()
+        Image.new("RGB", (40, 40), "red").save(buf, "JPEG")
+        with self.settings(AI_API_KEY="test"), mock.patch("bees.market.describe_image", return_value="red running shoes"):
+            r = self.client.post(reverse("photo_search"), {"photo": SimpleUploadedFile("s.jpg", buf.getvalue(), content_type="image/jpeg")})
+        self.assertIn("q=red+running+shoes", r["Location"])

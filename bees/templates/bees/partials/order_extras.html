@@ -1,0 +1,4 @@
+{% if order.pickup_point or order.gift_wrap %}<div class="order-extras">
+    {% if order.pickup_point %}<p>📦 <strong>Collection point:</strong> {{ order.pickup_point.name }}, {{ order.pickup_point.address }}, {{ order.pickup_point.city }}</p>{% endif %}
+    {% if order.gift_wrap %}<p>🎁 <strong>Gift - wrap it and leave prices out.</strong>{% if order.gift_message %} Message: “{{ order.gift_message }}”{% endif %}</p>{% endif %}
+</div>{% endif %}

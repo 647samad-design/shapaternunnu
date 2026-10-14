@@ -276,6 +276,9 @@
         .search input:focus { outline: none; border-color: var(--brand); background: var(--surface); }
         .search button { min-width: 56px; border: 0; border-radius: 0 999px 999px 0; background: var(--brand); color: var(--on-brand); cursor: pointer; display: grid; place-items: center; }
         .search button svg { width: 20px; height: 20px; }
+        .search .photo-btn { min-width: 46px; border-radius: 0; background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-left: 0; border-right: 0; }
+        .search .photo-btn:hover { background: var(--surface); color: var(--brand); }
+        body.photo-searching { cursor: progress; }
         .search button:hover { background: color-mix(in srgb, var(--brand) 82%, #000); }
         .suggestions { display: none; position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); z-index: 260; overflow: hidden; box-shadow: 0 12px 32px rgba(20,26,31,.12); }
         .suggestions.show { display: block; }
@@ -545,10 +548,12 @@
                 <form action="{% url 'search_products' %}" method="get">
                     <label for="search-input" class="sr-only">Search</label>
                     <input type="search" name="q" id="search-input" value="{{ query|default:'' }}" placeholder="{{ t.search_placeholder }}" autocomplete="off">
+                    {% if photo_search %}<button type="button" class="photo-btn" aria-label="Search with a photo" title="Search with a photo" onclick="document.getElementById('photo-input').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></button>{% endif %}
                     <button type="submit" aria-label="Search">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
                     </button>
                 </form>
+                {% if photo_search %}<form id="photo-search" action="{% url 'photo_search' %}" method="post" enctype="multipart/form-data" hidden>{% csrf_token %}<input type="file" name="photo" id="photo-input" accept="image/*" capture="environment" onchange="if(this.files.length){document.body.classList.add('photo-searching');this.form.submit();}"></form>{% endif %}
                 <div id="search-suggestions" class="suggestions" role="listbox" aria-label="Suggestions"></div>
                 <span hidden id="sg-words"><span data-w="products">Products</span><span data-w="popular">Popular searches</span><span data-w="cats">Categories</span><span data-w="fix">Did you mean</span></span>
             </div>
@@ -571,6 +576,11 @@
                     <div class="menu-panel">
                         <div class="menu-head" data-no-translate><strong>{{ user.get_full_name|default:user.username }}</strong><span class="muted small">{{ user.email }}</span></div>
                         <a href="{% url 'my_orders' %}">{{ t.my_orders }}</a>
+                        {% if brand.checkin_points %}<form method="post" action="{% url 'check_in' %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button type="submit">🪙 Collect today's coins</button></form>{% endif %}
+                        <a href="{% url 'vouchers' %}">Vouchers</a>
+                        <a href="{% url 'my_quotes' %}">Quotes &amp; offers</a>
+                        <a href="{% url 'subscriptions' %}">Subscriptions</a>
+                        {% if brand.membership_enabled %}<a href="{% url 'membership' %}">{{ brand.membership_name }} membership</a>{% endif %}
                         <a href="{% url 'notifications_list' %}">Notifications<span data-live-paren="notifications">{% if unread_notifications_count %} ({{ unread_notifications_count }}){% endif %}</span></a>
                         {% if is_seller %}<a href="{% url 'seller_messages' %}"><strong>Customer messages</strong><span data-live-paren="seller_messages">{% if seller_unread_messages %} ({{ seller_unread_messages }}){% endif %}</span></a>{% endif %}
                         <a href="{% url 'messages_inbox' %}">{% if is_seller %}My messages to sellers{% else %}{{ t.messages }}{% endif %}<span data-live-paren="messages">{% if buyer_unread_messages %} ({{ buyer_unread_messages }}){% endif %}</span></a>

@@ -179,6 +179,17 @@ def _reply(request, qs, redirect_name, who):
     action = request.POST.get("action")
     with transaction.atomic():
         quote = get_object_or_404(qs.select_for_update(), pk=request.POST.get("id"))
+        if action == "accept_target":
+            if quote.status != "open" or not quote.target_price:
+                messages.error(request, "There's no buyer price to accept.")
+                return redirect(redirect_name)
+            quote.offer_price, quote.status = quote.target_price, "offered"
+            quote.offer_expires_at = timezone.now() + timedelta(days=3)
+            quote.log(who, f"Accepted the buyer's price of {quote.target_price}")
+            quote.save()
+            _tell_buyer(quote, f"Your price was accepted for {quote.product.name}: {quote.offer_price} each. Buy within 3 days")
+            messages.success(request, "Accepted - the buyer can now buy at their price.")
+            return redirect(redirect_name)
         if action == "offer":
             if quote.status not in ("open", "offered"):
                 messages.error(request, "This quote is closed.")

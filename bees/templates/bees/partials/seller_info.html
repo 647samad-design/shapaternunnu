@@ -1,0 +1,19 @@
+{% if sa %}<details class="seller-info">
+    <summary><strong>Seller information</strong> <span class="muted small">who you're buying from</span></summary>
+    <dl>
+        <dt>Seller</dt><dd data-no-translate>{{ sa.display_name }}{% if sa.account_type == "organization" %} <span class="muted">(business)</span>{% else %} <span class="muted">(individual)</span>{% endif %}</dd>
+        {% if sa.business_address or sa.city %}<dt>Address</dt><dd data-no-translate>{{ sa.business_address }}{% if sa.business_address and sa.city %}, {% endif %}{{ sa.pickup_postal_code }} {{ sa.city }}{% if sa.country %}, {{ sa.country }}{% endif %}</dd>{% endif %}
+        {% if sa.trader_email %}<dt>Email</dt><dd><a href="mailto:{{ sa.trader_email }}">{{ sa.trader_email }}</a></dd>{% endif %}
+        {% if sa.phone and sa.account_type == "organization" %}<dt>Phone</dt><dd>{{ sa.phone }}</dd>{% endif %}
+        {% if sa.company_registration %}<dt>Registration no.</dt><dd>{{ sa.company_registration }}</dd>{% endif %}
+        {% if sa.tax_info and sa.account_type == "organization" %}<dt>VAT number</dt><dd>{{ sa.tax_info }}</dd>{% endif %}
+        {% if sa.trader_declared_at %}<dt>Compliance</dt><dd>The seller has confirmed it only offers products that comply with EU law.</dd>{% endif %}
+    </dl>
+</details>
+<style>
+    .seller-info { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+    .seller-info summary { cursor: pointer; }
+    .seller-info dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin-top: 10px; font-size: .94rem; }
+    .seller-info dt { font-weight: 700; }
+    .seller-info dd { margin: 0; color: var(--muted); }
+</style>{% endif %}

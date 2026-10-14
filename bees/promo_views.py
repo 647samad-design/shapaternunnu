@@ -38,7 +38,8 @@ def handle_post(request, seller):
     owner = {"seller_account": seller}
     if action == "coupon":
         code = request.POST.get("code", "").strip().upper()
-        pct = _int(request.POST.get("percent_off"), 1, 90)
+        free_ship = seller is None and bool(request.POST.get("free_shipping"))
+        pct = _int(request.POST.get("percent_off"), 0 if free_ship else 1, 90)
         if not CODE_RE.match(code):
             messages.error(request, "Codes are 3-30 letters or numbers, e.g. SUMMER20.")
         elif pct is None:
@@ -57,7 +58,9 @@ def handle_post(request, seller):
                 expiry = None
             Coupon.objects.create(code=code, percent_off=pct, min_order_value=max(min_order, Decimal("0")), expiry_date=expiry,
                                   usage_limit=_int(request.POST.get("usage_limit"), 1, 1_000_000),
-                                  per_user_limit=_int(request.POST.get("per_user_limit"), 1, 100) or 1, **owner)
+                                  per_user_limit=_int(request.POST.get("per_user_limit"), 1, 100) or 1,
+                                  free_shipping=free_ship, is_public=bool(request.POST.get("is_public")),
+                                  title=request.POST.get("title", "").strip()[:80], **owner)
             AuditLog.objects.create(user=request.user, action=f"Created coupon {code} ({pct}%)" + (f" for {seller.display_name}" if seller else ""))
             messages.success(request, f"Code {code} is live: {pct}% off" + (" your products." if seller else " the whole store."))
     elif action in ("coupon_toggle", "coupon_delete"):

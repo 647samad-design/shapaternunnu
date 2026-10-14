@@ -25,7 +25,7 @@
                     {% for i in items %}
                     <tr>
                         <td>{% if i.product %}<img class="thumb" src="{{ i.product.image_url }}" alt="">{% endif %}</td>
-                        <td>{% if i.product %}<a class="rowlink" href="{% url 'manage_product_edit' i.product.id %}">{{ i.product_name }}</a>{% else %}{{ i.product_name }}{% endif %}<div class="muted small">{% if order.status != "cancelled" %}<form method="post" style="margin:4px 0 0;">{% csrf_token %}<input type="hidden" name="action" value="item_status"><input type="hidden" name="item" value="{{ i.id }}"><label class="sr-only" for="fs{{ i.id }}">Status of {{ i.product_name }}</label><select id="fs{{ i.id }}" name="fulfillment_status" onchange="this.form.submit()" style="min-height:34px;padding:4px 8px;width:auto;">{% for value, label in fulfilment_choices %}<option value="{{ value }}" {% if i.fulfillment_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></form>{% if i.delivered_at %}Delivered {{ i.delivered_at|date:"M j" }}{% endif %}{% else %}{{ i.get_fulfillment_status_display }}{% endif %}</div></td>
+                        <td>{% if i.product %}<a class="rowlink" href="{% url 'manage_product_edit' i.product.id %}">{{ i.product_name }}</a>{% else %}{{ i.product_name }}{% endif %}{% if i.personalization %}<div class="small">✍️ {{ i.personalization }}</div>{% endif %}<div class="muted small">{% if order.status != "cancelled" %}<form method="post" style="margin:4px 0 0;">{% csrf_token %}<input type="hidden" name="action" value="item_status"><input type="hidden" name="item" value="{{ i.id }}"><label class="sr-only" for="fs{{ i.id }}">Status of {{ i.product_name }}</label><select id="fs{{ i.id }}" name="fulfillment_status" onchange="this.form.submit()" style="min-height:34px;padding:4px 8px;width:auto;">{% for value, label in fulfilment_choices %}<option value="{{ value }}" {% if i.fulfillment_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></form>{% if i.delivered_at %}Delivered {{ i.delivered_at|date:"M j" }}{% endif %}{% else %}{{ i.get_fulfillment_status_display }}{% endif %}</div></td>
                         <td class="small">{% if i.seller_account %}{{ i.seller_account.display_name }}<div class="muted">{{ i.commission_rate|floatformat:"-1" }}% = {{ i.commission_amount|money }}</div>{% else %}Your store{% endif %}</td>
                         <td class="num">{{ i.quantity }}</td><td class="num">{{ i.price|money }}</td><td class="num">{{ i.subtotal|money }}</td>
                     </tr>
@@ -83,6 +83,7 @@
         </section>
         <section class="panel">
             <h2>Ship to</h2>
+            {% include "bees/partials/order_extras.html" %}
             <p>{{ order.full_name }}<br>{{ order.address }}<br>{{ order.city }}{% if order.state %}, {{ order.state }}{% endif %} {{ order.postal_code }}<br>{{ order.country|country_name }}</p>
         </section>
         <section class="panel">

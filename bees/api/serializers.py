@@ -91,6 +91,18 @@ class ProductListSerializer(serializers.ModelSerializer):
         low, high = p.order_limits()
         return {"min": low, "max": high}
 
+    def get_auction(self, p) -> dict | None:
+        if not p.is_auction:
+            return None
+        from ..market import auction_open, next_min_bid, top_bid
+        top = top_bid(p)
+        return {"open": auction_open(p), "ends_at": p.auction_ends_at.isoformat() if p.auction_ends_at else None,
+                "current_bid": money(top.amount) if top else None, "next_min_bid": money(next_min_bid(p, top)),
+                "bids": p.bids.count()}
+
+    def get_subscribe_and_save(self, p) -> dict | None:
+        return {"percent_off": p.subscribe_percent} if p.subscribe_percent else None
+
     def get_product_safety(self, p) -> dict | None:
         if not p.has_safety_info:
             return None
@@ -142,6 +154,11 @@ class ProductDetailSerializer(ProductListSerializer):
     order_limits = serializers.SerializerMethodField()
     digital = serializers.BooleanField(source="is_digital")
     quotes = serializers.BooleanField(source="quote_only", help_text="Buyers can request a quote for bulk quantities.")
+    condition = serializers.CharField()
+    ships_from = serializers.CharField()
+    offers = serializers.BooleanField(source="accepts_offers", help_text="Buyers can make an offer.")
+    auction = serializers.SerializerMethodField()
+    subscribe_and_save = serializers.SerializerMethodField()
     product_safety = serializers.SerializerMethodField()
     images = serializers.SerializerMethodField()
     variants = serializers.SerializerMethodField()
@@ -151,7 +168,8 @@ class ProductDetailSerializer(ProductListSerializer):
     class Meta(ProductListSerializer.Meta):
         fields = ProductListSerializer.Meta.fields + ["description", "images", "stock", "variants", "guide",
                                                       "brand", "specifications", "video", "order_limits", "digital",
-                                                      "quotes", "product_safety", "weight_grams", "updated_at"]
+                                                      "quotes", "product_safety", "condition", "ships_from", "offers",
+                                                      "auction", "subscribe_and_save", "weight_grams", "updated_at"]
 
     def get_images(self, p) -> list[str]:
         request = self.context.get("request")

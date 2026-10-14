@@ -4,13 +4,13 @@
         <a href="{% url 'product_detail' q.product_id %}"><img src="{{ q.product.image_url }}" alt="" width="56" height="56" loading="lazy"></a>
         <div class="qc-main">
             <strong><a href="{% url 'product_detail' q.product_id %}">{{ q.product.name }}</a>{% if q.variant %} <span class="muted">({{ q.variant.label }})</span>{% endif %}</strong>
-            <div class="muted small">Quote #{{ q.id }} · {{ q.quantity }} pcs{% if viewer == "seller" %} · from <span data-no-translate>{{ q.buyer.get_full_name|default:q.buyer.username }}</span>{% if q.company %}, {{ q.company }}{% endif %}{% else %} · <span data-no-translate>{{ q.product.seller_name }}</span>{% endif %} · {{ q.updated_at|timesince }} ago</div>
+            <div class="muted small">{{ q.get_kind_display }} #{{ q.id }} · {{ q.quantity }} pcs{% if viewer == "seller" %} · from <span data-no-translate>{{ q.buyer.get_full_name|default:q.buyer.username }}</span>{% if q.company %}, {{ q.company }}{% endif %}{% else %} · <span data-no-translate>{{ q.product.seller_name }}</span>{% endif %} · {{ q.updated_at|timesince }} ago</div>
         </div>
         <span class="pill {% if q.status == 'offered' or q.status == 'accepted' or q.status == 'ordered' %}ok{% elif q.status == 'open' %}info{% endif %}">{% if viewer == "seller" and q.status == "open" %}Needs your offer{% elif viewer == "seller" and q.status == "offered" %}Offer sent{% else %}{{ q.get_status_display }}{% endif %}</span>
     </div>
     <div class="qc-nums">
         <div><span>List price</span><strong>{{ q.list_total|money }}</strong></div>
-        {% if q.target_price %}<div><span>Buyer's target</span><strong>{{ q.target_price|money }} <small>each</small></strong></div>{% endif %}
+        {% if q.target_price %}<div><span>{% if q.kind == "offer" %}Buyer's offer{% else %}Buyer's target{% endif %}</span><strong>{{ q.target_price|money }} <small>each</small></strong></div>{% endif %}
         {% if q.offer_price %}<div class="offer"><span>Offer{% if q.offer_expires_at and q.status == 'offered' %} · until {{ q.offer_expires_at|date:"j M" }}{% endif %}</span><strong>{{ q.offer_price|money }} <small>each · {{ q.offer_total|money }} total</small></strong></div>{% endif %}
     </div>
     {% if q.history %}<details class="qc-hist"><summary class="small">Conversation ({{ q.history|length }})</summary><ol>{% for h in q.history %}<li><span class="pill">{{ h.who }}</span> {{ h.text }}</li>{% endfor %}</ol></details>{% endif %}
@@ -32,10 +32,10 @@
         {% elif q.status == "offered" %}<p class="muted small" style="margin-top:10px;">This offer has expired. Send a counter-offer to ask for a new one.</p>{% endif %}
     {% elif q.status == "open" or q.status == "offered" %}
         <form method="post" class="qc-form qc-reply">{% csrf_token %}<input type="hidden" name="id" value="{{ q.id }}">
-            <div class="field"><label for="qo-p-{{ q.id }}">{% if q.status == 'offered' %}New price{% else %}Your price{% endif %} per piece</label><input id="qo-p-{{ q.id }}" name="offer_price" inputmode="decimal" required value="{{ q.offer_price|default:'' }}"></div>
+            <div class="field"><label for="qo-p-{{ q.id }}">{% if q.status == 'offered' %}New price{% else %}Your price{% endif %} per piece</label><input id="qo-p-{{ q.id }}" name="offer_price" inputmode="decimal" value="{{ q.offer_price|default:'' }}"></div>
             <div class="field"><label for="qo-d-{{ q.id }}">Offer valid for (days)</label><input id="qo-d-{{ q.id }}" name="valid_days" type="number" min="1" max="90" value="7"></div>
             <div class="field qc-wide"><label for="qo-n-{{ q.id }}">Note to the buyer (optional)</label><input id="qo-n-{{ q.id }}" name="offer_note" maxlength="2000" placeholder="Delivery time, packaging, payment terms…"></div>
-            <div class="qc-wide qc-actions"><button class="btn btn-primary btn-sm" name="action" value="offer">Send offer</button><button class="btn btn-ghost btn-sm" name="action" value="decline" formnovalidate>Decline</button></div>
+            <div class="qc-wide qc-actions">{% if q.target_price and q.status == "open" %}<button class="btn btn-primary btn-sm" name="action" value="accept_target" formnovalidate>Accept their price ({{ q.target_price|money }})</button>{% endif %}<button class="btn {% if q.target_price and q.status == 'open' %}btn-secondary{% else %}btn-primary{% endif %} btn-sm" name="action" value="offer">{% if q.target_price %}Send counter-offer{% else %}Send offer{% endif %}</button><button class="btn btn-ghost btn-sm" name="action" value="decline" formnovalidate>Decline</button></div>
         </form>
     {% endif %}
 </article>
