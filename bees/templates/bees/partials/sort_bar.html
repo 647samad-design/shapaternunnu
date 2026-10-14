@@ -1,5 +1,5 @@
 <form method="get" class="sort-form">
-    {% for key, val in request.GET.items %}{% if key != 'sort' and key != 'page' %}<input type="hidden" name="{{ key }}" value="{{ val }}">{% endif %}{% endfor %}
+    {% for key, vals in request.GET.lists %}{% if key != 'sort' and key != 'page' %}{% for val in vals %}<input type="hidden" name="{{ key }}" value="{{ val }}">{% endfor %}{% endif %}{% endfor %}
     <label for="sort-select" class="sr-only">Sort by</label>
     <select id="sort-select" name="sort" onchange="this.form.submit()">
         <option value="" {% if not current_sort %}selected{% endif %}>Sort: Recommended</option>

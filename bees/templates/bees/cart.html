@@ -57,11 +57,12 @@
                     {% if row.product.seller_account_id %}<a class="small link" href="{% url 'message_seller' row.product.id %}" rel="nofollow">💬 Ask the seller</a>{% endif %}
                     {% if row.bundle %}<div class="small" style="color:var(--ok);font-weight:700;">✓ {{ t.bulk_applied }} (−{{ row.product.bulk_percent }}%)</div>{% elif row.product.has_bulk_offer %}<div class="small muted">{{ t.bulk_offer|fill:row.product }}</div>{% endif %}
                     <div class="line-tools">
+                        {% if row.quote %}<span class="small"><strong>{{ row.qty }}</strong> pcs at the agreed price</span>{% else %}
                         <div class="qty">
                             <form method="post" action="{% url 'update_cart_item' row.key %}" class="ajax-cart-update-form">{% csrf_token %}<input type="hidden" name="action" value="decrease"><button type="submit" aria-label="Decrease quantity">−</button></form>
                             <span class="qty-value" aria-live="polite">{{ row.qty }}</span>
                             <form method="post" action="{% url 'update_cart_item' row.key %}" class="ajax-cart-update-form">{% csrf_token %}<input type="hidden" name="action" value="increase"><button type="submit" aria-label="Increase quantity">+</button></form>
-                        </div>
+                        </div>{% endif %}
                         <form method="post" action="{% url 'update_cart_item' row.key %}" class="ajax-cart-update-form">{% csrf_token %}<input type="hidden" name="action" value="remove"><button class="text-btn" type="submit">{{ t.remove }}</button></form>
                     </div>
                 </div>

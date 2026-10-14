@@ -122,7 +122,7 @@ class SecurityHeadersMiddleware:
         "img-src 'self' data: blob: https:",
         "media-src 'self' https:",
         "connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.facebook.com",
-        "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com",
+        "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com",
         "worker-src 'self'",
         "manifest-src 'self'",
         "object-src 'none'",

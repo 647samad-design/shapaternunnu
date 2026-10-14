@@ -13,6 +13,8 @@ from bees import pwa
 from bees import messaging as msgs
 from bees import account_views
 from bees import manage_views as mv
+from bees import content_views
+from bees import quote_views as qv
 from bees import seller_views as sv
 from bees import bulk_views as bv
 from bees import giftcards as gc
@@ -204,6 +206,18 @@ urlpatterns = [
     path('manage/problems/', mv.claims, name='manage_claims'),
     path('manage/keys/', mv.keys, name='manage_keys'),
     path('manage/taxes/', mv.tax_rates, name='manage_taxes'),
+    path('manage/categories/', content_views.categories, name='manage_categories'),
+    path('manage/pages/', content_views.pages, name='manage_pages'),
+    path('manage/pages/new/', content_views.page_edit, name='manage_page_new'),
+    path('manage/pages/<int:pk>/', content_views.page_edit, name='manage_page_edit'),
+    path('manage/pages/builtin/<slug:builtin>/', content_views.page_edit, name='manage_page_builtin'),
+    path('pages/<slug:slug>/', views.custom_page, name='custom_page'),
+    path('product/<int:pk>/quote/', qv.request_quote, name='request_quote'),
+    path('account/quotes/', qv.my_quotes, name='my_quotes'),
+    path('seller/quotes/', sv.seller_required()(qv.seller_quotes), name='seller_quotes'),
+    path('manage/quotes/', mv.staff_required(qv.manage_quotes), name='manage_quotes'),
+    path('download/<int:item_id>/', qv.download, name='digital_download'),
+    path('store-follow/<int:seller_id>/', qv.follow_store, name='follow_store'),
     path('manage/problems/<int:pk>/', mv.claim_detail, name='manage_claim'),
     path('manage/cash-on-delivery/', mv.cod_protection, name='manage_cod'),
     path('manage/gift-cards/', mv.staff_required(gc.admin_page), name='manage_gift_cards'),

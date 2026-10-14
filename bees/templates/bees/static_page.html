@@ -1,10 +1,13 @@
 {% extends "bees/base.html" %}
 {% block title %}{{ page_title }} — {{ brand.site_name }}{% endblock %}
+{% block meta_description %}{% if page.meta_description %}{{ page.meta_description }}{% else %}{{ block.super }}{% endif %}{% endblock %}
 {% block content %}
 <div class="wrap page" style="max-width:820px;">
     <article class="panel prose">
         <h1>{{ page_title }}</h1>
         {% for heading, body in sections %}<h2>{{ heading }}</h2><p>{{ body }}</p>{% endfor %}
+        {% for kind, value in blocks %}{% if kind == "h" %}<h2>{{ value }}</h2>{% elif kind == "ul" %}<ul>{% for item in value %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p>{{ value|urlize }}</p>{% endif %}{% endfor %}
+        {% if page %}<p class="muted small" style="margin-top:28px;">Last updated {{ page.updated_at|date:"j F Y" }}</p>{% endif %}
         {% if cta_url %}<a href="{{ cta_url }}" class="btn btn-primary" style="margin-top:28px;">{{ cta_label }}</a>{% endif %}
     </article>
 </div>

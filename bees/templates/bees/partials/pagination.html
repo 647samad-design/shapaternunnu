@@ -1,12 +1,12 @@
 {% if page_obj.paginator.num_pages > 1 %}
 <nav class="pagination" aria-label="Pages">
-    {% if page_obj.has_previous %}<a href="?{% for key, val in request.GET.items %}{% if key != 'page' %}{{ key|urlencode }}={{ val|urlencode }}&amp;{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}">{{ t.prev }}</a>{% endif %}
+    {% if page_obj.has_previous %}<a href="?{% for key, vals in request.GET.lists %}{% if key != 'page' %}{% for val in vals %}{{ key|urlencode }}={{ val|urlencode }}&amp;{% endfor %}{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}">{{ t.prev }}</a>{% endif %}
     {% for num in page_obj.paginator.page_range %}
         {% if num == page_obj.number %}<span class="current" aria-current="page">{{ num }}</span>
         {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' or num == 1 or num == page_obj.paginator.num_pages %}
-        <a href="?{% for key, val in request.GET.items %}{% if key != 'page' %}{{ key|urlencode }}={{ val|urlencode }}&amp;{% endif %}{% endfor %}page={{ num }}">{{ num }}</a>
+        <a href="?{% for key, vals in request.GET.lists %}{% if key != 'page' %}{% for val in vals %}{{ key|urlencode }}={{ val|urlencode }}&amp;{% endfor %}{% endif %}{% endfor %}page={{ num }}">{{ num }}</a>
         {% endif %}
     {% endfor %}
-    {% if page_obj.has_next %}<a href="?{% for key, val in request.GET.items %}{% if key != 'page' %}{{ key|urlencode }}={{ val|urlencode }}&amp;{% endif %}{% endfor %}page={{ page_obj.next_page_number }}">{{ t.next }}</a>{% endif %}
+    {% if page_obj.has_next %}<a href="?{% for key, vals in request.GET.lists %}{% if key != 'page' %}{% for val in vals %}{{ key|urlencode }}={{ val|urlencode }}&amp;{% endfor %}{% endif %}{% endfor %}page={{ page_obj.next_page_number }}">{{ t.next }}</a>{% endif %}
 </nav>
 {% endif %}

@@ -6361,3 +6361,297 @@ class DockerSupportTests(TestCase):
         for url, choice, expected in cases:
             with mock.patch.dict(os.environ, {"DATABASE_SSL": choice}), mock.patch.object(st, "DATABASE_URL", url):
                 self.assertEqual(st._database_ssl(), expected, (url, choice))
+
+
+# ---------------------------------------------------------------------------
+# Competitor-parity features: categories, pages, specs, digital, quotes...
+# ---------------------------------------------------------------------------
+
+from .models import Category, HomeBanner, Page, QuoteRequest, StoreFollow  # noqa: E402
+
+
+class CategoryAdminTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user("catboss", "catboss@example.com", "pass12345", is_staff=True, is_superuser=True)
+        self.client.force_login(self.staff)
+
+    def test_starting_categories_are_grouped(self):
+        beauty = Category.objects.get(slug="beauty")
+        self.assertEqual(Category.objects.get(slug="skincare").parent, beauty)
+        self.assertIn(("beauty", "Beauty"), __import__("bees.categories", fromlist=["x"]).top_level())
+
+    def test_add_subcategory_and_parent_page_lists_its_products(self):
+        r = self.client.post(reverse("manage_categories"), {"action": "add", "name": "Yoga mats", "parent": Category.objects.get(slug="beauty").pk, "is_active": "1"})
+        self.assertRedirects(r, reverse("manage_categories"))
+        self.assertTrue(Category.objects.filter(slug="yoga-mats", parent__slug="beauty").exists())
+        make_product(name="Cork Mat", category="yoga-mats")
+        page = self.client.get(reverse("category_products", args=["beauty"]))
+        self.assertContains(page, "Cork Mat")
+        self.assertContains(page, "Yoga mats")  # subcategory chip
+        child = self.client.get(reverse("category_products", args=["yoga-mats"]))
+        self.assertContains(child, "Cork Mat")
+        self.assertContains(child, 'aria-label="Breadcrumb"')
+
+    def test_no_nesting_deeper_than_one_level(self):
+        skincare = Category.objects.get(slug="skincare")
+        self.client.post(reverse("manage_categories"), {"action": "add", "name": "Deep", "parent": skincare.pk})
+        self.assertFalse(Category.objects.filter(name="Deep").exists())
+
+    def test_delete_moves_products(self):
+        cat = Category.objects.create(slug="old-cat", name="Old")
+        p = make_product(category="old-cat")
+        self.client.post(reverse("manage_categories"), {"action": "delete", "id": cat.pk})
+        self.assertTrue(Category.objects.filter(pk=cat.pk).exists())  # products need a new home first
+        self.client.post(reverse("manage_categories"), {"action": "delete", "id": cat.pk, "move_to": "grocery"})
+        self.assertFalse(Category.objects.filter(pk=cat.pk).exists())
+        p.refresh_from_db()
+        self.assertEqual(p.category, "grocery")
+
+    def test_hidden_category_is_404_and_not_in_menu(self):
+        cat = Category.objects.get(slug="charity")
+        cat.is_active = False
+        cat.save()
+        self.assertEqual(self.client.get(reverse("category_products", args=["charity"])).status_code, 404)
+        self.assertEqual(self.client.get(reverse("category_products", args=["donate-education"])).status_code, 404)
+        self.assertNotContains(self.client.get("/"), "/category/charity/")
+
+    def test_catalog_staff_can_open_categories_marketing_cannot(self):
+        from .models import Profile
+        u = User.objects.create_user("mk", "mk@example.com", "pass12345", is_staff=True)
+        Profile.objects.update_or_create(user=u, defaults={"staff_role": "marketing"})
+        self.client.force_login(u)
+        self.assertRedirects(self.client.get(reverse("manage_categories")), reverse("manage_dashboard"), fetch_redirect_response=False)
+        self.assertEqual(self.client.get(reverse("manage_pages")).status_code, 200)
+
+
+class PagesAndBannersTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user("pgboss", "pgboss@example.com", "pass12345", is_staff=True, is_superuser=True)
+
+    def test_store_text_replaces_built_in_page(self):
+        self.assertContains(self.client.get(reverse("terms_page")), "Using ")
+        self.client.force_login(self.staff)
+        form = self.client.get(reverse("manage_page_builtin", args=["terms"]))
+        self.assertContains(form, "## Using")  # starts from the built-in text
+        self.client.post(reverse("manage_page_builtin", args=["terms"]), {"title": "Our terms", "body": "## Rules\nBe nice.\n- one\n- two\n<script>x</script>", "is_published": "1"})
+        page = self.client.get(reverse("terms_page"))
+        self.assertContains(page, "<h2>Rules</h2>", html=True)
+        self.assertContains(page, "<li>two</li>", html=True)
+        self.assertNotContains(page, "<script>x</script>")
+        self.assertNotContains(page, "Using ")
+
+    def test_custom_page_in_footer_and_drafts_hidden(self):
+        self.client.force_login(self.staff)
+        self.client.post(reverse("manage_page_new"), {"title": "Shipping policy", "body": "We ship fast.", "is_published": "1", "show_in_footer": "1"})
+        self.client.post(reverse("manage_page_new"), {"title": "Secret", "body": "Draft text."})
+        self.assertContains(self.client.get("/pages/shipping-policy/"), "We ship fast.")
+        self.assertEqual(self.client.get("/pages/secret/").status_code, 404)
+        self.assertContains(self.client.get("/"), "/pages/shipping-policy/")
+        self.assertEqual(self.client.get("/pages/terms/").status_code, 404)  # built-ins live at their own address
+
+    def test_home_banner_respects_schedule(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        HomeBanner.objects.create(title="Summer sale", link="/products/")
+        HomeBanner.objects.create(title="Future deal", link="/products/", starts_at=timezone.now() + timedelta(days=2))
+        home = self.client.get("/")
+        self.assertContains(home, "Summer sale")
+        self.assertNotContains(home, "Future deal")
+
+    def test_banner_link_must_be_safe(self):
+        self.client.force_login(self.staff)
+        self.client.post(reverse("manage_pages"), {"action": "add_banner", "title": "X", "link": "javascript:alert(1)", "is_active": "1"})
+        self.assertFalse(HomeBanner.objects.exists())
+
+
+class ProductDetailsAndFiltersTests(TestCase):
+    def test_brand_size_colour_filters(self):
+        from .models import ProductVariant
+        a = make_product(name="Alpha Tee", brand="Acme", category="fashion")
+        b = make_product(name="Beta Tee", brand="Bolt", category="fashion", has_variants=True)
+        ProductVariant.objects.create(product=b, size="M", color="Red", stock=3)
+        ProductVariant.objects.create(product=b, size="L", color="Blue", stock=0)
+        Review.objects.create(product=b, user=User.objects.create_user("rv", "rv@example.com", "x"), rating=5, comment="ok")
+        page = self.client.get(reverse("category_products", args=["fashion"]), {"brand": "Acme"})
+        self.assertContains(page, "Alpha Tee")
+        self.assertNotContains(page, "Beta Tee")
+        page = self.client.get(reverse("category_products", args=["fashion"]), {"size": "M"})
+        self.assertContains(page, "Beta Tee")
+        self.assertNotContains(page, "Alpha Tee")
+        self.assertEqual(page.context["products"][0].rating_count, 1)  # no double counting
+        # Sold-out options don't match.
+        self.assertNotContains(self.client.get(reverse("category_products", args=["fashion"]), {"color": "Blue"}), "Beta Tee")
+        self.assertContains(self.client.get(reverse("category_products", args=["fashion"])), 'name="brand" value="Bolt"')
+        _ = a
+
+    def test_product_page_shows_specs_safety_video_and_size_guide(self):
+        p = make_product(name="Wool Hoodie", category="hoodies", brand="Nordic", specs="Material: Merino wool\nFit: Regular",
+                         manufacturer="Nordic Knit AB, Storgatan 1, Stockholm", video_url="https://youtu.be/dQw4w9WgXcQ")
+        page = self.client.get(reverse("product_detail", args=[p.id]))
+        self.assertContains(page, "Merino wool")
+        self.assertContains(page, "Nordic Knit AB")
+        self.assertContains(page, "youtube-nocookie.com/embed/dQw4w9WgXcQ")
+        self.assertContains(page, "Size guide")  # from the Fashion > Hoodies category
+        self.assertIn("player.vimeo.com", page["Content-Security-Policy"])
+
+    def test_seller_form_validates_new_fields(self):
+        from .views import _extra_product_fields
+        from django.core.exceptions import ValidationError
+        from django.test import RequestFactory
+        rf = RequestFactory()
+        with self.assertRaises(ValidationError):
+            _extra_product_fields(rf.post("/", {"video_url": "https://evil.example/x.html"}))
+        with self.assertRaises(ValidationError):
+            _extra_product_fields(rf.post("/", {"min_order_qty": "5", "max_order_qty": "2"}))
+        with self.assertRaises(ValidationError):
+            _extra_product_fields(rf.post("/", {"specs": "no colon here"}))
+        ok = _extra_product_fields(rf.post("/", {"brand": "  Acme  ", "specs": "A: b", "min_order_qty": "2"}))
+        self.assertEqual((ok["brand"], ok["min_order_qty"]), ("Acme", 2))
+
+
+class OrderLimitTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("lim", "lim@example.com", "pass12345")
+        self.client.force_login(self.user)
+
+    def test_minimum_added_and_maximum_enforced(self):
+        p = make_product(price=Decimal("5.00"), stock=50, min_order_qty=3, max_order_qty=4)
+        self.client.post(reverse("add_to_cart", args=[p.id]), {"quantity": 1})
+        self.assertEqual(self.client.session["cart"][str(p.id)], 3)
+        self.client.post(reverse("add_to_cart", args=[p.id]), {"quantity": 5})
+        self.assertEqual(self.client.session["cart"][str(p.id)], 4)
+        self.client.post(reverse("update_cart_item", args=[str(p.id)]), {"action": "increase"})
+        self.assertEqual(self.client.session["cart"][str(p.id)], 4)
+        Product.objects.filter(pk=p.pk).update(max_order_qty=2)
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        self.assertFalse(Order.objects.exists())
+
+
+class DigitalProductTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("dig", "dig@example.com", "pass12345")
+        self.client.force_login(self.user)
+        self.p = make_product(name="Recipe e-book", price=Decimal("9.00"), stock=999, is_digital=True,
+                              digital_file=SimpleUploadedFile("book.pdf", b"%PDF-1.4 test", content_type="application/pdf"))
+        SiteSettings.objects.filter(pk=1).update(shipping_flat_fee=Decimal("5.00"))
+
+    def tearDown(self):
+        self.p.digital_file.delete(save=False)
+
+    def test_no_cod_no_shipping_and_download_after_payment(self):
+        from .views import _price_cart
+        self.assertEqual(_price_cart(Decimal("9"), country="US", digital_only=True)["shipping"], Decimal("0"))
+        self.client.post(reverse("add_to_cart", args=[self.p.id]))
+        page = self.client.get(reverse("checkout"))
+        self.assertNotIn("cod", page.context["payment_methods"])
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        self.assertFalse(Order.objects.exists())
+
+        order = Order.objects.create(user=self.user, email="dig@example.com", full_name="D", address="1", city="X", country="US",
+                                     phone="+15550100", payment_method="card", payment_status="pending", status="pending")
+        item = OrderItem.objects.create(order=order, product=self.p, product_name=self.p.name, price=self.p.price, quantity=1)
+        self.assertFalse(item.can_return)
+        self.assertRedirects(self.client.get(reverse("digital_download", args=[item.id])), reverse("my_orders"), fetch_redirect_response=False)
+        order.payment_status, order.status = "paid", "confirmed"
+        order.save(update_fields=["payment_status", "status"])
+        item.refresh_from_db()
+        order.refresh_from_db()
+        self.assertEqual(item.fulfillment_status, "delivered")
+        self.assertEqual(order.status, "delivered")
+        r = self.client.get(reverse("digital_download", args=[item.id]))
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("attachment", r["Content-Disposition"])
+        item.refresh_from_db()
+        self.assertEqual(item.downloads, 1)
+        # Someone else can't download it.
+        other = User.objects.create_user("oth", "oth@example.com", "pass12345")
+        self.client.force_login(other)
+        self.assertEqual(self.client.get(reverse("digital_download", args=[item.id])).status_code, 404)
+        # Limit
+        OrderItem.objects.filter(pk=item.pk).update(downloads=5)
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get(reverse("digital_download", args=[item.id])).status_code, 302)
+
+    def test_digital_product_needs_a_file(self):
+        from .views import check_digital
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            check_digital({"is_digital": True})
+        check_digital({"is_digital": True}, self.p)  # keeps the current file
+
+
+class QuoteTests(TestCase):
+    def setUp(self):
+        self.buyer = User.objects.create_user("qb", "qb@example.com", "pass12345")
+        self.seller_user = User.objects.create_user("qs", "qs@example.com", "pass12345")
+        self.seller = SellerAccount.objects.create(user=self.seller_user, status="approved", business_name="Bulk Co")
+        self.p = make_product(name="Mug", price=Decimal("10.00"), stock=500, quote_only=True, seller_account=self.seller, seller_name="Bulk Co")
+
+    def test_request_offer_accept_and_order_at_agreed_price(self):
+        self.client.force_login(self.buyer)
+        self.assertContains(self.client.get(reverse("product_detail", args=[self.p.id])), "Request a quote")
+        self.client.post(reverse("request_quote", args=[self.p.id]), {"quantity": "100", "target_price": "7", "message": "Logo print?"})
+        q = QuoteRequest.objects.get()
+        self.assertEqual((q.status, q.quantity, q.seller_account), ("open", 100, self.seller))
+        self.assertTrue(Notification.objects.filter(user=self.seller_user, message__contains="quote").exists())
+        # Buyer can't answer their own quote as a seller.
+        self.client.force_login(self.seller_user)
+        self.client.post(reverse("seller_quotes"), {"action": "offer", "id": q.id, "offer_price": "8.00", "valid_days": "5"})
+        q.refresh_from_db()
+        self.assertEqual((q.status, q.offer_price), ("offered", Decimal("8.00")))
+        # Another user can't accept it.
+        self.client.force_login(User.objects.create_user("x9", "x9@example.com", "pass12345"))
+        self.assertEqual(self.client.post(reverse("my_quotes"), {"action": "accept", "id": q.id}).status_code, 404)
+        self.client.force_login(self.buyer)
+        self.client.post(reverse("my_quotes"), {"action": "accept", "id": q.id})
+        q.refresh_from_db()
+        self.assertEqual(q.status, "accepted")
+        cart = self.client.get(reverse("cart"))
+        self.assertContains(cart, "Quote #")
+        self.client.post(reverse("update_cart_item", args=[f"q{q.id}"]), {"action": "increase"})
+        self.assertEqual(self.client.session["cart"][f"q{q.id}"], 100)
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "email": "qb@example.com", "payment_method": "cod"})
+        order = Order.objects.get()
+        item = order.items.get()
+        self.assertEqual((item.price, item.quantity, item.quote_id), (Decimal("8.00"), 100, q.id))
+        q.refresh_from_db()
+        self.assertEqual(q.status, "ordered")
+
+    def test_quote_not_available_unless_turned_on(self):
+        self.client.force_login(self.buyer)
+        Product.objects.filter(pk=self.p.pk).update(quote_only=False)
+        self.assertEqual(self.client.get(reverse("request_quote", args=[self.p.id])).status_code, 404)
+
+    def test_counter_offer_reopens(self):
+        q = QuoteRequest.objects.create(product=self.p, buyer=self.buyer, seller_account=self.seller, quantity=50,
+                                        offer_price=Decimal("9"), status="offered")
+        self.client.force_login(self.buyer)
+        self.client.post(reverse("my_quotes"), {"action": "counter", "id": q.id, "target_price": "8.5", "quantity": "60"})
+        q.refresh_from_db()
+        self.assertEqual((q.status, q.quantity, q.target_price), ("open", 60, Decimal("8.50")))
+
+
+class FollowStoreTests(TestCase):
+    def test_follow_and_daily_notification(self):
+        from django.core.management import call_command
+        seller = SellerAccount.objects.create(user=User.objects.create_user("fs", "fs@example.com", "x"), status="approved", business_name="Fern Shop")
+        fan = User.objects.create_user("fan", "fan@example.com", "pass12345")
+        self.client.force_login(fan)
+        self.client.post(reverse("follow_store", args=[seller.id]), {"next": "/"})
+        self.assertTrue(StoreFollow.objects.filter(user=fan, seller_account=seller).exists())
+        make_product(name="Fern pot", seller_account=seller, seller_name="Fern Shop")
+        call_command("notify_followers", stdout=open(os.devnull, "w"))
+        self.assertTrue(Notification.objects.filter(user=fan, message__contains="Fern Shop added 1 new product").exists())
+        self.client.post(reverse("follow_store", args=[seller.id]), {"next": "/"})
+        self.assertFalse(StoreFollow.objects.exists())
+
+
+class ApiNewFieldsTests(TestCase):
+    def test_product_detail_and_categories(self):
+        p = make_product(name="Spec Lamp", brand="Lumo", specs="Watts: 9", min_order_qty=2)
+        data = self.client.get(f"/api/v1/products/{p.id}/").json()
+        self.assertEqual(data["brand"], "Lumo")
+        self.assertEqual(data["specifications"], [{"name": "Watts", "value": "9"}])
+        self.assertEqual(data["order_limits"], {"min": 2, "max": None})
+        cats = {c["code"]: c for c in self.client.get("/api/v1/categories/").json()}
+        self.assertEqual(cats["skincare"]["parent"], "beauty")

@@ -1,0 +1,16 @@
+{% extends "bees/base.html" %}
+{% block title %}Quotes — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:920px;">
+    <div class="page-head"><div><h1>Your account</h1><p>Signed in as <span data-no-translate>{{ request.user.username }}</span></p></div></div>
+    {% include "bees/partials/account_tabs.html" with tab="quotes" %}
+    <section class="panel">
+        <h2>Quotes</h2>
+        <p class="muted small" style="margin-top:4px;">Buying in bulk? Look for <strong>Request a quote</strong> on a product page. Accepted offers go to your cart at the agreed price.</p>
+        {% for q in quotes %}{% include "bees/partials/quote_card.html" with viewer="buyer" %}{% empty %}<p class="muted" style="padding:24px 0;text-align:center;">No quote requests yet.</p>{% endfor %}
+        {% include "bees/partials/pagination.html" %}
+    </section>
+</div>
+{% include "bees/partials/quote_css.html" %}
+{% endblock %}

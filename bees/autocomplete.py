@@ -11,6 +11,7 @@ import re
 
 from django.core.cache import cache
 from django.db.models import Sum
+from .categories import choices as category_choices
 
 WORD = re.compile(r"[^\W\d_][\w'-]+", re.UNICODE)
 VOCAB_KEY = "search:vocab:v1"
@@ -25,7 +26,8 @@ def vocabulary():
             for w in WORD.findall(f"{name} {category.replace('-', ' ')}".lower()):
                 if len(w) > 2:
                     bag[w] = bag.get(w, 0) + 1
-        for label in dict(Product.CATEGORY_CHOICES).values():
+        from .categories import labels as category_labels
+        for label in category_labels().values():
             for w in WORD.findall(label.lower()):
                 if len(w) > 2:
                     bag[w] = bag.get(w, 0) + 3
@@ -82,7 +84,7 @@ def suggest(query, limit=5):
             products = list(qs2.order_by("-stock", "-created_at")[:limit].values("id", "name", "image_url", "price"))
             if products:
                 did_you_mean = fixed
-    cats = [{"label": label, "url": f"/category/{code}/"} for code, label in Product.CATEGORY_CHOICES
+    cats = [{"label": label, "url": f"/category/{code}/"} for code, label in category_choices()
             if lowered in label.lower() or lowered in code][:3]
     terms = [r["key"] for r in DailyStat.objects.filter(kind="search", key__startswith=lowered).exclude(key=lowered)
              .values("key").annotate(n=Sum("count")).order_by("-n")[:4]]

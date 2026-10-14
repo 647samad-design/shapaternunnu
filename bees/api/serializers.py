@@ -7,6 +7,7 @@ from django.urls import reverse
 from rest_framework import serializers
 
 from ..models import Order, OrderItem, Product, ProductVariant, Review, SellerAccount
+from ..categories import choices as category_choices
 
 
 def absolute(request, url):
@@ -79,6 +80,22 @@ class ProductListSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "url", "image", "price", "old_price", "currency", "category", "in_stock",
                   "has_variants", "rating", "seller", "deal", "created_at"]
 
+    def get_specifications(self, p) -> list:
+        return [{"name": n, "value": v} for n, v in p.spec_rows()]
+
+    def get_video(self, p) -> str | None:
+        v = p.video()
+        return p.video_url if v else None
+
+    def get_order_limits(self, p) -> dict:
+        low, high = p.order_limits()
+        return {"min": low, "max": high}
+
+    def get_product_safety(self, p) -> dict | None:
+        if not p.has_safety_info:
+            return None
+        return {"manufacturer": p.manufacturer, "eu_responsible_person": p.eu_responsible_person, "safety_info": p.safety_info}
+
     def get_url(self, p) -> str:
         return absolute(self.context.get("request"), reverse("product_detail", args=[p.pk]))
 
@@ -119,6 +136,13 @@ class ProductListSerializer(serializers.ModelSerializer):
 
 
 class ProductDetailSerializer(ProductListSerializer):
+    brand = serializers.CharField()
+    specifications = serializers.SerializerMethodField()
+    video = serializers.SerializerMethodField()
+    order_limits = serializers.SerializerMethodField()
+    digital = serializers.BooleanField(source="is_digital")
+    quotes = serializers.BooleanField(source="quote_only", help_text="Buyers can request a quote for bulk quantities.")
+    product_safety = serializers.SerializerMethodField()
     images = serializers.SerializerMethodField()
     variants = serializers.SerializerMethodField()
     stock = serializers.IntegerField()
@@ -126,7 +150,8 @@ class ProductDetailSerializer(ProductListSerializer):
 
     class Meta(ProductListSerializer.Meta):
         fields = ProductListSerializer.Meta.fields + ["description", "images", "stock", "variants", "guide",
-                                                      "weight_grams", "updated_at"]
+                                                      "brand", "specifications", "video", "order_limits", "digital",
+                                                      "quotes", "product_safety", "weight_grams", "updated_at"]
 
     def get_images(self, p) -> list[str]:
         request = self.context.get("request")
@@ -278,7 +303,12 @@ class SellerProductWriteSerializer(serializers.Serializer):
     import: new products, and changes to name / category / photo /
     description, go to the store's review; price and stock are live at once."""
     name = serializers.CharField(max_length=255, required=False)
-    category = serializers.ChoiceField(choices=Product.CATEGORY_CHOICES, required=False)
+    category = serializers.CharField(max_length=30, required=False)
+
+    def validate_category(self, value):
+        if value not in dict(category_choices()):
+            raise serializers.ValidationError("Unknown category. See GET /api/v1/categories/.")
+        return value
     price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0.01"), required=False)
     old_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0"), required=False, allow_null=True)
     stock = serializers.IntegerField(min_value=0, max_value=1_000_000, required=False)

@@ -73,7 +73,8 @@
             {% if item.product %}<img src="{{ item.product.image_url }}" alt="">{% else %}<span></span>{% endif %}
             <div>
                 <div style="font-weight:700;">{{ item.product_name }}</div>
-                <span class="muted small">Qty {{ item.quantity }} · {{ item.price|money }} each</span>
+                <span class="muted small">Qty {{ item.quantity }} · {{ item.price|money }} each{% if item.quote_id %} · agreed quote{% endif %}</span>
+                {% if item.is_digital %}<div style="margin-top:6px;">{% if item.can_download %}<a class="btn btn-primary btn-sm" href="{% url 'digital_download' item.id %}{% if guest %}?t={{ order.access_token }}{% endif %}">⬇ Download</a> <span class="muted small">{{ item.downloads }}/{{ item.product.download_limit }} used</span>{% elif order.payment_status != "paid" %}<span class="muted small">⬇ The download appears here once your payment is confirmed.</span>{% else %}<span class="muted small">Download limit reached - message the seller if you need it again.</span>{% endif %}</div>{% endif %}
                 {% if order.status != "cancelled" and order.status != "pending" %}
                 <div class="oi-step">
                     {% if item.fulfillment_status == "delivered" or order.status == "delivered" %}<span class="pill ok small">✓ Delivered{% if item.delivered_at %} {{ item.delivered_at|date:"M j" }}{% endif %}</span>

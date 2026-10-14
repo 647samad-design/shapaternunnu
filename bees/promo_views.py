@@ -11,6 +11,7 @@ from django.utils import timezone
 from . import promotions
 from .models import AuditLog, Coupon, Product, Promotion
 from .seller_views import _render as seller_render, seller_required
+from .categories import choices as category_choices
 
 CODE_RE = re.compile(r"^[A-Z0-9][A-Z0-9_-]{2,29}$")
 
@@ -73,7 +74,7 @@ def handle_post(request, seller):
         pct = _int(request.POST.get("percent_off"), 1, 90)
         starts, ends = _when(request.POST.get("starts_at")), _when(request.POST.get("ends_at"))
         category = request.POST.get("category", "")
-        if category and category not in dict(Product.CATEGORY_CHOICES):
+        if category and category not in dict(category_choices()):
             category = ""
         if pct is None:
             messages.error(request, "Discount must be between 1 and 90%.")
@@ -109,7 +110,7 @@ def context(seller):
     for c in coupons:
         c.used = c.times_used()
     return {
-        "coupons": coupons, "sales": Promotion.objects.filter(**owner)[:50], "categories": Product.CATEGORY_CHOICES,
+        "coupons": coupons, "sales": Promotion.objects.filter(**owner)[:50], "categories": category_choices(),
         "today": timezone.localdate(),
         "tz_name": timezone.get_current_timezone_name(),
         "now_local": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),

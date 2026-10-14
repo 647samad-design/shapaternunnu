@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 
 from ..models import ApiToken, Order, OrderEvent, OrderItem, Product, Profile, Review, SellerAccount, Wishlist
 from . import serializers as s
+from ..categories import choices as category_choices
 
 TOKEN_DAYS = int(getattr(settings, "API_TOKEN_DAYS", 90))
 MONEY_ROLES = ("owner", "admin")
@@ -80,8 +81,9 @@ class CategoryList(APIView):
     @extend_schema(responses=s.CategorySerializer(many=True))
     def get(self, request):
         counts = dict(Product.objects.live().values_list("category").annotate(n=Count("id")))
-        data = [{"code": code, "label": label, "product_count": counts.get(code, 0)}
-                for code, label in Product.CATEGORY_CHOICES]
+        from ..categories import all_rows
+        data = [{"code": r["slug"], "label": r["name"], "parent": r["parent"] or None,
+                 "product_count": counts.get(r["slug"], 0)} for r in all_rows()]
         return Response(data)
 
 
@@ -121,7 +123,8 @@ class ProductList(ListAPIView):
             qs = Product.objects.live()
         category = params.get("category")
         if category:
-            qs = qs.filter(category=category)
+            from ..categories import with_children
+            qs = qs.filter(category__in=with_children(category))
         seller_id = params.get("seller_id")
         if seller_id:
             if not str(seller_id).isdigit():

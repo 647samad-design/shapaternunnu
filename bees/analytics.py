@@ -12,6 +12,7 @@ from decimal import Decimal
 from django.db import IntegrityError, transaction
 from django.db.models import F
 from django.utils import timezone
+from .categories import choices as category_choices
 
 BOT = re.compile(r"bot|crawl|spider|slurp|preview|monitor|headless|python-requests|curl|wget|lighthouse", re.I)
 KINDS = ("visit", "view", "cart", "checkout", "order", "search", "search_zero")
@@ -133,7 +134,8 @@ def report(start, end):
     from .countries import COUNTRIES
     from .models import DailyStat, Order, OrderItem, Product, ReturnRequest
     names = dict(COUNTRIES)
-    cats = dict(Product.CATEGORY_CHOICES)
+    from .categories import labels as category_labels
+    cats = category_labels()
     in_period = Order.objects.filter(created_at__date__gte=start, created_at__date__lte=end)
     counted = in_period.exclude(status="cancelled").exclude(payment_status__in=["pending", "failed", "refunded"])
     # Light rows instead of full objects: fast even with a year of orders.

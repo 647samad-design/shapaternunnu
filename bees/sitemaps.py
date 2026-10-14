@@ -1,6 +1,7 @@
 from django.contrib.sitemaps import Sitemap
 from django.urls import reverse
 from .models import Product
+from .categories import choices as category_choices
 
 
 class ProductSitemap(Sitemap):
@@ -24,7 +25,7 @@ class CategorySitemap(Sitemap):
     def items(self):
         # Pulled directly from the model so this never goes stale if
         # categories are added or renamed.
-        return [choice[0] for choice in Product.CATEGORY_CHOICES]
+        return [choice[0] for choice in category_choices()]
 
     def location(self, item):
         return reverse("category_products", args=[item])

@@ -1,4 +1,6 @@
 from .translations import TRANSLATIONS, LANGUAGE_NAMES, RTL_LANGUAGES
+from .categories import top_level as category_top_level
+from .content import footer_pages
 
 
 def cart_count(request):
@@ -154,7 +156,8 @@ def brand(request):
         "brand": brand_obj,
         "stripe_enabled": payments.is_configured(),
         "store_currency": dj_settings.STORE_CURRENCY.upper(),
-        "nav_categories": Product.CATEGORY_CHOICES,
+        "nav_categories": category_top_level(),
+        "footer_pages": footer_pages(),
         "demo_mode": getattr(dj_settings, "DEMO_MODE", False),
         "staging": getattr(dj_settings, "STAGING", False),
     }

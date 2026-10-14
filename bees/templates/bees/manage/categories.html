@@ -1,0 +1,77 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Categories<script>
+document.querySelectorAll('[data-toggle-row]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var row = document.getElementById(btn.getAttribute('aria-controls'));
+        row.hidden = !row.hidden;
+        btn.setAttribute('aria-expanded', String(!row.hidden));
+        btn.textContent = row.hidden ? 'Edit' : 'Close';
+        if (!row.hidden) row.querySelector('input[name=name]').focus();
+    });
+});
+</script>
+{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Categories</h1>
+    <p>Top-level categories show in the shop's menu bar and on the home page. A subcategory's products also show on its parent's page. Sellers pick from this list when they add products.</p></div></div>
+<section class="panel">
+    <details class="cat-add"{% if not rows %} open{% endif %}>
+        <summary class="btn btn-primary btn-sm">+ Add a category</summary>
+        <form method="post" class="cat-form">{% csrf_token %}<input type="hidden" name="action" value="add">
+            {% include "bees/manage/_category_fields.html" with c=None %}
+            <div class="field"><label for="c-slug">Address (optional)</label><input id="c-slug" name="slug" maxlength="30" placeholder="made from the name" pattern="[a-z0-9\-]*"><small class="muted">/category/<em>address</em>/ - can't be changed later</small></div>
+            <div class="cat-actions"><button class="btn btn-primary btn-sm" type="submit">Add category</button></div>
+        </form>
+    </details>
+</section>
+<section class="panel" style="padding:8px 20px;">
+    <div class="table-scroll"><table class="table cat-table">
+        <thead><tr><th>Category</th><th>Address</th><th class="num">Products</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+        {% for c, depth in rows %}
+        <tr class="{% if depth %}sub{% endif %}">
+            <td>{% if depth %}<span class="muted" aria-hidden="true">└</span> {% endif %}<strong>{{ c.name }}</strong>{% if c.size_chart %} <span class="pill">Size guide</span>{% endif %}</td>
+            <td><a class="small" href="{% url 'category_products' c.slug %}" target="_blank" rel="noopener">/category/{{ c.slug }}/</a></td>
+            <td class="num">{{ c.n }}{% if c.total != c.n %} <span class="muted small">({{ c.total }} with subcategories)</span>{% endif %}</td>
+            <td>{% if c.is_active %}<span class="pill ok">Visible</span>{% else %}<span class="pill">Hidden</span>{% endif %}</td>
+            <td class="num"><button type="button" class="btn btn-ghost btn-sm" aria-expanded="false" aria-controls="ce-{{ c.id }}" data-toggle-row>Edit</button></td>
+        </tr>
+        <tr class="cat-edit-row" id="ce-{{ c.id }}" hidden><td colspan="5">
+            <form method="post" class="cat-form">{% csrf_token %}<input type="hidden" name="action" value="save"><input type="hidden" name="id" value="{{ c.id }}">
+                {% include "bees/manage/_category_fields.html" %}
+                <div class="cat-actions"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
+            </form>
+            <form method="post" class="cat-del">{% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="{{ c.id }}">
+                {% if c.n %}<label class="small" for="mv-{{ c.id }}">Move its {{ c.n }} products to</label>
+                <select id="mv-{{ c.id }}" name="move_to" required><option value="">Choose…</option>{% for slug, name in everything %}{% if slug != c.slug %}<option value="{{ slug }}">{{ name }}</option>{% endif %}{% endfor %}</select>{% endif %}
+                <button class="btn btn-ghost btn-sm" style="color:var(--sale);" type="submit">Delete category</button>
+            </form>
+        </td></tr>
+        {% empty %}<tr><td colspan="5" class="muted" style="text-align:center;padding:24px;">No categories yet.</td></tr>{% endfor %}
+        </tbody>
+    </table></div>
+</section>
+<style>
+.cat-add > summary { list-style: none; display: inline-flex; }
+.cat-add > summary::-webkit-details-marker { display: none; }
+.cat-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; align-items: start; margin-top: 16px; text-align: left; }
+.cat-form .wide { grid-column: 1 / -1; }
+.cat-form textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
+.cat-actions { grid-column: 1 / -1; }
+.cat-table tr.sub td:first-child { padding-left: 28px; }
+.cat-edit-row > td { background: var(--surface-2); padding: 4px 16px 18px !important; }
+.cat-del { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.cat-del select { max-width: 260px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+</style>
+<script>
+document.querySelectorAll('[data-toggle-row]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var row = document.getElementById(btn.getAttribute('aria-controls'));
+        row.hidden = !row.hidden;
+        btn.setAttribute('aria-expanded', String(!row.hidden));
+        btn.textContent = row.hidden ? 'Edit' : 'Close';
+        if (!row.hidden) row.querySelector('input[name=name]').focus();
+    });
+});
+</script>
+{% endblock %}

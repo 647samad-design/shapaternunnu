@@ -19,7 +19,8 @@ def products_for(promo):
     from .models import Product
     qs = Product.objects.filter(seller_account_id=promo.seller_account_id).exclude(approval_status="archived")
     if promo.category:
-        qs = qs.filter(category=promo.category)
+        from .categories import with_children
+        qs = qs.filter(category__in=with_children(promo.category))
     if promo.product_ids:
         qs = qs.filter(id__in=promo.product_ids)
     return qs

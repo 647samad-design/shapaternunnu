@@ -76,6 +76,7 @@ def _nav_counts(seller):
         "questions": Question.objects.filter(product__seller_account=seller, answer="").count(),
         "messages": unread_for_seller(seller),
         "claims": Claim.objects.filter(order_item__seller_account=seller, status="open").count(),
+        "quotes": seller.quotes.filter(status="open").count(),
     }
 
 

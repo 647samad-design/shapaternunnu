@@ -1,13 +1,19 @@
 {% load bees_extras %}
 <div class="wrap page">
+    {% if category_parent %}<nav class="crumbs small" aria-label="Breadcrumb"><a href="{% url 'home' %}">Home</a> / <a href="{% url 'category_products' category_parent.slug %}">{{ category_parent.name }}</a> / <span aria-current="page">{{ listing_title }}</span></nav>{% endif %}
     <div class="page-head">
         <div>
             <h1>{{ listing_title }}</h1>
+            {% if category_info.description %}<p class="cat-desc">{{ category_info.description }}</p>{% endif %}
             <p>{{ page_obj.paginator.count }} product{{ page_obj.paginator.count|pluralize }}{% if smart.price or smart.cheap or smart.fallback %}
                 <span class="smart-chips">{% if smart.min is not None and smart.max is not None %}<span>{{ smart.min|money }} – {{ smart.max|money }}</span>{% elif smart.max is not None %}<span>Under {{ smart.max|money }}</span>{% elif smart.min is not None %}<span>Over {{ smart.min|money }}</span>{% endif %}{% if smart.cheap %}<span>Lowest price first</span>{% endif %}{% if smart.fallback %}<span>Close matches</span>{% endif %}</span>{% endif %}</p>
         </div>
         <div class="result-bar" style="margin:0;">{% include "bees/partials/sort_bar.html" %}</div>
     </div>
+    {% if subcategories or sibling_categories %}<div class="subcats" role="list">
+        {% if subcategories %}<a role="listitem" class="on" href="{% url 'category_products' category %}">All {{ listing_title }}</a>{% for slug, name in subcategories %}<a role="listitem" href="{% url 'category_products' slug %}">{{ name }}</a>{% endfor %}
+        {% else %}<a role="listitem" href="{% url 'category_products' category_parent.slug %}">All {{ category_parent.name }}</a>{% for slug, name in sibling_categories %}<a role="listitem" href="{% url 'category_products' slug %}" class="{% if slug == category %}on{% endif %}"{% if slug == category %} aria-current="page"{% endif %}>{{ name }}</a>{% endfor %}{% endif %}
+    </div>{% endif %}
     <div class="shop">
         {% include "bees/partials/filters_sidebar.html" %}
         <div>

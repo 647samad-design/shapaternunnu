@@ -1,0 +1,42 @@
+<details class="xf" {% if p.brand or p.specs or p.video_url %}open{% endif %}>
+    <summary><strong>Brand, specifications &amp; video</strong> <span class="muted small">(optional - helps shoppers filter and compare)</span></summary>
+    <div class="xf-grid">
+        <div class="field"><label for="pf_brand">Brand</label><input id="pf_brand" name="brand" maxlength="80" value="{{ p.brand|default:'' }}" placeholder="e.g. Nike, or your own brand"></div>
+        <div class="field"><label for="pf_video">Video link</label><input id="pf_video" name="video_url" maxlength="300" value="{{ p.video_url|default:'' }}" placeholder="YouTube, Vimeo or https://….mp4"></div>
+        <div class="field xf-wide"><label for="pf_specs">Specifications</label><textarea id="pf_specs" name="specs" rows="4" placeholder="Material: 100% cotton&#10;Weight: 220 g&#10;Made in: Portugal">{{ p.specs|default:'' }}</textarea><small class="muted">One per line as <em>Name: value</em>. Shown as a table on the product page.</small></div>
+    </div>
+</details>
+<details class="xf" {% if p.min_order_qty and p.min_order_qty|stringformat:"s" != "1" or p.max_order_qty or p.quote_only %}open{% endif %}>
+    <summary><strong>Order limits &amp; wholesale</strong> <span class="muted small">(optional)</span></summary>
+    <div class="xf-grid">
+        <div class="field"><label for="pf_minq">Minimum per order</label><input id="pf_minq" name="min_order_qty" type="number" min="1" max="10000" value="{{ p.min_order_qty|default:1 }}"></div>
+        <div class="field"><label for="pf_maxq">Maximum per order</label><input id="pf_maxq" name="max_order_qty" type="number" min="1" max="10000" value="{{ p.max_order_qty|default:'' }}" placeholder="No limit"></div>
+        <label class="xf-wide check small"><input type="checkbox" name="quote_only" value="1"{% if p.quote_only %} checked{% endif %}> <span>Let business buyers <strong>request a quote</strong> for larger quantities (you reply with your price under Quotes)</span></label>
+    </div>
+</details>
+<details class="xf" {% if p.is_digital %}open{% endif %}>
+    <summary><strong>Digital download</strong> <span class="muted small">(e-books, music, templates, software, print files…)</span></summary>
+    <div class="xf-grid">
+        <label class="xf-wide check small"><input type="checkbox" name="is_digital" value="1"{% if p.is_digital %} checked{% endif %}> <span>This is a digital product - buyers download it after paying online (no shipping, no cash on delivery)</span></label>
+        <div class="field"><label for="pf_dfile">File</label><input id="pf_dfile" name="digital_file" type="file">
+            {% if product.digital_file %}<small class="muted">Current file: {{ product.digital_file.name|cut:"digital/"|truncatechars:48 }} <label class="check" style="display:inline-flex;"><input type="checkbox" name="remove_digital_file" value="1"> Remove</label></small>{% else %}<small class="muted">Up to 200 MB. Kept private - only buyers can download it.</small>{% endif %}</div>
+        <div class="field"><label for="pf_dl">Downloads per purchase</label><input id="pf_dl" name="download_limit" type="number" min="1" max="100" value="{{ p.download_limit|default:5 }}"></div>
+    </div>
+</details>
+<details class="xf" {% if p.manufacturer or p.eu_responsible_person or p.safety_info %}open{% endif %}>
+    <summary><strong>Product safety (EU)</strong> <span class="muted small">(required to sell most products in the EU - GPSR)</span></summary>
+    <div class="xf-grid">
+        <div class="field xf-wide"><label for="pf_mfr">Manufacturer</label><input id="pf_mfr" name="manufacturer" maxlength="300" value="{{ p.manufacturer|default:'' }}" placeholder="Name, postal address, email or website"></div>
+        <div class="field xf-wide"><label for="pf_eurp">EU responsible person</label><input id="pf_eurp" name="eu_responsible_person" maxlength="300" value="{{ p.eu_responsible_person|default:'' }}" placeholder="Needed when the manufacturer is outside the EU: name, address, contact"></div>
+        <div class="field xf-wide"><label for="pf_safe">Safety information</label><textarea id="pf_safe" name="safety_info" rows="3" placeholder="Warnings, age limits, safe-use instructions">{{ p.safety_info|default:'' }}</textarea></div>
+    </div>
+</details>
+<style>
+    .xf { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 4px; }
+    .xf + .xf { margin-top: 12px; }
+    .xf summary { cursor: pointer; }
+    .xf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 14px; margin-top: 10px; }
+    .xf-wide { grid-column: 1 / -1; }
+    .xf .check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; }
+    .xf .check input { margin-top: 3px; flex: none; }
+</style>

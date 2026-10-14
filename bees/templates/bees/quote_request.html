@@ -1,0 +1,27 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Request a quote — {{ product.name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:760px;">
+    <a class="link small" href="{% url 'product_detail' product.id %}">← Back to the product</a>
+    <div class="page-head" style="margin-top:8px;"><div><h1>Request a quote</h1><p>Tell the seller what you need. They'll reply with a price for your quantity - usually within a day or two.</p></div></div>
+    <section class="panel">
+        <div class="rq-product"><img src="{{ product.image_url }}" alt="" width="72" height="72"><div><strong>{{ product.name }}</strong><div class="muted small">Sold by <span data-no-translate>{{ product.seller_name }}</span> · listed at {{ product.price|price }} each</div></div></div>
+        <form method="post" class="rq-form">{% csrf_token %}
+            {% if variants %}<div class="field"><label for="rq-v">Size / colour</label><select id="rq-v" name="variant" required><option value="">Choose…</option>{% for v in variants %}<option value="{{ v.id }}"{% if form.variant == v.id|stringformat:"s" %} selected{% endif %}>{{ v.label }}</option>{% endfor %}</select></div>{% endif %}
+            <div class="field"><label for="rq-q">Quantity</label><input id="rq-q" name="quantity" type="number" min="{{ min_qty }}" max="1000000" required value="{{ form.quantity }}"><small class="muted">At least {{ min_qty }}</small></div>
+            <div class="field"><label for="rq-t">Your target price per piece (optional)</label><input id="rq-t" name="target_price" inputmode="decimal" value="{{ form.target_price }}" placeholder="e.g. {{ product.price|floatformat:2 }}"></div>
+            <div class="field"><label for="rq-c">Company (optional)</label><input id="rq-c" name="company" maxlength="120" value="{{ form.company }}"></div>
+            <div class="field rq-wide"><label for="rq-m">Message (optional)</label><textarea id="rq-m" name="message" rows="4" maxlength="2000" placeholder="Delivery date, packaging, branding, payment terms…">{{ form.message }}</textarea></div>
+            <div class="rq-wide"><button class="btn btn-primary" type="submit">Send request</button></div>
+        </form>
+    </section>
+</div>
+<style>
+.rq-product { display: flex; gap: 14px; align-items: center; padding-bottom: 16px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.rq-product img { width: 72px; height: 72px; object-fit: cover; border-radius: var(--radius-sm); }
+.rq-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.rq-wide { grid-column: 1 / -1; }
+</style>
+{% endblock %}

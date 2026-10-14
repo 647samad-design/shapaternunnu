@@ -22,8 +22,11 @@ tax and contact details from **Admin → Site settings** — no code changes.
 
 **For customers**
 - Fast, accessible storefront (WCAG-minded contrast, 16px+ text, keyboard focus, dark mode, mobile-first)
-- Search with live suggestions, category navigation, filters (price, rating, seller, stock) and sorting
-- Product pages with gallery, verified-purchase reviews, questions for the seller, related products
+- Search with live suggestions, categories with subcategories, filters (price, rating, seller, brand, size, colour, stock) and sorting
+- Product pages with gallery and video, specifications, size guides, EU product-safety (GPSR) details, verified-purchase reviews, questions for the seller, related products
+- Digital downloads (e-books, music, templates…) delivered in My orders after online payment
+- **Request a quote** for bulk orders: the seller offers a price, the buyer accepts, counters or declines
+- Follow stores and get told about their new products
 - Cart with live updates, saved addresses, coupons, shipping and tax calculation
 - **Stripe Checkout** — cards, Apple Pay, Google Pay, Link (whatever you enable in Stripe)
 - Order tracking, PDF invoices, one-click cancel with **automatic refund**, return requests, buy again
@@ -33,12 +36,14 @@ tax and contact details from **Admin → Site settings** — no code changes.
 - Individual and business accounts, with team members for businesses
 - Dashboard: sales chart, earnings after commission, low-stock alerts, order fulfilment
 - Product listing with image upload; edits to listing details go back to moderation automatically
+- Brand, specifications, video, minimum/maximum order, wholesale quotes and digital files per product
 
 **For the store owner**
 - Store dashboard: revenue, commission, money owed to sellers, approvals and stock alerts
 - Admin for products, orders, sellers, coupons, returns, chat, newsletter (with bulk email) and audit log
 - Tiered commission, payout tracking, CSV exports
 - White-label branding, announcement bar, cash-on-delivery toggle
+- Categories and subcategories managed in the admin (no code changes), editable About/Terms/Privacy pages, extra pages and scheduled home-page banners
 
 **Engineering**
 - Django 6, Postgres (**Supabase**) or SQLite, S3-compatible file storage (**Supabase Storage**)
@@ -46,7 +51,7 @@ tax and contact details from **Admin → Site settings** — no code changes.
 - Rate limiting, upload validation, private storage for seller ID documents, safe production defaults
 - REST API with token sign-in and OpenAPI docs (`/api/v1/docs/`)
 - Docker setup with PostgreSQL, Redis and a background scheduler
-- 400+ automated tests, run on SQLite, PostgreSQL and Docker by GitHub Actions: `python manage.py test bees`
+- 440+ automated tests, run on SQLite, PostgreSQL and Docker by GitHub Actions: `python manage.py test bees`
 
 ## Seller Center (/seller/)
 

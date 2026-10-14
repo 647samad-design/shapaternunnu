@@ -20,6 +20,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.core.cache import cache
 from django.http import HttpResponse
+from .categories import choices as category_choices
 
 MAX_ROWS = 2000
 MAX_BYTES = 5 * 1024 * 1024
@@ -196,10 +197,13 @@ def _category(value):
     value = (value or "").strip()
     if not value:
         return None
-    choices = dict(Product.CATEGORY_CHOICES)
+    choices = dict(category_choices())
     if value in choices:
         return value
-    by_label = {label.lower(): code for code, label in Product.CATEGORY_CHOICES}
+    by_label = {label.lower(): code for code, label in category_choices()}
+    from .categories import all_rows
+    for row in all_rows():  # plain names too ("Sneakers" as well as "Fashion › Sneakers")
+        by_label.setdefault(row["name"].lower(), row["slug"])
     if value.lower() in by_label:
         return by_label[value.lower()]
     raise BulkError(f"unknown category '{value[:30]}'")
@@ -583,7 +587,7 @@ def _xlsx_response(table, filename, with_help, options=None):
         info.column_dimensions["B"].width = 80
     cats = wb.create_sheet("categories")
     cats.append(["category code", "name"])
-    for code, label in Product.CATEGORY_CHOICES:
+    for code, label in category_choices():
         cats.append([code, label])
     cats.column_dimensions["A"].width = 20
     cats.column_dimensions["B"].width = 34

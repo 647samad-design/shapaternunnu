@@ -8,6 +8,7 @@ from . import bulk
 from .manage_views import _log, _render as manage_render, staff_required
 from .models import Product
 from .seller_views import _render as seller_render, seller_required
+from .categories import choices as category_choices
 
 
 def _handle(request, products, *, seller=None, store=False, back, render):
@@ -47,7 +48,7 @@ def _handle(request, products, *, seller=None, store=False, back, render):
             except InvalidOperation:
                 value = None
             category = request.POST.get("category", "")
-            if category and category not in dict(Product.CATEGORY_CHOICES):
+            if category and category not in dict(category_choices()):
                 category = ""
             if value is None or mode not in ("price_pct", "price_add", "stock_set") \
                     or (mode == "price_pct" and not Decimal("-90") <= value <= Decimal("500")) \
@@ -74,7 +75,7 @@ def _handle(request, products, *, seller=None, store=False, back, render):
 def seller_bulk(request):
     seller = request.seller
     return _handle(request, Product.objects.filter(seller_account=seller), seller=seller, back="seller_bulk",
-                   render=lambda ctx: seller_render(request, "bulk.html", {"section": "products", "categories": Product.CATEGORY_CHOICES,
+                   render=lambda ctx: seller_render(request, "bulk.html", {"section": "products", "categories": category_choices(),
                                                                            "count": seller.products.exclude(approval_status="archived").count(), **ctx}))
 
 
@@ -86,5 +87,5 @@ def manage_bulk(request):
         messages.error(request, "Bulk price/stock changes only apply to the store's own products. Sellers set their own prices.")
         return redirect("manage_bulk")
     return _handle(request, products, store=True, back="manage_bulk",
-                   render=lambda ctx: manage_render(request, "bulk.html", {"section": "products", "categories": Product.CATEGORY_CHOICES,
+                   render=lambda ctx: manage_render(request, "bulk.html", {"section": "products", "categories": category_choices(),
                                                                           "scope": scope, "count": products.exclude(approval_status="archived").count(), **ctx}))

@@ -58,6 +58,33 @@
     .assurances { list-style: none; margin-top: 26px; border-top: 1px solid var(--line); }
     .assurances li { padding: 14px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 16px; }
     .assurances li span:last-child { color: var(--muted); text-align: right; }
+    .gallery-video { position: absolute; inset: 0; background: #000; }
+    .gallery-video iframe, .gallery-video video { width: 100%; height: 100%; border: 0; display: block; }
+    .thumb-video { position: relative; }
+    .thumb-video span { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 1.3rem; background: rgba(0,0,0,.35); }
+    .thumb-video:not(:has(img)) { background: var(--ink); }
+    .brand-line { display: inline-block; font-weight: 800; font-size: .85rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); text-decoration: none; margin-bottom: 4px; }
+    .brand-line:hover { color: var(--ink); text-decoration: underline; }
+    .pdp-note { margin-top: 10px; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--line); font-size: .95rem; }
+    .pdp-note.digital { background: color-mix(in srgb, var(--ok) 10%, var(--surface)); border-color: color-mix(in srgb, var(--ok) 30%, var(--line)); }
+    .size-guide-btn { display: inline-block; margin: 10px 0 4px; font-weight: 700; }
+    .size-guide { border: 0; border-radius: var(--radius-lg); padding: 20px; width: min(640px, calc(100vw - 32px)); background: var(--surface); color: var(--ink); box-shadow: 0 30px 80px rgba(0,0,0,.3); }
+    .size-guide::backdrop { background: rgba(0,0,0,.45); }
+    .sg-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .sg-head h2 { margin: 0; font-size: 1.25rem; }
+    .quote-cta { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 12px 14px; border: 1px dashed var(--line); border-radius: var(--radius-sm); text-decoration: none; color: var(--ink); }
+    .quote-cta:hover { border-color: var(--ink); background: var(--surface-2); }
+    .quote-cta span:nth-child(2) { flex: 1; }
+    .follow-form { margin: 0; }
+    .spec-h { font-size: 1.05rem; margin: 22px 0 8px; }
+    .spec-table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+    .spec-table th, .spec-table td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .spec-table th { width: 38%; color: var(--muted); font-weight: 600; }
+    .safety-box { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+    .safety-box summary { cursor: pointer; }
+    .safety-box dl { display: grid; gap: 4px; margin-top: 10px; }
+    .safety-box dt { font-weight: 700; margin-top: 8px; }
+    .safety-box dd { margin: 0; color: var(--muted); }
     .guide-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 18px; margin-top: 14px; }
     .guide-cols h3 { font-size: 1rem; margin: 0 0 8px; }
     .guide-cols ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
@@ -109,7 +136,7 @@
 <div class="wrap page">
     <nav class="crumbs" aria-label="Breadcrumb">
         <a href="{% url 'home' %}">Home</a><span aria-hidden="true">/</span>
-        <a href="{% url 'category_products' product.category %}">{{ product.get_category_display }}</a><span aria-hidden="true">/</span>
+        {% for slug, name in category_path %}<a href="{% url 'category_products' slug %}">{{ name }}</a><span aria-hidden="true">/</span>{% endfor %}
         <span aria-current="page">{{ product.name|truncatechars:48 }}</span>
     </nav>
 
@@ -123,17 +150,20 @@
         <div>
             <div class="gallery-main">
                 <img src="{{ product.image_url }}" alt="{{ product.name }}" id="main-image" fetchpriority="high" decoding="async" width="800" height="800">
+                {% if video %}<div class="gallery-video" id="main-video" hidden data-kind="{{ video.kind }}" data-src="{{ video.src }}"></div>{% endif %}
             </div>
-            {% if gallery|length > 1 %}
+            {% if gallery|length > 1 or video %}
             <div class="thumbs" role="group" aria-label="Product images">
                 {% for img in gallery %}
                 <button type="button" class="{% if forloop.first %}active{% endif %}" aria-label="Show image {{ forloop.counter }}" onclick="showImage(this, '{{ img|escapejs }}')"><img src="{{ img }}" alt=""></button>
                 {% endfor %}
+                {% if video %}<button type="button" class="thumb-video" aria-label="Play the product video" data-show-video>{% if video.kind == "youtube" %}<img src="https://i.ytimg.com/vi/{{ video.id }}/mqdefault.jpg" alt="" loading="lazy">{% endif %}<span aria-hidden="true">▶</span></button>{% endif %}
             </div>
             {% endif %}
         </div>
 
         <div class="buybox">
+            {% if product.brand %}<a class="brand-line" href="{% url 'search_products' %}?q={{ product.brand|urlencode }}" data-no-translate>{{ product.brand }}</a>{% endif %}
             <h1>{{ product.name }}</h1>{% if product.approval_status == "archived" %}<div class="callout" style="margin:8px 0;">This product is no longer sold. You can still review it if you bought it.</div>{% endif %}
             {% if product.seller_name %}<p class="seller-line">Sold by <a href="{% url 'store_page' product.seller_name %}" data-no-translate>{{ product.seller_name }}</a>{% if product.seller_account.has_badge %} <span class="pro-badge">★ Pro seller</span>{% endif %}{% if product.seller_account.verified_at %} <span class="seller-badge verified">✓ {{ t.verified_seller }}</span>{% endif %}{% if product.seller_account.top_seller %} <span class="seller-badge top">★ {{ t.top_seller }}</span>{% endif %}</p>{% endif %}
             {% if product.rating_count %}
@@ -147,6 +177,15 @@
             </div>
             {% if product.flash_countdown %}<div class="deal-timer" data-ends="{{ product.flash_sale_ends|date:'c' }}"><span>⚡ {{ t.deal_ends_in }}</span> <strong data-timer>--:--:--</strong></div>{% endif %}
             {% if product.has_bulk_offer %}<div class="bulk-offer">🏷️ {{ t.bulk_offer|fill:product }}</div>{% endif %}
+            {% if product.is_digital %}<div class="pdp-note digital">⬇ <strong>Digital download</strong> - available in My orders right after you pay online. Nothing is shipped.</div>{% endif %}
+            {% if order_limits.0 > 1 or order_limits.1 %}<div class="pdp-note">{% if order_limits.0 > 1 %}Minimum order: <strong>{{ order_limits.0 }}</strong>{% endif %}{% if order_limits.0 > 1 and order_limits.1 %} · {% endif %}{% if order_limits.1 %}Up to <strong>{{ order_limits.1 }}</strong> per order{% endif %}</div>{% endif %}
+            {% if size_chart %}<button type="button" class="link-btn size-guide-btn" data-size-guide>📏 Size guide</button>
+            <dialog class="size-guide" id="size-guide" aria-labelledby="sg-title">
+                <div class="sg-head"><h2 id="sg-title">Size guide</h2><button type="button" class="btn btn-ghost btn-sm" data-close-size-guide aria-label="Close">✕</button></div>
+                <div class="table-scroll"><table class="table"><thead><tr>{% for cell in size_chart.0 %}<th scope="col">{{ cell }}</th>{% endfor %}</tr></thead>
+                    <tbody>{% for row in size_chart|slice:"1:" %}<tr>{% for cell in row %}{% if forloop.first %}<th scope="row">{{ cell }}</th>{% else %}<td>{{ cell }}</td>{% endif %}{% endfor %}</tr>{% endfor %}</tbody></table></div>
+                <p class="muted small" style="margin-top:10px;">Measurements can vary a little. If you're between sizes, ask the seller.</p>
+            </dialog>{% endif %}
             {% if product.has_variants %}
             <div class="variant-picker">
                 {% if variant_sizes %}<fieldset><legend>Size: <strong id="pick-size">Choose</strong></legend><div class="opts">{% for s in variant_sizes %}<button type="button" class="opt" data-kind="size" data-value="{{ s }}">{{ s }}</button>{% endfor %}</div></fieldset>{% endif %}
@@ -162,15 +201,18 @@
                 <form method="post" action="{% url 'add_to_cart' product.id %}" class="ajax-add-cart-form">
                     {% csrf_token %}
                     {% if product.has_variants %}<input type="hidden" name="variant" class="variant-input">{% endif %}
+                    {% if order_limits.0 > 1 %}<input type="hidden" name="quantity" value="{{ order_limits.0 }}">{% endif %}
                     <button class="btn btn-secondary buy-btn" type="submit" {% if product.has_variants %}disabled{% endif %}>{{ t.add_to_cart }}</button>
                 </form>
                 <form method="post" action="{% url 'add_to_cart' product.id %}">
                     {% csrf_token %}
                     {% if product.has_variants %}<input type="hidden" name="variant" class="variant-input">{% endif %}
                     <input type="hidden" name="next" value="{% url 'checkout' %}">
+                    {% if order_limits.0 > 1 %}<input type="hidden" name="quantity" value="{{ order_limits.0 }}">{% endif %}
                     <button class="btn btn-primary buy-btn" type="submit" {% if product.has_variants %}disabled{% endif %}>{{ t.buy_now }}</button>
                 </form>
             </div>
+            {% if product.quote_only %}<a class="quote-cta" href="{% url 'request_quote' product.id %}" rel="nofollow"><span aria-hidden="true">📦</span><span><strong>Buying in bulk?</strong> Request a quote for a better price</span><span aria-hidden="true">→</span></a>{% endif %}
             <form method="post" action="{% url 'stock_alert' product.id %}" class="notify-form" id="notify-form" {% if product.stock > 0 %}hidden{% endif %}>
                 {% csrf_token %}
                 {% if product.has_variants %}<input type="hidden" name="variant" class="variant-input">{% endif %}
@@ -200,6 +242,7 @@
                 <span class="who"><strong><a href="{% url 'store_page' sa.display_name %}" data-no-translate>{{ sa.display_name }}</a></strong>
                     <span class="muted small">{% if seller_reply %}Usually replies {{ seller_reply }}{% else %}Ask about sizes, delivery or custom orders{% endif %}</span></span>
                 <a class="btn btn-secondary btn-sm" href="{% url 'message_seller' product.id %}" rel="nofollow">💬 {{ t.message_seller }}</a>
+                {% if user.is_authenticated and sa.user_id != user.id %}<form method="post" action="{% url 'follow_store' sa.id %}" class="follow-form">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button type="submit" class="btn btn-ghost btn-sm" aria-pressed="{% if following %}true{% else %}false{% endif %}">{% if following %}✓ Following{% else %}+ Follow{% endif %}</button></form>{% endif %}
             </div>
             <a class="seller-fab" href="{% url 'message_seller' product.id %}" rel="nofollow" aria-label="{{ t.message_seller }}"><span class="dot" aria-hidden="true"></span>💬 <span class="txt-long">{{ t.message_seller }}</span></a>
             {% endwith %}{% endif %}
@@ -213,7 +256,7 @@
                 {{ ship_table|json_script:"ship-table" }}
                 {% endif %}
                 <li {% if has_shipping_zones %}hidden{% endif %}><span>Shipping</span><span>{% if has_shipping_zones %}By country, shown at checkout{% elif brand.free_shipping_threshold %}Free over {{ brand.free_shipping_threshold|money }}{% elif brand.shipping_flat_fee %}{{ brand.shipping_flat_fee|money }} flat rate{% else %}Free{% endif %}</span></li>
-                <li><span>Returns</span><span>{{ brand.return_days }} days from delivery</span></li>
+                {% if product.is_digital %}<li><span>Returns</span><span>Downloads can't be returned</span></li>{% else %}<li><span>Returns</span><span>{{ brand.return_days }} days from delivery</span></li>{% endif %}
                 <li><span>Payment</span><span>{% if stripe_enabled %}Secure card checkout via Stripe{% else %}{{ t.cash_on_delivery }}{% endif %}</span></li>
             </ul>
         </div>
@@ -223,6 +266,23 @@
         <section class="panel">
             <h2>{{ t.product_details }}</h2>
             <div class="description" style="margin-top:14px;" data-no-translate>{{ product.description|default:"The seller hasn't added a description yet." }}</div>
+            {% with specs=product.spec_rows %}{% if specs or product.brand %}
+            <h3 class="spec-h">Specifications</h3>
+            <table class="spec-table"><tbody>
+                {% if product.brand %}<tr><th scope="row">Brand</th><td data-no-translate>{{ product.brand }}</td></tr>{% endif %}
+                {% for name, value in specs %}<tr><th scope="row">{{ name }}</th><td>{{ value }}</td></tr>{% endfor %}
+            </tbody></table>
+            {% endif %}{% endwith %}
+            {% if product.has_safety_info %}
+            <details class="safety-box">
+                <summary><strong>Product safety</strong> <span class="muted small">manufacturer &amp; EU contact</span></summary>
+                <dl>
+                    {% if product.manufacturer %}<dt>Manufacturer</dt><dd data-no-translate>{{ product.manufacturer }}</dd>{% endif %}
+                    {% if product.eu_responsible_person %}<dt>Responsible person in the EU</dt><dd data-no-translate>{{ product.eu_responsible_person }}</dd>{% endif %}
+                    {% if product.safety_info %}<dt>Safety information</dt><dd>{{ product.safety_info|linebreaksbr }}</dd>{% endif %}
+                </dl>
+            </details>
+            {% endif %}
         </section>
 
         <section class="panel guide-panel" id="guide" data-guide-panel {% if not product.guide %}data-empty{% endif %}>
@@ -439,9 +499,34 @@
         const main = document.getElementById('main-image');
         delete main.dataset.fallback;
         main.src = src;
+        const video = document.getElementById('main-video');
+        if (video) { video.hidden = true; video.innerHTML = ''; }
         document.querySelectorAll('.thumbs button').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
     }
+    (function () {
+        const btn = document.querySelector('[data-show-video]'), box = document.getElementById('main-video');
+        if (btn && box) btn.addEventListener('click', function () {
+            // The player only loads when asked (no third-party requests before).
+            let el;
+            if (box.dataset.kind === 'file') {
+                el = document.createElement('video'); el.controls = true; el.autoplay = true; el.playsInline = true; el.src = box.dataset.src;
+            } else {
+                el = document.createElement('iframe'); el.title = 'Product video';
+                el.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen'; el.allowFullscreen = true;
+                el.src = box.dataset.src + (box.dataset.src.indexOf('?') < 0 ? '?' : '&') + 'autoplay=1';
+            }
+            box.innerHTML = ''; box.appendChild(el); box.hidden = false;
+            document.querySelectorAll('.thumbs button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+        const sg = document.getElementById('size-guide'), open = document.querySelector('[data-size-guide]');
+        if (sg && open && sg.showModal) {
+            open.addEventListener('click', () => sg.showModal());
+            sg.querySelector('[data-close-size-guide]').addEventListener('click', () => sg.close());
+            sg.addEventListener('click', e => { if (e.target === sg) sg.close(); });
+        }
+    })();
 </script>
 {% if product.has_variants %}
 <script>

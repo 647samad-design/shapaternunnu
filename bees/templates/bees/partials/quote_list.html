@@ -1,0 +1,12 @@
+<nav class="q-tabs" aria-label="Quote status">{% for key, label, n in tabs %}<a href="?tab={{ key }}" {% if tab == key %}aria-current="page"{% endif %}>{{ label }}{% if n %} <span class="n">{{ n }}</span>{% endif %}</a>{% endfor %}</nav>
+<section class="panel">
+    {% for q in quotes %}{% include "bees/partials/quote_card.html" with viewer="seller" %}{% empty %}<p class="muted" style="padding:24px 0;text-align:center;">Nothing here.</p>{% endfor %}
+    {% include "bees/partials/pagination.html" %}
+</section>
+{% include "bees/partials/quote_css.html" %}
+<style>
+.q-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.q-tabs a { padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); text-decoration: none; color: var(--ink); font-weight: 700; font-size: .9rem; }
+.q-tabs a[aria-current] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.q-tabs .n { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: .78rem; text-align: center; }
+</style>

@@ -63,37 +63,141 @@ class ProductQuerySet(models.QuerySet):
             models.Q(flash_sale_ends__isnull=True) | models.Q(flash_sale_ends__gt=timezone.now()))
 
 
-class Product(models.Model):
-    CATEGORY_CHOICES = [
-        ("skincare", "Skin care"),
-        ("haircare", "Hair care"),
-        ("grocery", "Grocery"),
-        ("fashion", "Fashion"),
-        ("electronics", "Electronics"),
-        ("3d-printers", "3D printers"),
-        ("pasta-tools", "Pasta, Noodle & Pizza Tools"),
-        ("sim-devices", "SIM devices"),
-        ("screen-protector", "Screen protector"),
-        ("casserole-pot", "Casserole pot"),
-        ("table-lamp", "Table lamp"),
-        ("hoodies", "Hoodies & Sweatshirts"),
-        ("toy-boxes", "Toy boxes and organizers"),
-        ("sneakers", "Sneakers"),
-        ("education", "Education"),
-        ("dress-up-kits", "Dress-Up Kits"),
-        ("microphones", "Microphones"),
-        ("leashes", "Leashes and harnesses"),
-        ("donate-education", "Donate to education"),
-        ("coloring-drawing", "Coloring & Drawing"),
-        ("lotion-cream", "Lotion, Cream and Scrubs"),
-    ]
+class Category(models.Model):
+    """A shop category. Top-level categories show in the menu bar; a
+    subcategory's products also show on its parent's page. Managed in
+    Manage > Categories (the store can add, rename, nest and hide them)."""
+    slug = models.SlugField(max_length=30, unique=True, help_text="Used in the address: /category/<slug>/. Can't be changed later.")
+    name = models.CharField(max_length=60)
+    parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="children",
+                               help_text="Empty = top-level category (shown in the menu bar).")
+    position = models.PositiveSmallIntegerField(default=0, help_text="Lower numbers come first.")
+    image_url = models.CharField(max_length=500, blank=True, help_text="Optional picture for the category tile. Empty = a product photo.")
+    description = models.CharField(max_length=300, blank=True, help_text="Shown at the top of the category page and in Google results.")
+    is_active = models.BooleanField("Visible", default=True)
+    size_chart = models.TextField(blank=True, help_text="Optional size guide for products in this category, one row per line, cells separated by | (first line = headings). Example: Size | Chest (cm) | Length (cm)")
 
+    class Meta:
+        ordering = ["position", "name"]
+        verbose_name_plural = "categories"
+
+    def __str__(self):
+        return self.name
+
+
+class Page(models.Model):
+    """An information page the store writes itself (Manage > Pages):
+    About, Terms, Privacy, Sell with us (these replace the built-in text),
+    or any new page such as a shipping policy or FAQ (/pages/<slug>/).
+    Body: plain text; a line starting with "## " is a heading, a blank line
+    starts a new paragraph, lines starting with "- " are a bullet list."""
+    BUILT_IN = [("about", "About us"), ("terms", "Terms of Service"), ("privacy", "Privacy Policy"), ("sell", "Sell with us")]
+    slug = models.SlugField(max_length=60, unique=True)
+    title = models.CharField(max_length=120)
+    body = models.TextField()
+    meta_description = models.CharField(max_length=170, blank=True, help_text="Snippet in Google results. Empty = start of the page.")
+    is_published = models.BooleanField("Published", default=True)
+    show_in_footer = models.BooleanField(default=True, help_text="Link to it in the site footer.")
+    position = models.PositiveSmallIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position", "title"]
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def is_built_in(self):
+        return self.slug in dict(self.BUILT_IN)
+
+
+class HomeBanner(models.Model):
+    """A promotion card on the home page, under the big welcome banner
+    (Manage > Pages & banners). Up to three show at a time."""
+    title = models.CharField(max_length=80)
+    subtitle = models.CharField(max_length=160, blank=True)
+    image_url = models.CharField("Picture URL", max_length=500, blank=True, help_text="Wide picture, about 1200 x 600. Empty = a coloured card.")
+    link = models.CharField(max_length=300, help_text="Where it goes, e.g. /category/fashion/ or /search/?q=summer")
+    button_label = models.CharField(max_length=30, default="Shop now")
+    position = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField("Showing", default=True)
+    starts_at = models.DateTimeField(null=True, blank=True, help_text="Optional: show from this time.")
+    ends_at = models.DateTimeField(null=True, blank=True, help_text="Optional: hide after this time.")
+
+    class Meta:
+        ordering = ["position", "-id"]
+
+    def __str__(self):
+        return self.title
+
+
+class QuoteRequest(models.Model):
+    """Request for quotation (B2B): a buyer asks a seller for a price for a
+    larger quantity; the seller offers a unit price, the buyer accepts (it
+    goes to the cart at that price), counters or declines."""
+    STATUS = [("open", "Waiting for the seller"), ("offered", "Offer received"), ("accepted", "Accepted - in cart"),
+              ("ordered", "Ordered"), ("declined", "Declined"), ("cancelled", "Cancelled")]
+    product = models.ForeignKey("Product", on_delete=models.CASCADE, related_name="quotes")
+    variant = models.ForeignKey("ProductVariant", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    buyer = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="quotes")
+    seller_account = models.ForeignKey("SellerAccount", null=True, blank=True, on_delete=models.CASCADE, related_name="quotes",
+                                       help_text="Empty = the store's own product.")
+    quantity = models.PositiveIntegerField()
+    target_price = models.DecimalField("Buyer's target unit price", max_digits=10, decimal_places=2, null=True, blank=True)
+    company = models.CharField(max_length=120, blank=True)
+    message = models.TextField(blank=True)
+    offer_price = models.DecimalField("Offered unit price", max_digits=10, decimal_places=2, null=True, blank=True)
+    offer_note = models.TextField(blank=True)
+    offer_expires_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS, default="open", db_index=True)
+    history = models.JSONField(default=list, blank=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"Quote #{self.pk}: {self.quantity} x {self.product}"
+
+    @property
+    def offer_valid(self):
+        from django.utils import timezone
+        return self.offer_price is not None and (self.offer_expires_at is None or self.offer_expires_at > timezone.now())
+
+    @property
+    def offer_total(self):
+        return (self.offer_price or 0) * self.quantity
+
+    @property
+    def list_total(self):
+        base = self.variant.unit_price if self.variant_id and self.variant else self.product.price
+        return base * self.quantity
+
+    def log(self, who, text):
+        from django.utils import timezone
+        self.history = (self.history or []) + [{"who": who, "text": text[:600], "at": timezone.now().isoformat()}]
+
+
+class StoreFollow(models.Model):
+    """A shopper follows a seller's store to hear about new products."""
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="followed_stores")
+    seller_account = models.ForeignKey("SellerAccount", on_delete=models.CASCADE, related_name="followers")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "seller_account"], name="one_follow_per_store")]
+
+
+class Product(models.Model):
     name = models.CharField(max_length=255)
     image_url = models.CharField(max_length=500)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     old_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     discount_percent = models.PositiveIntegerField(default=0)
-    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default="grocery", db_index=True)
+    category = models.CharField(max_length=30, default="grocery", db_index=True,
+                                help_text="Category slug (see Manage > Categories).")
     description = models.TextField(blank=True)
     is_flash_sale = models.BooleanField(default=False, db_index=True)
     flash_sale_ends = models.DateTimeField(null=True, blank=True,
@@ -121,6 +225,20 @@ class Product(models.Model):
     width_cm = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
     height_cm = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
     approval_status = models.CharField(max_length=20, choices=APPROVAL_CHOICES, default="approved", db_index=True)
+    brand = models.CharField(max_length=80, blank=True, db_index=True, help_text="Brand or maker shown on the product and used in filters.")
+    specs = models.TextField("Specifications", blank=True, help_text="One per line as 'Name: value', e.g. 'Material: Cotton'. Shown as a table on the product page.")
+    video_url = models.CharField("Video", max_length=300, blank=True, help_text="YouTube or Vimeo link, or a direct .mp4 address. Shown in the product gallery.")
+    min_order_qty = models.PositiveSmallIntegerField("Minimum order", default=1, help_text="Fewest a customer can buy in one order.")
+    max_order_qty = models.PositiveSmallIntegerField("Maximum order", null=True, blank=True, help_text="Most a customer can buy in one order. Empty = no limit.")
+    quote_only = models.BooleanField("Request a quote", default=False, help_text="Business buyers can ask for a price for larger quantities (on top of normal buying).")
+    # Digital products: delivered as a download once the order is paid online.
+    is_digital = models.BooleanField("Digital download", default=False)
+    digital_file = models.FileField(upload_to="digital/%Y/%m/", storage=_private_storage, blank=True, null=True)
+    download_limit = models.PositiveSmallIntegerField(default=5, help_text="How many times a buyer can download the file.")
+    # EU General Product Safety Regulation (GPSR): who made it and who is responsible in the EU.
+    manufacturer = models.CharField(max_length=300, blank=True, help_text="Manufacturer's name, postal address and email or website.")
+    eu_responsible_person = models.CharField("EU responsible person", max_length=300, blank=True, help_text="Name, address and contact of the person in the EU responsible for this product (needed when the maker is outside the EU).")
+    safety_info = models.TextField("Safety information", blank=True, help_text="Warnings, age limits and safe-use instructions.")
     seo_title = models.CharField("SEO title", max_length=70, blank=True, help_text="Title in Google results (max 70). Empty = product name.")
     seo_description = models.CharField("SEO description", max_length=170, blank=True, help_text="Snippet in Google results (max 160). Empty = start of the description.")
     updated_at = models.DateTimeField(auto_now=True, null=True)
@@ -138,6 +256,52 @@ class Product(models.Model):
     # True when the product is sold in sizes/colours (see ProductVariant);
     # ``stock`` is then the total of all variants.
     has_variants = models.BooleanField(default=False)
+
+    def spec_rows(self):
+        """[(name, value)] from the specifications text."""
+        rows = []
+        for line in (self.specs or "").splitlines():
+            if ":" in line:
+                name, value = line.split(":", 1)
+                if name.strip() and value.strip():
+                    rows.append((name.strip()[:60], value.strip()[:300]))
+        return rows
+
+    def video(self):
+        """{"kind": "youtube"|"vimeo"|"file", "src": ...} or None."""
+        import re
+        url = (self.video_url or "").strip()
+        if not url.startswith("https://"):
+            return None
+        m = re.match(r"https://(?:www\.|m\.)?(?:youtube\.com/(?:watch\?(?:.*&)?v=|embed/|shorts/)|youtu\.be/)([A-Za-z0-9_-]{6,20})", url)
+        if m:
+            return {"kind": "youtube", "src": f"https://www.youtube-nocookie.com/embed/{m.group(1)}", "id": m.group(1)}
+        m = re.match(r"https://(?:www\.|player\.)?vimeo\.com/(?:video/)?(\d{5,12})", url)
+        if m:
+            return {"kind": "vimeo", "src": f"https://player.vimeo.com/video/{m.group(1)}"}
+        if re.search(r"\.(mp4|webm)(\?.*)?$", url, re.I):
+            return {"kind": "file", "src": url}
+        return None
+
+    def size_chart(self):
+        from . import categories
+        return categories.size_chart(self.category)
+
+    @property
+    def has_safety_info(self):
+        return bool(self.manufacturer or self.eu_responsible_person or self.safety_info)
+
+    def order_limits(self):
+        """(minimum, maximum or None) a customer may buy in one order."""
+        low = max(1, self.min_order_qty or 1)
+        high = self.max_order_qty or None
+        if high is not None and high < low:
+            high = low
+        return low, high
+
+    def get_category_display(self):
+        from . import categories
+        return categories.label(self.category)
 
     def sync_variants(self):
         """Keeps ``stock`` and ``has_variants`` in line with the variants."""
@@ -700,6 +864,17 @@ class OrderItem(models.Model):
     fulfillment_status = models.CharField(max_length=20, choices=FULFILLMENT_CHOICES, default="pending", db_index=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
     shipped_at = models.DateTimeField(null=True, blank=True)
+    downloads = models.PositiveSmallIntegerField(default=0, editable=False)
+    quote = models.ForeignKey("QuoteRequest", null=True, blank=True, on_delete=models.SET_NULL, related_name="order_items")
+
+    @property
+    def is_digital(self):
+        return bool(self.product_id and self.product and self.product.is_digital)
+
+    @property
+    def can_download(self):
+        return (self.is_digital and bool(self.product.digital_file) and self.order.payment_status == "paid"
+                and self.order.status != "cancelled" and self.downloads < self.product.download_limit)
 
     @property
     def subtotal(self):
@@ -721,6 +896,8 @@ class OrderItem(models.Model):
     @property
     def can_return(self):
         from django.utils import timezone
+        if self.is_digital:
+            return False  # downloads can't be sent back (buyers agree to this at checkout)
         deadline = self.return_deadline()
         return bool(deadline) and self.order.status != "cancelled" and timezone.now() <= deadline
 
@@ -1774,6 +1951,35 @@ def _merge_saved_cart(sender, request, user, **kwargs):
         cart.setdefault(key, qty)
     request.session["cart"] = cart
     persist(request, user=user)
+
+
+@receiver(post_save, sender=Order)
+def _deliver_downloads(sender, instance, **kwargs):
+    """Digital items are delivered the moment the order is paid: the buyer
+    can download them from My orders."""
+    fields = kwargs.get("update_fields")
+    if fields is not None and not ({"payment_status", "status"} & set(fields)):
+        return
+    if instance.payment_status == "paid" and instance.status != "cancelled":
+        from django.utils import timezone
+        now = timezone.now()
+        changed = OrderItem.objects.filter(order=instance, product__is_digital=True).exclude(
+            fulfillment_status="delivered").update(fulfillment_status="delivered", delivered_at=now, shipped_at=now)
+        if changed and not OrderItem.objects.filter(order=instance).exclude(fulfillment_status="delivered").exists():
+            Order.objects.filter(pk=instance.pk).update(status="delivered")
+
+
+@receiver([post_save, post_delete], sender=Page)
+@receiver([post_save, post_delete], sender=HomeBanner)
+def _content_changed(sender, **kwargs):
+    from django.core.cache import cache
+    cache.delete_many(["content:footer_pages", "content:banners"])
+
+
+@receiver([post_save, post_delete], sender=Category)
+def _categories_changed(sender, **kwargs):
+    from . import categories
+    categories.clear_cache()
 
 
 @receiver([post_save, post_delete], sender=ShippingZone)
