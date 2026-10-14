@@ -417,7 +417,7 @@ def products_bulk(request):
 
 @staff_required
 def product_form(request, pk=None):
-    from .views import (_product_fields_from_post, parse_variant_rows, apply_variant_rows, variant_rows_for_form,
+    from .views import (_product_fields_from_post, check_digital, parse_variant_rows, apply_variant_rows, variant_rows_for_form,
                         gallery_from_post, save_gallery)
     product = get_object_or_404(Product, pk=pk) if pk else None
     if request.method == "POST":
@@ -425,6 +425,7 @@ def product_form(request, pk=None):
             variant_rows = parse_variant_rows(request)
             gallery = gallery_from_post(request, product)
             fields = _product_fields_from_post(request)
+            check_digital(fields, product)
             if not fields["image_url"]:
                 if product:
                     fields["image_url"] = product.image_url

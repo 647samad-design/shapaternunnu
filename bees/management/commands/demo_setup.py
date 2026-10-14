@@ -54,6 +54,7 @@ class Command(BaseCommand):
             products = self._products(seller)
             if options["reset"] or not Order.objects.filter(user=users["shopper"]).exists():
                 self._orders(users["shopper"], products)
+            self._showcase(users, seller, products, reset=options["reset"])
         site = SiteSettings.load()
         site.setup_completed = True
         site.show_language_menu = True  # show off languages and currencies in the demo
@@ -116,6 +117,47 @@ class Command(BaseCommand):
             is_flash_sale=True, flash_sale_ends=timezone.now() + timedelta(days=2, hours=5), old_price=Decimal("32.00"))
         Product.objects.filter(pk=out[0].pk).update(bulk_min_qty=2, bulk_percent=10)
         return out
+
+    def _showcase(self, users, seller, products, reset=False):
+        """Brands, specifications, EU safety details, bulk quotes, a home
+        banner and a store page, so every feature has something to show."""
+        from bees.models import HomeBanner, Page, QuoteRequest
+        details = [
+            ("Demo Studio", "Material: Stoneware\nCapacity: 350 ml\nDishwasher safe: Yes\nMade in: Portugal", True),
+            ("Demo Studio", "Material: 100% linen\nSize: 38 x 42 cm\nPocket: Inside zip pocket", False),
+            ("Lumen Home", "Wax: 100% soy\nBurn time: About 40 hours\nScent: Cedar & amber", True),
+            ("Little Artists", "Colours: 12\nBrushes: 2\nAge: 4+", False),
+            ("Demo Studio", "Material: Merino wool\nSize: One size\nCare: Hand wash cold", False),
+        ]
+        for product, (brand, specs, quotes) in zip(products, details):
+            Product.objects.filter(pk=product.pk).update(
+                brand=brand, specs=specs, quote_only=quotes,
+                manufacturer=f"{STORE_NAME}, Rua das Flores 12, 1200-195 Lisbon, Portugal - hello@demo.invalid",
+                safety_info="Keep away from children under 3." if "Kit" in product.name else "")
+        if not HomeBanner.objects.exists():
+            HomeBanner.objects.create(title="New from independent makers", subtitle="Handmade mugs, candles and linen - straight from the studio.",
+                                      link=f"/store/{seller.display_name}/", button_label="Visit the studio", position=0)
+            HomeBanner.objects.create(title="Buying for your business?", subtitle="Request a quote on bulk orders and get a better price.",
+                                      link="/search/?q=mug", button_label="See bulk deals", position=1)
+        Page.objects.get_or_create(slug="shipping-policy", defaults={
+            "title": "Shipping policy", "show_in_footer": True,
+            "body": "## Delivery times\nMost orders arrive in 3-7 working days. You'll get a tracking link by email as soon as your parcel ships.\n\n"
+                    "## Costs\n- Free shipping on orders over the free-shipping amount\n- Otherwise a flat fee, shown at checkout\n\n"
+                    "## International orders\nImport duties may apply depending on your country."})
+        if reset or not QuoteRequest.objects.filter(buyer=users["shopper"]).exists():
+            QuoteRequest.objects.filter(buyer=users["shopper"]).delete()
+            mug, candle = products[0], products[2]
+            open_q = QuoteRequest(product=candle, buyer=users["shopper"], seller_account=seller, quantity=120,
+                                  target_price=Decimal("15.00"), company="Hotel Aurora", message="Gift candles for our guests, delivery in March.")
+            open_q.log("buyer", "Asked for 120 pcs at 15.00 each: Gift candles for our guests, delivery in March.")
+            open_q.save()
+            offered = QuoteRequest(product=mug, buyer=users["shopper"], seller_account=seller, quantity=60, target_price=Decimal("13.00"),
+                                   company="Café Lumen", status="offered", offer_price=Decimal("14.50"),
+                                   offer_note="Includes your logo glazed on the side. Ships in 3 weeks.",
+                                   offer_expires_at=timezone.now() + timedelta(days=6))
+            offered.log("buyer", "Asked for 60 pcs at 13.00 each")
+            offered.log("seller", "Offered 14.50 each, valid 6 days - Includes your logo glazed on the side. Ships in 3 weeks.")
+            offered.save()
 
     def _orders(self, shopper, products):
         Order.objects.filter(user=shopper).delete()

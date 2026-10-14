@@ -1,0 +1,11 @@
+{% extends "bees/emails/_base_email.html" %}
+{% load bees_extras %}
+{% block email_body %}{% site_brand as b %}
+    <h1 style="margin:0 0 8px;font-size:22px;">Update on your quote request</h1>
+    <p style="margin:0 0 16px;color:#56606B;">{{ text }}</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;border:1px solid #DDE2E6;border-radius:8px;">
+        <tr><td style="padding:12px 14px;"><strong data-no-translate>{{ quote.product.name }}</strong><br><span style="color:#56606B;font-size:14px;">{{ quote.quantity }} pcs{% if quote.offer_price %} · offer {{ quote.offer_price|money }} each ({{ quote.offer_total|money }} total){% endif %}</span>
+        {% if quote.offer_note %}<p style="margin:8px 0 0;color:#56606B;font-size:14px;">“{{ quote.offer_note }}”</p>{% endif %}</td></tr>
+    </table>
+    <a href="{{ '/account/quotes/'|abs_url }}" style="display:inline-block;background:{{ b.primary_color }};color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:8px;font-weight:bold;">See the quote</a>
+{% endblock %}

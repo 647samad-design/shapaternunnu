@@ -41,7 +41,10 @@
                     {% if seller_account.country %}<span>Ships from <span data-no-translate>{{ seller_account.city|default:"" }}{% if seller_account.city %}, {% endif %}{{ seller_account.country }}</span></span>{% endif %}
                     {% if seller_account %}<span>Selling since {{ seller_account.created_at|date:"Y" }}</span>{% endif %}
                 </div>
-                {% if seller_account and seller_account.status == "approved" %}<a class="btn btn-secondary btn-sm" style="margin-top:12px;" href="{% url 'message_store' seller_account.id %}" rel="nofollow">💬 {{ t.message_seller }}</a>{% endif %}
+                {% if seller_account and seller_account.status == "approved" %}<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;"><a class="btn btn-secondary btn-sm" href="{% url 'message_store' seller_account.id %}" rel="nofollow">💬 {{ t.message_seller }}</a>
+                {% if user.is_authenticated %}{% if seller_account.user_id != user.id %}<form method="post" action="{% url 'follow_store' seller_account.id %}" style="margin:0;">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button type="submit" class="btn {% if stats.following %}btn-ghost{% else %}btn-primary{% endif %} btn-sm" aria-pressed="{% if stats.following %}true{% else %}false{% endif %}">{% if stats.following %}✓ Following{% else %}+ Follow store{% endif %}</button></form>{% endif %}
+                {% else %}<a class="btn btn-primary btn-sm" href="{% url 'login' %}?next={{ request.path|urlencode }}">+ Follow store</a>{% endif %}
+                {% if stats.followers %}<span class="muted small">{{ stats.followers }} follower{{ stats.followers|pluralize }}</span>{% endif %}</div>{% endif %}
             </div>
         </div>
     </section>

@@ -60,3 +60,5 @@ The whole test suite now also runs on **PostgreSQL 16** and the full **Docker** 
 | Database | A Postgres server in the same Docker network was forced to use SSL and refused the connection | SSL is decided by host (on for remote databases, off for local/Docker), or set with `DATABASE_SSL` |
 
 New in this round: REST API v1 with hashed tokens, two-step sign-in support, rate limits and OpenAPI docs; Docker setup (web, scheduler, PostgreSQL, Valkey/Redis); developer guide, handover and licence documents. Tests: 422 passing on SQLite and PostgreSQL.
+
+Competitor-parity round (compared with Dokan, CS-Cart Multi-Vendor, Yo!Kart and Sharetribe): admin-managed categories with subcategories, editable pages and home banners, brand/size/colour filters, product specifications, video, size guides, EU GPSR safety fields, minimum/maximum order quantities, digital downloads, request-a-quote (RFQ) and store following. Tests: 443 passing.

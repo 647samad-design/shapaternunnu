@@ -29,14 +29,40 @@
             </select>
         </div>
         {% endif %}
+        {% if f_brands %}
+        <fieldset class="field fchips"><legend class="label">Brand</legend>
+            <div class="fchip-list">{% for b in f_brands %}<label class="fchip"><input type="checkbox" name="brand" value="{{ b }}" {% if b in f_brand %}checked{% endif %}><span>{{ b }}</span></label>{% endfor %}</div>
+        </fieldset>
+        {% endif %}
+        {% if f_sizes %}
+        <fieldset class="field fchips"><legend class="label">Size</legend>
+            <div class="fchip-list">{% for v in f_sizes %}<label class="fchip"><input type="checkbox" name="size" value="{{ v }}" {% if v in f_size %}checked{% endif %}><span>{{ v }}</span></label>{% endfor %}</div>
+        </fieldset>
+        {% endif %}
+        {% if f_colors %}
+        <fieldset class="field fchips"><legend class="label">Colour</legend>
+            <div class="fchip-list">{% for v in f_colors %}<label class="fchip"><input type="checkbox" name="color" value="{{ v }}" {% if v in f_color %}checked{% endif %}><span>{{ v }}</span></label>{% endfor %}</div>
+        </fieldset>
+        {% endif %}
         <div class="field">
             <label class="check"><input type="checkbox" name="in_stock" value="1" {% if f_in_stock %}checked{% endif %}> In stock only</label>
+            {% if f_has_digital %}<label class="check"><input type="checkbox" name="digital" value="1" {% if f_digital %}checked{% endif %}> Digital downloads</label>{% endif %}
         </div>
         <div class="field">
             <button type="submit" class="btn btn-primary btn-block">Show results</button>
-            {% if f_min_price or f_max_price or f_min_rating or f_seller or f_in_stock %}
+            {% if f_min_price or f_max_price or f_min_rating or f_seller or f_in_stock or f_brand or f_size or f_color or f_digital %}
             <a href="?{% if query %}q={{ query|urlencode }}{% endif %}" class="btn btn-ghost btn-block">Clear filters</a>
             {% endif %}
         </div>
     </form>
 </aside>
+<style>
+    .fchips { border: 0; padding: 0; margin: 0; min-width: 0; }
+    .fchip-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; max-height: 168px; overflow-y: auto; scrollbar-width: none; }
+    .fchip-list::-webkit-scrollbar { display: none; }
+    .fchip { position: relative; }
+    .fchip input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+    .fchip span { display: inline-block; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font-size: .86rem; font-weight: 600; }
+    .fchip input:checked + span { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+    .fchip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>

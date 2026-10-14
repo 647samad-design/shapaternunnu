@@ -50,7 +50,7 @@ Authorization: Bearer lm_7Qe...
 | Method | Path | What it does |
 |---|---|---|
 | GET | `/api/v1/` | Index with links to everything |
-| GET | `/categories/` | Categories with the number of products for sale |
+| GET | `/categories/` | Categories (with `parent` for subcategories) and the number of products for sale. `?category=` on `/products/` includes subcategories |
 | GET | `/products/` | Products for sale. Filters below |
 | GET | `/products/{id}/` | One product: photos, sizes/colours, buying guide, seller |
 | GET | `/products/{id}/reviews/` | Reviews, newest first |

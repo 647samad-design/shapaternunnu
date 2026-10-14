@@ -1,7 +1,8 @@
 """Session cart helpers.
 
 The cart is stored in the session as {key: quantity}. A key is the product
-id ("12"), or product and variant id for sizes/colours ("12-34").
+id ("12"), or product and variant id for sizes/colours ("12-34"), or an
+accepted quote ("q7": that quantity at the agreed price).
 """
 from decimal import Decimal
 
@@ -28,7 +29,10 @@ def lines(cart):
     from .models import Product, ProductVariant
 
     parsed = {}
+    quote_rows = _quote_lines(cart)
     for key, qty in (cart or {}).items():
+        if str(key).startswith("q"):
+            continue
         ids = parse_key(key)
         try:
             qty = int(qty)
@@ -37,7 +41,7 @@ def lines(cart):
         if ids and qty > 0:
             parsed[key] = (ids, qty)
     if not parsed:
-        return []
+        return quote_rows
     products = Product.objects.live().select_related("seller_account").in_bulk(
         {ids[0] for ids, _ in parsed.values()})
     variant_ids = {ids[1] for ids, _ in parsed.values() if ids[1]}
@@ -62,6 +66,29 @@ def lines(cart):
             "unit_price": unit, "subtotal": unit * qty, "base_price": base, "bundle": unit != base,
             "label": variant.label if variant else "",
             "stock": variant.stock if variant else product.stock,
+        })
+    return rows + quote_rows
+
+
+def _quote_lines(cart):
+    """Cart rows for accepted quotes: fixed quantity at the agreed price."""
+    from .models import Product, QuoteRequest
+    ids = [int(k[1:]) for k in (cart or {}) if str(k).startswith("q") and str(k)[1:].isdigit()]
+    if not ids:
+        return []
+    live = set(Product.objects.live().filter(quotes__id__in=ids).values_list("id", flat=True))
+    rows = []
+    for q in QuoteRequest.objects.filter(id__in=ids, status="accepted").select_related("product__seller_account", "variant"):
+        if q.product_id not in live or not q.offer_valid:
+            continue
+        variant = q.variant
+        if variant is not None:
+            variant.product = q.product
+        rows.append({
+            "key": f"q{q.id}", "product": q.product, "variant": variant, "qty": q.quantity, "quote": q,
+            "unit_price": q.offer_price, "subtotal": q.offer_price * q.quantity, "base_price": q.offer_price, "bundle": False,
+            "label": (variant.label + " · " if variant else "") + f"Quote #{q.id}",
+            "stock": variant.stock if variant else q.product.stock,
         })
     return rows
 

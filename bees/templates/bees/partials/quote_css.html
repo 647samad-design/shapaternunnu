@@ -1,0 +1,27 @@
+<style>
+.qcard .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .8rem; font-weight: 700; white-space: nowrap; background: var(--surface-2); color: var(--ink); }
+.qcard .pill.ok { background: color-mix(in srgb, var(--ok) 15%, var(--surface)); color: var(--ok); }
+.qcard .pill.info { background: color-mix(in srgb, var(--brand) 12%, var(--surface)); color: var(--brand); }
+.qcard .qc-hist .pill { font-size: .72rem; padding: 1px 8px; text-transform: capitalize; }
+.qcard { padding: 16px 0; border-top: 1px solid var(--line); }
+.qcard:first-child { border-top: 0; }
+.qc-top { display: flex; gap: 12px; align-items: center; }
+.qc-top img { width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-sm); flex: none; }
+.qc-main { flex: 1; min-width: 0; }
+.qc-main a { color: inherit; text-decoration: none; }
+.qc-nums { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.qc-nums > div { display: grid; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--surface-2); min-width: 130px; }
+.qc-nums span { font-size: .78rem; color: var(--muted); font-weight: 700; }
+.qc-nums small { font-weight: 600; color: var(--muted); }
+.qc-nums .offer { background: color-mix(in srgb, var(--ok) 12%, var(--surface)); }
+.qc-hist { margin-top: 10px; }
+.qc-hist summary { cursor: pointer; color: var(--muted); }
+.qc-hist ol { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; font-size: .92rem; }
+.qc-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.qc-actions form { margin: 0; }
+.qc-counter > summary { list-style: none; }
+.qc-counter > summary::-webkit-details-marker { display: none; }
+.qc-counter[open] { flex-basis: 100%; order: 3; }
+.qc-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 12px; }
+.qc-wide { grid-column: 1 / -1; }
+</style>

@@ -147,6 +147,19 @@ def _apply_filters(qs, request):
             pass
     if seller:
         qs = qs.filter(seller_name=seller)
+    brands = [b for b in request.GET.getlist("brand") if b][:20]
+    if brands:
+        qs = qs.filter(brand__in=brands)
+    for kind in ("color", "size"):
+        picked = [v for v in request.GET.getlist(kind) if v][:20]
+        if picked:
+            q = Q()
+            for value in picked:
+                q |= Q(**{f"{kind}__iexact": value})
+            # A subquery, not a join: keeps the rating counts right.
+            qs = qs.filter(id__in=ProductVariant.objects.filter(q, stock__gt=0).values("product_id"))
+    if request.GET.get("digital"):
+        qs = qs.filter(is_digital=True)
     if in_stock:
         qs = qs.filter(stock__gt=0)
     if min_rating:
@@ -157,10 +170,35 @@ def _apply_filters(qs, request):
     return qs
 
 
+SIZE_ORDER = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "2XL", "XXXL", "3XL", "4XL"]
+
+
+def _sort_sizes(sizes):
+    def key(size):
+        up = size.upper()
+        if up in SIZE_ORDER:
+            return (0, SIZE_ORDER.index(up), "")
+        try:
+            return (1, float(size.replace(",", ".")), "")
+        except ValueError:
+            return (2, 0, up)
+    return sorted(sizes, key=key)
+
+
 def _filter_context(request, base_qs):
     """Sellers list for the filter sidebar, and the current filter values
     so the form and pagination links can stay populated across requests."""
+    ids = base_qs.values("id")
+    brands = list(base_qs.exclude(brand="").order_by("brand").values_list("brand", flat=True).distinct()[:40])
+    colors = sorted({c.strip().capitalize() for c in ProductVariant.objects.filter(product_id__in=ids, stock__gt=0)
+                     .exclude(color="").values_list("color", flat=True).distinct()[:200]})[:30]
+    sizes = _sort_sizes({s.strip() for s in ProductVariant.objects.filter(product_id__in=ids, stock__gt=0)
+                         .exclude(size="").values_list("size", flat=True).distinct()[:200]})[:30]
     return {
+        "f_brands": brands, "f_colors": colors, "f_sizes": sizes,
+        "f_brand": request.GET.getlist("brand"), "f_color": request.GET.getlist("color"), "f_size": request.GET.getlist("size"),
+        "f_digital": request.GET.get("digital", ""),
+        "f_has_digital": base_qs.filter(is_digital=True).exists(),
         "sellers": base_qs.order_by("seller_name").values_list("seller_name", flat=True).distinct(),
         "f_min_price": request.GET.get("min_price", ""),
         "f_max_price": request.GET.get("max_price", ""),
@@ -347,11 +385,17 @@ def product_detail(request, pk):
     recently_viewed = with_ratings(Product.objects.live().filter(id__in=recent_ids[1:7]))
 
     from . import seo
+    from . import categories as cats_mod
+    cat_row = cats_mod.get(product.category)
+    category_path = [(product.category, product.get_category_display())]
+    if cat_row and cat_row["parent"]:
+        category_path.insert(0, (cat_row["parent"], cats_mod.label(cat_row["parent"])))
     return render(request, "bees/product_detail.html", {
         "product_ld": seo.product(request, product, reviews),
-        "breadcrumb_ld": seo.breadcrumbs(request, [(_brand().site_name, reverse("home")),
-                                                   (product.get_category_display(), reverse("category_products", args=[product.category])),
-                                                   (product.name, reverse("product_detail", args=[product.pk]))]),
+        "breadcrumb_ld": seo.breadcrumbs(request, [(_brand().site_name, reverse("home"))]
+                                         + [(name, reverse("category_products", args=[slug])) for slug, name in category_path]
+                                         + [(product.name, reverse("product_detail", args=[product.pk]))]),
+        "category_path": category_path,
         "product": product,
         "reviews": reviews,
         "in_wishlist": in_wishlist,
@@ -365,6 +409,11 @@ def product_detail(request, pk):
         "ship_table": {**ship_table, "default_days": _brand().delivery_days},
         "ship_country": ship_country,
         "seller_reply": _seller_reply(product),
+        "following": bool(request.user.is_authenticated and product.seller_account_id and
+                          product.seller_account.followers.filter(user=request.user).exists()),
+        "size_chart": product.size_chart(),
+        "video": product.video(),
+        "order_limits": product.order_limits(),
         "ai_enabled": bool(settings.AI_API_KEY),
         "review_summary": ai_tools.review_summary(product),
         "related_products": related_products,
@@ -579,6 +628,8 @@ def store_page(request, seller_name):
         stats = Review.objects.filter(product__seller_account=seller_account).aggregate(avg=Avg("rating"), n=Count("id"))
         stats["sold"] = OrderItem.objects.filter(seller_account=seller_account).counted().aggregate(n=Sum("quantity"))["n"] or 0
         stats["store_reviews"] = seller_account.seller_reviews.select_related("user")[:3]
+        stats["followers"] = seller_account.followers.count()
+        stats["following"] = request.user.is_authenticated and seller_account.followers.filter(user=request.user).exists()
     return render(request, "bees/store.html", {
         "seller_name": seller_name,
         "products": page_obj,
@@ -1064,6 +1115,15 @@ def add_to_cart(request, pk):
     qty = max(1, min(qty, 99))
     new_qty = cart.get(key, 0) + qty
     warning = None
+    low, high = product.order_limits()
+    if low > stock:
+        return fail(f"{name} is sold in quantities of at least {low}, and only {stock} are left.")
+    if new_qty < low:
+        new_qty = low
+        warning = f"{name} has a minimum order of {low}, so {low} were added."
+    if high and new_qty > high:
+        new_qty = high
+        warning = f"You can buy at most {high} of {name} per order."
     if new_qty > stock:
         new_qty = stock
         warning = f"Only {stock} of {name} left in stock."
@@ -1097,16 +1157,26 @@ def update_cart_item(request, key):
     cart = request.session.get("cart", {})
     action = request.POST.get("action")
     warning = None
-    if key in cart:
+    if key in cart and key.startswith("q") and action in ("increase", "decrease"):
+        warning = "The quantity of a quote was agreed with the seller. Remove it, or ask for a new quote."
+    elif key in cart:
         if action == "increase":
             row = next(iter(lines({key: cart[key]})), None)
+            high = row["product"].order_limits()[1] if row else None
             if row and cart[key] >= row["stock"]:
                 warning = f"Only {row['stock']} of {row['product'].name} available."
+            elif row and high and cart[key] >= high:
+                warning = f"You can buy at most {high} of {row['product'].name} per order."
             elif row:
                 cart[key] += 1
         elif action == "decrease":
+            row = next(iter(lines({key: cart[key]})), None)
+            low = row["product"].order_limits()[0] if row else 1
             cart[key] -= 1
-            if cart[key] <= 0:
+            if cart[key] < low and cart[key] > 0:
+                del cart[key]
+                warning = f"{row['product'].name} has a minimum order of {low}, so it was removed from your cart."
+            elif cart[key] <= 0:
                 del cart[key]
         elif action == "remove":
             del cart[key]
@@ -1213,7 +1283,7 @@ def _payment_methods():
     return methods
 
 
-def _price_cart(subtotal, coupon=None, country=None, items=1, lines=None):
+def _price_cart(subtotal, coupon=None, country=None, items=1, lines=None, digital_only=False):
     """Returns the full price breakdown for a cart subtotal. Shipping
     depends on the destination country; ``shipping`` is None while the
     country isn't known, and ``ships`` is False if we don't deliver there."""
@@ -1227,7 +1297,10 @@ def _price_cart(subtotal, coupon=None, country=None, items=1, lines=None):
     discounted = max(subtotal - discount, Decimal("0"))
     # Free-shipping thresholds are checked against what the customer
     # actually pays for the goods (after the coupon).
-    quote = shipping_rules.quote(country, discounted, items) if subtotal else {"ships": True, "fee": Decimal("0"), "zone": None}
+    if digital_only or not subtotal:
+        quote = {"ships": True, "fee": Decimal("0"), "zone": None}  # downloads don't ship
+    else:
+        quote = shipping_rules.quote(country, discounted, items)
     shipping = quote["fee"]
     from . import taxes
     tax = taxes.compute(discounted, shipping or Decimal("0"), country)
@@ -1244,6 +1317,11 @@ def _price_cart(subtotal, coupon=None, country=None, items=1, lines=None):
         "total": discounted + (shipping or Decimal("0")) + (Decimal("0") if tax["included"] else tax["amount"]),
         "tax_percent": tax["rate"] if tax["rate"] is not None else brand.tax_percent,
     }
+
+
+def _all_digital(products):
+    products = list(products)
+    return bool(products) and all(getattr(p, "is_digital", False) for p in products)
 
 
 def _cart_lines(items):
@@ -1292,9 +1370,11 @@ def checkout_view(request):
 
     coupon, coupon_error = _session_coupon(request, subtotal, items)
     default_address = Address.objects.filter(user=request.user, is_default=True).first() if request.user.is_authenticated else None
-    pricing = _price_cart(subtotal, coupon, default_address.country if default_address else None, count, lines=_cart_lines(items))
+    pricing = _price_cart(subtotal, coupon, default_address.country if default_address else None, count, lines=_cart_lines(items), digital_only=_all_digital(i["product"] for i in items))
     methods = _payment_methods()
     cod_note = ""
+    if any(i["product"].is_digital for i in items):
+        methods = [m for m in methods if m != "cod"]  # downloads are paid online
     if "cod" in methods:
         from . import cod
         cod_note = cod.problem(pricing["total"], request.user.email if request.user.is_authenticated else "",
@@ -1315,7 +1395,7 @@ def checkout_view(request):
         data = {f: request.POST.get(f, "").strip() for f in CHECKOUT_REQUIRED + ("state",)}
         data["country"] = data["country"].upper()[:2]
         missing = [f.replace("_", " ") for f in CHECKOUT_REQUIRED if not data[f]]
-        pricing = _price_cart(subtotal, coupon, data["country"], count, lines=_cart_lines(items))
+        pricing = _price_cart(subtotal, coupon, data["country"], count, lines=_cart_lines(items), digital_only=_all_digital(i["product"] for i in items))
         try:
             if missing:
                 raise ValidationError(f"Please fill in: {', '.join(missing)}.")
@@ -1431,6 +1511,8 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
         "shipping": shipping_rules.table(), "card": "card" in methods or "paypal" in methods, "items": sum(i["qty"] for i in items),
         "taxes": taxes_table(),
     }
+    if _all_digital(i["product"] for i in items):
+        checkout_data["shipping"] = {"flat": {"fee": "0", "free_over": None}}  # downloads don't ship
     sellers = []
     for row in items:
         sa = row["product"].seller_account
@@ -1439,6 +1521,7 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
     from .currency import charge_currency_for
     charge_in = charge_currency_for("card") or charge_currency_for("paypal")
     return {
+        "has_digital": any(i["product"].is_digital for i in items),
         "charge_in": charge_in,
         "charge_paypal_ok": bool(charge_currency_for("paypal")),
         "checkout_sellers": sellers,
@@ -1476,10 +1559,27 @@ def _place_order(request, items, data, payment_method, use_credit=False):
 
         subtotal = Decimal("0")
         lines = []
+        line_quotes = []
         for item in items:
             product = locked.get(item["product"].id)
             if not product or not product.is_live:
                 raise CheckoutError(f"{item['product'].name} is no longer available.")
+            quote = None
+            if item.get("quote"):
+                from .models import QuoteRequest
+                quote = QuoteRequest.objects.select_for_update().filter(pk=item["quote"].pk).first()
+                if (quote is None or quote.status != "accepted" or not quote.offer_valid or quote.product_id != product.id
+                        or not request.user.is_authenticated or quote.buyer_id != request.user.id):
+                    raise CheckoutError(f"The quote for {product.name} is no longer valid. Please remove it from your cart.")
+            low, high = product.order_limits()
+            if quote is not None:
+                low, high = 1, None  # the quantity was agreed with the seller
+            if item["qty"] < low:
+                raise CheckoutError(f"{product.name} has a minimum order of {low}. Please update your cart.")
+            if high and item["qty"] > high:
+                raise CheckoutError(f"You can buy at most {high} of {product.name} per order. Please update your cart.")
+            if product.is_digital and payment_method == "cod":
+                raise CheckoutError(f"{product.name} is a digital download, so it has to be paid online.")
             variant = None
             if item.get("variant"):
                 variant = locked_variants.get(item["variant"].id)
@@ -1494,9 +1594,10 @@ def _place_order(request, items, data, payment_method, use_credit=False):
                 if item["qty"] > product.stock:
                     raise CheckoutError(f"Sorry, only {product.stock} of {product.name} left in stock. Please update your cart.")
                 price = product.price
-            price = product.bulk_unit_price(price, item["qty"])
+            price = quote.offer_price if quote is not None else product.bulk_unit_price(price, item["qty"])
             subtotal += price * item["qty"]
             lines.append((product, variant, price, item["qty"]))
+            line_quotes.append(quote)
 
         coupon = None
         code = request.session.get("coupon_code", "")
@@ -1512,9 +1613,9 @@ def _place_order(request, items, data, payment_method, use_credit=False):
             # pays for it); the order itself has no store discount.
             lines = [(p, v, coupon.unit_after(price) if coupon.applies_to(p) else price, qty) for p, v, price, qty in lines]
             subtotal = sum((price * qty for _p, _v, price, qty in lines), Decimal("0"))
-            pricing = _price_cart(subtotal, None, data["country"], sum(qty for _p, _v, _price, qty in lines))
+            pricing = _price_cart(subtotal, None, data["country"], sum(qty for _p, _v, _price, qty in lines), digital_only=_all_digital(p for p, _v, _price, _q in lines))
         else:
-            pricing = _price_cart(subtotal, coupon, data["country"], sum(qty for _p, _v, _price, qty in lines))
+            pricing = _price_cart(subtotal, coupon, data["country"], sum(qty for _p, _v, _price, qty in lines), digital_only=_all_digital(p for p, _v, _price, _q in lines))
         if not pricing["ships"]:
             raise CheckoutError("Sorry, we don't deliver to that country yet.")
         is_card = payment_method in ("card", "paypal")  # paid online before it ships
@@ -1552,9 +1653,13 @@ def _place_order(request, items, data, payment_method, use_credit=False):
             cod_confirmed=is_card or (not _cod_phone_check() and (not signed_in or _email_verified(request.user))),
         )
         seller_cache = {}
-        for product, variant, price, qty in lines:
+        for (product, variant, price, qty), quote in zip(lines, line_quotes):
             name = f"{product.name} ({variant.label})" if variant else product.name
-            item = OrderItem(order=order, product=product, variant=variant, product_name=name[:255], price=price, quantity=qty)
+            item = OrderItem(order=order, product=product, variant=variant, product_name=name[:255], price=price, quantity=qty, quote=quote)
+            if quote is not None:
+                quote.status = "ordered"
+                quote.log("system", f"Ordered in order #{order.id}")
+                quote.save(update_fields=["status", "history", "updated_at"])
             seller = None
             if product.seller_account_id:
                 if product.seller_account_id not in seller_cache:
@@ -1582,7 +1687,11 @@ def _restore_cart_from_order(request, order):
     from .cart import make_key
     cart = request.session.get("cart", {})
     for item in order.items.all():
-        if item.product_id:
+        if item.quote_id:
+            from .models import QuoteRequest
+            QuoteRequest.objects.filter(pk=item.quote_id, status="ordered").update(status="accepted")
+            cart[f"q{item.quote_id}"] = item.quantity
+        elif item.product_id:
             key = make_key(item.product_id, item.variant_id)
             cart[key] = cart.get(key, 0) + item.quantity
     request.session["cart"] = cart
@@ -2391,7 +2500,58 @@ def _product_fields_from_post(request):
         "seo_title": request.POST.get("seo_title", "").strip()[:70],
         "seo_description": " ".join(request.POST.get("seo_description", "").split())[:170],
         **_guide_fields_from_post(request),
+        **_extra_product_fields(request),
     }
+
+
+def check_digital(fields, product=None):
+    """A digital product needs its file."""
+    if fields.get("is_digital"):
+        has_file = fields["digital_file"] if "digital_file" in fields else (product.digital_file if product else None)
+        if not has_file:
+            raise ValidationError("Digital download: choose the file buyers will download.")
+
+
+DIGITAL_TYPES = (".pdf", ".zip", ".epub", ".mp3", ".mp4", ".m4a", ".wav", ".png", ".jpg", ".jpeg", ".svg", ".psd",
+                 ".ai", ".docx", ".xlsx", ".pptx", ".txt", ".csv", ".stl", ".obj", ".3mf", ".ttf", ".otf")
+DIGITAL_MAX_MB = 200
+
+
+def _extra_product_fields(request):
+    """Brand, specifications, video, order limits, quotes, digital download
+    and EU product-safety details (seller and store product forms)."""
+    from .models import Product
+    video = request.POST.get("video_url", "").strip()[:300]
+    if video and Product(video_url=video).video() is None:
+        raise ValidationError("Video: paste a YouTube or Vimeo link, or an https:// address ending in .mp4.")
+    low = _parse_int(request.POST.get("min_order_qty") or "1", "Minimum order", minimum=1, maximum=10000)
+    high = _parse_int(request.POST.get("max_order_qty"), "Maximum order", minimum=1, maximum=10000, default=None)
+    if high is not None and high < low:
+        raise ValidationError("Maximum order can't be lower than the minimum order.")
+    specs = "\n".join(line.strip()[:360] for line in request.POST.get("specs", "").splitlines() if line.strip())[:4000]
+    if specs and not all(":" in line for line in specs.splitlines()):
+        raise ValidationError("Specifications: write one per line as 'Name: value', e.g. 'Material: Cotton'.")
+    fields = {
+        "brand": " ".join(request.POST.get("brand", "").split())[:80],
+        "specs": specs, "video_url": video, "min_order_qty": low, "max_order_qty": high,
+        "quote_only": bool(request.POST.get("quote_only")),
+        "manufacturer": " ".join(request.POST.get("manufacturer", "").split())[:300],
+        "eu_responsible_person": " ".join(request.POST.get("eu_responsible_person", "").split())[:300],
+        "safety_info": request.POST.get("safety_info", "").strip()[:3000],
+        "is_digital": bool(request.POST.get("is_digital")),
+        "download_limit": _parse_int(request.POST.get("download_limit") or "5", "Download limit", minimum=1, maximum=100),
+    }
+    upload = request.FILES.get("digital_file")
+    if upload:
+        name = upload.name.lower()
+        if not name.endswith(DIGITAL_TYPES):
+            raise ValidationError("Digital file: use PDF, ZIP, EPUB, MP3, MP4, images, Office files, fonts or 3D-print files.")
+        if upload.size > DIGITAL_MAX_MB * 1024 * 1024:
+            raise ValidationError(f"Digital file: the largest allowed is {DIGITAL_MAX_MB} MB.")
+        fields["digital_file"] = upload
+    elif request.POST.get("remove_digital_file"):
+        fields["digital_file"] = None
+    return fields
 
 
 def _guide_fields_from_post(request):
@@ -2510,6 +2670,7 @@ def seller_add_product(request):
             variant_rows = parse_variant_rows(request)
             gallery = gallery_from_post(request)
             fields = _product_fields_from_post(request)
+            check_digital(fields)
             if not fields["image_url"]:
                 raise ValidationError("Please add a product image (upload a file or paste an https:// link).")
         except ValidationError as exc:
@@ -2536,7 +2697,8 @@ def seller_add_product(request):
 
 # Changing any of these sends the product back for moderation; price and
 # stock updates go live immediately.
-REVIEWED_FIELDS = ("name", "category", "image_url", "description", "guide_uses", "guide_pros", "guide_cons")
+REVIEWED_FIELDS = ("name", "category", "image_url", "description", "guide_uses", "guide_pros", "guide_cons",
+                   "brand", "specs", "video_url", "is_digital")
 
 
 @login_required
@@ -2548,6 +2710,7 @@ def seller_edit_product(request, pk):
             variant_rows = parse_variant_rows(request)
             gallery = gallery_from_post(request, product)
             fields = _product_fields_from_post(request)
+            check_digital(fields, product)
         except ValidationError as exc:
             messages.error(request, " ".join(exc.messages))
             return _seller_form(request, seller, role, {

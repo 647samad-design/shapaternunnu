@@ -40,7 +40,7 @@ def create_categories(apps, schema_editor):
                 "name": names[kid], "parent": by_slug[slug], "position": kpos})
     for slug, name in DEFAULTS:
         Category.objects.get_or_create(slug=slug, defaults={"name": name, "position": 100})
-    Category.objects.filter(slug__in=["fashion", "hoodies"], size_chart="").update(size_chart=SIZE_CHART)
+    Category.objects.filter(slug="hoodies", size_chart="").update(size_chart=SIZE_CHART)
     Category.objects.filter(slug="sneakers", size_chart="").update(size_chart=SHOE_CHART)
     # Any other category already used by a product keeps working.
     for slug in Product.objects.values_list("category", flat=True).distinct():
