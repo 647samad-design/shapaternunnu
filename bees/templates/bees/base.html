@@ -279,6 +279,8 @@
         .search .photo-btn { min-width: 46px; border-radius: 0; background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-left: 0; border-right: 0; }
         .search .photo-btn:hover { background: var(--surface); color: var(--brand); }
         body.photo-searching { cursor: progress; }
+        .search .voice-btn.listening { color: var(--sale); animation: pulse 1s infinite; }
+        @keyframes pulse { 50% { opacity: .4; } }
         .search button:hover { background: color-mix(in srgb, var(--brand) 82%, #000); }
         .suggestions { display: none; position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); z-index: 260; overflow: hidden; box-shadow: 0 12px 32px rgba(20,26,31,.12); }
         .suggestions.show { display: block; }
@@ -548,6 +550,7 @@
                 <form action="{% url 'search_products' %}" method="get">
                     <label for="search-input" class="sr-only">Search</label>
                     <input type="search" name="q" id="search-input" value="{{ query|default:'' }}" placeholder="{{ t.search_placeholder }}" autocomplete="off">
+                    <button type="button" class="photo-btn voice-btn" aria-label="Search by voice" title="Search by voice" hidden data-voice-search><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
                     {% if photo_search %}<button type="button" class="photo-btn" aria-label="Search with a photo" title="Search with a photo" onclick="document.getElementById('photo-input').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></button>{% endif %}
                     <button type="submit" aria-label="Search">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -636,6 +639,8 @@
             <div class="wrap">
                 <ul>
                     <li><a href="{% url 'all_products' %}" class="{% if request.resolver_match.url_name == 'all_products' %}active{% endif %}">{{ t.all_products }}</a></li>
+                    <li><a href="{% url 'deals' %}" class="nav-deals {% if request.resolver_match.url_name == 'deals' %}active{% endif %}">🔥 Deals</a></li>
+                    <li><a href="{% url 'shop_assistant' %}" class="{% if request.resolver_match.url_name == 'shop_assistant' %}active{% endif %}">✨ Ask</a></li>
                     {% for slug, label in nav_categories %}
                     <li><a href="{% url 'category_products' slug %}" class="{% if category == slug %}active{% endif %}">{{ label }}</a></li>
                     {% endfor %}
@@ -678,6 +683,8 @@
                         <li><a href="{% url 'all_products' %}">{{ t.all_products }}</a></li>
                         {% for slug, label in nav_categories|slice:":4" %}<li><a href="{% url 'category_products' slug %}">{{ label }}</a></li>{% endfor %}
                         {% if brand.gift_cards_enabled %}<li><a href="{% url 'gift_cards' %}">Gift cards</a></li>{% endif %}
+                        <li><a href="{% url 'deals' %}">Today's deals</a></li>
+                        <li><a href="{% url 'vouchers' %}">Vouchers</a></li>
                     </ul>
                 </div>
                 <div>
@@ -686,6 +693,7 @@
                         <li><a href="{% url 'help_support' %}">{{ t.help_center }}</a></li>
                         <li><a href="{% url 'my_orders' %}">Track your order</a></li>
                         <li><a href="{% url 'help_support' %}#returns">{{ t.returns_refund }}</a></li>
+                        <li><a href="{% url 'buyer_protection' %}">Buyer protection</a></li>
                         {% if brand.support_email %}<li><a href="mailto:{{ brand.support_email }}">{{ brand.support_email }}</a></li>{% endif %}
                         {% if brand.support_phone %}<li><a href="tel:{{ brand.support_phone }}">{{ brand.support_phone }}</a></li>{% endif %}
                     </ul>
@@ -1306,6 +1314,22 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 });
+</script>
+<script>
+(function () {
+    var btn = document.querySelector('[data-voice-search]'), Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!btn || !Rec) return;
+    btn.hidden = false;
+    btn.addEventListener('click', function () {
+        var rec = new Rec(), input = document.getElementById('search-input');
+        rec.lang = document.documentElement.lang || 'en';
+        rec.interimResults = false;
+        btn.classList.add('listening');
+        rec.onresult = function (e) { input.value = e.results[0][0].transcript; input.form.submit(); };
+        rec.onend = function () { btn.classList.remove('listening'); };
+        rec.start();
+    });
+})();
 </script>
 </body>
 </html>

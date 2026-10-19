@@ -4,6 +4,7 @@
         <img src="{{ product.image_url }}" alt="{{ product.name }}" loading="lazy" decoding="async" width="400" height="400">
         {% if product.stock <= 0 %}<span class="pcard-flag badge">{{ t.out_of_stock }}</span>
         {% elif product.is_auction %}<span class="pcard-flag badge badge-accent">🔨 Auction</span>
+        {% elif product.id|best_seller_rank == 1 %}<span class="pcard-flag badge" style="background:#C45500;color:#fff;">#1 Best Seller</span>
         {% elif product.condition != "new" %}<span class="pcard-flag badge">{{ product.get_condition_display }}</span>
         {% elif product.discount_percent %}<span class="pcard-flag badge badge-accent">Save {{ product.discount_percent }}%</span>{% endif %}
     </a>

@@ -596,6 +596,7 @@ def referrals(request):
     today = timezone.localdate()
     for c in rewards:
         c.state = "used" if c.code in used_codes else ("expired" if c.expiry_date and c.expiry_date < today else "ready")
+    from . import loyalty
     link = request.build_absolute_uri(reverse("signup")) + f"?ref={profile.referral_code}"
     shop_link = request.build_absolute_uri(reverse("home")) + f"?ref={profile.referral_code}"
     return render(request, "bees/account/referrals.html", {
@@ -604,6 +605,7 @@ def referrals(request):
         "stats": {"joined": len(friends), "bought": sum(1 for f in friends if f.referral_rewarded),
                   "earned": sum(1 for c in rewards if c.purpose == "referral_reward")},
         "site": site,
+        "affiliate": loyalty.affiliate_stats(profile) if site.affiliate_percent else None,
         "share_text": f"Here's {site.referral_friend_percent}% off your first order at {site.site_name}: {link}",
         "share_short": f"Get {site.referral_friend_percent}% off your first order at {site.site_name}",
     })

@@ -33,6 +33,8 @@ tax and contact details from **Admin → Site settings** — no code changes.
 - Subscribe & Save, "Frequently bought together", Save for later, several wishlists and shareable wishlists
 - Review photos, "Helpful" votes and review filters; search by photo (with AI on); "pay in instalments" message for Klarna/Afterpay via Stripe
 - EU rules: lowest price of the last 30 days next to discounts (Omnibus) and seller trader information (DSA)
+- AI shopping assistant ("Ask"), deals page, "Recommended for you", price alerts, delivery dates, "50+ bought in the past month" and "#1 Best Seller" badges, voice search, image zoom
+- Loyalty levels (Bronze to Platinum, up to 2x points), affiliate commission on shared links, Buyer Protection page
 - Cart with live updates, saved addresses, coupons, shipping and tax calculation
 - **Stripe Checkout** — cards, Apple Pay, Google Pay, Link (whatever you enable in Stripe)
 - Order tracking, PDF invoices, one-click cancel with **automatic refund**, return requests, buy again
@@ -57,7 +59,7 @@ tax and contact details from **Admin → Site settings** — no code changes.
 - Rate limiting, upload validation, private storage for seller ID documents, safe production defaults
 - REST API with token sign-in and OpenAPI docs (`/api/v1/docs/`)
 - Docker setup with PostgreSQL, Redis and a background scheduler
-- 460+ automated tests, run on SQLite, PostgreSQL and Docker by GitHub Actions: `python manage.py test bees`
+- 465+ automated tests, run on SQLite, PostgreSQL and Docker by GitHub Actions: `python manage.py test bees`
 
 ## Seller Center (/seller/)
 

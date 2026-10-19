@@ -7,6 +7,7 @@
         <option value="price_desc" {% if current_sort == "price_desc" %}selected{% endif %}>{{ t.price_high_low }}</option>
         <option value="newest" {% if current_sort == "newest" %}selected{% endif %}>{{ t.newest_first }}</option>
         <option value="rating" {% if current_sort == "rating" %}selected{% endif %}>{{ t.top_rated }}</option>
+        <option value="popular" {% if current_sort == "popular" %}selected{% endif %}>Best selling</option>
     </select>
     <noscript><button type="submit" class="btn btn-secondary btn-sm">Sort</button></noscript>
 </form>

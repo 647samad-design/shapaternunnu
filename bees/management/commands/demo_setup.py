@@ -168,6 +168,7 @@ class Command(BaseCommand):
         site.membership_enabled = True
         site.membership_discount = 5
         site.bnpl_enabled = True
+        site.affiliate_percent = 5
         site.save()
         mug, tote, candle, kit, beanie = products
         Product.objects.filter(pk=mug.pk).update(personalization_prompt="Name to glaze on the mug (max 12 letters)", personalization_max=12,

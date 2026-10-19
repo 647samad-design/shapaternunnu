@@ -3,6 +3,8 @@
 {% block title %}Your profile — {{ brand.site_name }}{% endblock %}
 {% block robots_meta %}noindex, nofollow{% endblock %}
 {% block extra_css %}
+    .tier-silver strong { color: #6B7785; } .tier-gold strong { color: #B07400; } .tier-platinum strong { color: #4A5BD4; }
+    .tier-line { margin: 6px 0 10px; }
     .profile { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
     .profile h2 { font-size: 1.3rem; margin-bottom: 16px; }
     .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
@@ -26,11 +28,13 @@
     <div class="stats">
         <a class="stat" href="{% url 'my_orders' %}" style="text-decoration:none;"><strong>{{ orders_count }}</strong><span>Orders</span></a>
         <div class="stat"><strong>{{ addresses|length }}</strong><span>Saved addresses</span></div>
+        <div class="stat tier-{{ tier.key }}"><strong>{{ tier.name }}</strong><span>Member level{% if tier.multiplier > 1 %} · {{ tier.multiplier|floatformat:"-2" }}× points{% endif %}</span></div>
         <div class="stat"><strong>{{ profile.loyalty_points }}</strong><span>Reward points</span></div>
         <div class="stat"><strong>{{ profile.store_credit|money }}</strong><span>Store credit</span></div>
     </div>
     <section class="panel" style="margin-bottom:20px;">
         <h2>Rewards &amp; store credit</h2>
+        <p class="tier-line"><strong>{{ tier.name }} level</strong> - you spent {{ tier.spend|money }} in the last 12 months.{% if tier.next %} Spend {{ tier.next.1|money }} more to reach <strong>{{ tier.next.0 }}</strong> and earn more points on every order.{% else %} That's our top level - thank you!{% endif %} <span class="muted small">Levels: Silver {{ 100|money }} (1.25× points), Gold {{ 500|money }} (1.5×), Platinum {{ 1500|money }} (2×).</span></p>
         <p class="muted">You earn 1 point for every {{ 1|money }} spent on delivered orders. Every {{ points_per_unit }} points = {{ 1|money }} of store credit. Store credit is applied at checkout automatically (you can switch it off), and refunds you choose as store credit land here too.</p>
         {% if redeemable_credit > 0 %}
         <form method="post" action="{% url 'redeem_points' %}" style="margin-top:12px;">{% csrf_token %}

@@ -82,8 +82,10 @@ class ReferralCaptureMiddleware:
 
     def __call__(self, request):
         ref = request.GET.get("ref", "")
-        if ref and 4 <= len(ref) <= 12 and ref.isalnum() and not request.user.is_authenticated:
-            request.session["ref"] = ref.upper()
+        if ref and 4 <= len(ref) <= 12 and ref.isalnum():
+            request.session["aff"] = ref.upper()  # affiliate links work for everyone
+            if not request.user.is_authenticated:
+                request.session["ref"] = ref.upper()
         return self.get_response(request)
 
 

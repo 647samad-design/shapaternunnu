@@ -1,0 +1,39 @@
+{% extends "bees/base.html" %}
+{% block title %}Ask {{ brand.site_name }} — shopping assistant{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:980px;">
+    <section class="ask-hero">
+        <span class="ask-tag">✨ Shopping assistant</span>
+        <h1>What are you looking for?</h1>
+        <p>Describe it like you'd tell a friend - who it's for, what it's for, your budget. We'll find it in our catalog.</p>
+        <form method="post" class="ask-form">{% csrf_token %}
+            <label class="sr-only" for="ask-q">Your question</label>
+            <input id="ask-q" name="q" maxlength="300" required value="{{ question }}" placeholder="e.g. a gift for my mum who loves gardening, under 40" autocomplete="off">
+            <button class="btn btn-accent" type="submit">Ask</button>
+        </form>
+        {% if not question %}<div class="ask-examples">{% for e in examples %}<form method="post">{% csrf_token %}<input type="hidden" name="q" value="{{ e }}"><button type="submit">{{ e }}</button></form>{% endfor %}</div>{% endif %}
+    </section>
+    {% if result %}
+    <section class="ask-answer" aria-live="polite">
+        <p class="ask-text">{{ result.text }}</p>
+        {% if result.products %}<div class="grid-products">{% for product in result.products %}{% include "bees/partials/product_card.html" %}{% endfor %}</div>
+        <p class="small" style="margin-top:12px;"><a class="link" href="{% url 'search_products' %}?q={{ result.query|urlencode }}">See all results for “{{ result.query }}”</a></p>
+        {% else %}<p><a class="btn btn-secondary" href="{% url 'deals' %}">See today's deals</a></p>{% endif %}
+    </section>
+    {% endif %}
+</div>
+<style>
+.ask-hero { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: clamp(22px, 4vw, 40px); border-radius: var(--radius-lg); background: var(--brand); color: var(--on-brand); }
+.ask-hero h1 { color: var(--on-brand); margin: 0; font-size: clamp(1.8rem, 4vw, 2.6rem); }
+.ask-hero p { margin: 0; opacity: .9; max-width: 60ch; }
+.ask-tag { justify-self: start; padding: 4px 12px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: 800; font-size: .85rem; }
+.ask-form { display: flex; gap: 8px; margin-top: 6px; }
+.ask-form input { flex: 1; min-width: 0; padding: 14px 16px; border-radius: 999px; border: 0; font-size: 1.05rem; background: var(--surface); color: var(--ink); }
+.ask-form .btn { border-radius: 999px; padding-inline: 26px; }
+.ask-examples { display: flex; flex-wrap: wrap; gap: 8px; }
+.ask-examples form { margin: 0; }
+.ask-examples button { max-width: 100%; text-align: left; border: 1px solid color-mix(in srgb, var(--on-brand) 40%, transparent); background: transparent; color: var(--on-brand); border-radius: 999px; padding: 6px 14px; cursor: pointer; font: inherit; font-size: .9rem; }
+.ask-answer { margin-top: 24px; }
+.ask-text { font-size: 1.1rem; padding: 16px 18px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); margin-bottom: 18px; }
+</style>
+{% endblock %}

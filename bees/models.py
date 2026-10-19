@@ -96,7 +96,8 @@ class Page(models.Model):
     or any new page such as a shipping policy or FAQ (/pages/<slug>/).
     Body: plain text; a line starting with "## " is a heading, a blank line
     starts a new paragraph, lines starting with "- " are a bullet list."""
-    BUILT_IN = [("about", "About us"), ("terms", "Terms of Service"), ("privacy", "Privacy Policy"), ("sell", "Sell with us")]
+    BUILT_IN = [("about", "About us"), ("terms", "Terms of Service"), ("privacy", "Privacy Policy"), ("sell", "Sell with us"),
+                ("protection", "Buyer protection")]
     slug = models.SlugField(max_length=60, unique=True)
     title = models.CharField(max_length=120)
     body = models.TextField()
@@ -547,6 +548,9 @@ class Order(models.Model):
     tax_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     tax_included = models.BooleanField(default=False, help_text="Prices already included this tax (shown, not added).")
     customer_tax_id = models.CharField("Customer VAT / tax number", max_length=40, blank=True)
+    affiliate_code = models.CharField(max_length=16, blank=True, db_index=True, help_text="Code of the affiliate whose link brought this order.")
+    affiliate_paid = models.BooleanField(default=False, editable=False)
+    affiliate_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, editable=False)
     gift_wrap = models.BooleanField(default=False)
     gift_message = models.CharField(max_length=300, blank=True)
     pickup_point = models.ForeignKey("PickupPoint", null=True, blank=True, on_delete=models.SET_NULL, related_name="orders")
@@ -766,6 +770,10 @@ class Order(models.Model):
             from django.db import transaction as _tx
             from . import sms
             _tx.on_commit(lambda o=self, st=self.status: sms.order_status(o, st))
+        if not is_new and old_status != "delivered" and self.status == "delivered" and self.affiliate_code:
+            from django.db import transaction as _tx2
+            from . import loyalty as _loyalty
+            _tx2.on_commit(lambda o=self: _loyalty.pay_affiliate(o))
         if self.user and not is_new and old_status and old_status != self.status:
             Notification.objects.create(
                 user=self.user,
@@ -774,8 +782,9 @@ class Order(models.Model):
             )
             if self.status == "delivered" and old_status != "delivered":
                 _reward_referrer_for(self.user)
-                # 1 loyalty point per whole unit of currency spent.
-                points_earned = int(self.total)
+                # 1 loyalty point per whole unit of currency spent, more for higher tiers.
+                from . import loyalty
+                points_earned = loyalty.points_for(self)
                 if points_earned > 0:
                     profile, _ = Profile.objects.get_or_create(user=self.user)
                     profile.loyalty_points += points_earned
@@ -1721,6 +1730,8 @@ class SiteSettings(models.Model):
     membership_price = models.DecimalField(max_digits=8, decimal_places=2, default="4.99")
     membership_days = models.PositiveSmallIntegerField("Membership length (days)", default=30)
     membership_discount = models.PositiveSmallIntegerField("Member discount (%)", default=0, help_text="Extra % off for members on every order (the store pays it). 0 = only free shipping.")
+    affiliate_percent = models.PositiveSmallIntegerField("Affiliate commission (%)", default=0,
+                                                         help_text="Anyone who shares a link with their code earns this % of delivered orders as store credit. 0 = off.")
     checkin_points = models.PositiveSmallIntegerField("Daily check-in coins", default=5, help_text="Reward points for visiting each day (7-day streak gets double). 0 = off.")
     gift_cards_enabled = models.BooleanField(default=True, help_text="Sell digital gift cards (needs card or PayPal payments). Redeemed as store credit.")
     require_seller_2fa = models.BooleanField(default=False, help_text="Sellers must turn on two-step sign-in before using Seller Center.")
@@ -2508,3 +2519,36 @@ def _remember_price(sender, instance, created, **kwargs):
     last = PriceHistory.objects.filter(product=instance).order_by("-recorded_at").values_list("price", flat=True).first()
     if last is None or last != instance.price:
         PriceHistory.objects.create(product=instance, price=instance.price)
+
+
+class PriceAlert(models.Model):
+    """'Tell me when it drops below X' on a product page."""
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="price_alerts")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="price_alerts")
+    target_price = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+    notified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "product"], name="one_price_alert_per_product")]
+
+
+@receiver(post_save, sender=Product)
+def _price_alerts(sender, instance, created, **kwargs):
+    fields = kwargs.get("update_fields")
+    if created or (fields is not None and "price" not in fields):
+        return
+    due = PriceAlert.objects.filter(product=instance, notified_at__isnull=True, target_price__gte=instance.price)
+    if not due.exists():
+        return
+    from django.utils import timezone
+    for alert in due.select_related("user"):
+        Notification.objects.create(user_id=alert.user_id, link=f"/product/{instance.id}/",
+                                    message=f"Price alert: {instance.name} is now {instance.price} (your target {alert.target_price})."[:255])
+        from .views import _send_html_email
+        from .order_emails import absolute
+        _send_html_email(f"{instance.name} dropped to your price", "bees/emails/price_drop.html", {
+            "user": alert.user, "items": [{"product": instance, "old": alert.target_price, "new": instance.price, "pct": 0,
+                                           "url": absolute(f"/product/{instance.id}/")}],
+            "wishlist_url": absolute(f"/product/{instance.id}/"), "prefs_url": absolute("/account/privacy/")}, alert.user.email)
+    due.update(notified_at=timezone.now())
