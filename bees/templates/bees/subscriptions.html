@@ -1,0 +1,43 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Subscriptions — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:920px;">
+    <div class="page-head"><div><h1>Your account</h1><p>Signed in as <span data-no-translate>{{ request.user.username }}</span></p></div></div>
+    {% include "bees/partials/account_tabs.html" %}
+    <section class="panel">
+        <h2>Subscribe &amp; Save</h2>
+        <p class="muted small" style="margin-top:4px;">Things you buy again, at a discount. We remind you when each refill is due - one click puts it in your cart.</p>
+        {% for s, price in rows %}
+        <div class="subrow{% if not s.active %} off{% endif %}">
+            <img src="{{ s.product.image_url }}" alt="" width="56" height="56">
+            <div class="sr-main"><strong><a href="{% url 'product_detail' s.product_id %}">{{ s.product.name }}</a></strong>{% if s.variant %} <span class="muted">({{ s.variant.label }})</span>{% endif %}
+                <div class="muted small">{{ s.quantity }} × {{ price|money }} ({{ s.product.subscribe_percent }}% off) · every {{ s.every_weeks }} week{{ s.every_weeks|pluralize }}{% if s.active %} · next {{ s.next_date|date:"j M" }}{% else %} · cancelled{% endif %}</div></div>
+            <div class="sr-act">
+                {% if s.active %}
+                <form method="post">{% csrf_token %}<input type="hidden" name="id" value="{{ s.id }}"><button class="btn btn-primary btn-sm" name="action" value="order_now">Order now</button></form>
+                <form method="post" class="sr-change">{% csrf_token %}<input type="hidden" name="id" value="{{ s.id }}"><input type="hidden" name="action" value="change">
+                    <label class="sr-only" for="sw-{{ s.id }}">How often</label><select id="sw-{{ s.id }}" name="every_weeks">{% for w in "1 2 4 8 12"|split %}<option value="{{ w }}"{% if s.every_weeks|stringformat:"s" == w %} selected{% endif %}>Every {{ w }} wk</option>{% endfor %}</select>
+                    <label class="sr-only" for="sq-{{ s.id }}">Quantity</label><input id="sq-{{ s.id }}" name="quantity" type="number" min="1" max="20" value="{{ s.quantity }}">
+                    <button class="btn btn-ghost btn-sm" type="submit">Save</button></form>
+                <form method="post">{% csrf_token %}<input type="hidden" name="id" value="{{ s.id }}"><button class="btn btn-ghost btn-sm" name="action" value="cancel">Cancel</button></form>
+                {% else %}<form method="post">{% csrf_token %}<input type="hidden" name="id" value="{{ s.id }}"><button class="btn btn-secondary btn-sm" name="action" value="resume">Restart</button></form>{% endif %}
+            </div>
+        </div>
+        {% empty %}<p class="muted" style="padding:24px 0;text-align:center;">No subscriptions yet. Look for <strong>Subscribe &amp; Save</strong> on product pages.</p>{% endfor %}
+    </section>
+</div>
+<style>
+.subrow { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 14px 0; border-top: 1px solid var(--line); }
+.subrow.off { opacity: .6; }
+.subrow img { width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-sm); }
+.sr-main { flex: 1; min-width: 200px; }
+.sr-main a { color: inherit; text-decoration: none; }
+.sr-act { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sr-act form { margin: 0; }
+.sr-change { display: flex; gap: 6px; align-items: center; }
+.sr-change select, .sr-change input { padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.sr-change input { width: 64px; }
+</style>
+{% endblock %}

@@ -40,3 +40,28 @@
     .xf .check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; }
     .xf .check input { margin-top: 3px; flex: none; }
 </style>
+<details class="xf" {% if p.condition and p.condition != "new" or p.ships_from or p.personalization_prompt or p.accepts_offers or p.subscribe_percent and p.subscribe_percent|stringformat:"s" != "0" or p.is_auction %}open{% endif %}>
+    <summary><strong>Condition, personalization, offers &amp; auction</strong> <span class="muted small">(optional)</span></summary>
+    <div class="xf-grid">
+        <div class="field"><label for="pf_cond">Condition</label><select id="pf_cond" name="condition">{% for v, l in conditions %}<option value="{{ v }}"{% if p.condition == v or not p.condition and v == "new" %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="pf_from">Ships from</label><select id="pf_from" name="ships_from"><option value="">Your store's country</option>{% for code, name in country_list %}<option value="{{ code }}"{% if p.ships_from == code %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+        <div class="field xf-wide"><label for="pf_pers">Personalization question</label><input id="pf_pers" name="personalization_prompt" maxlength="120" value="{{ p.personalization_prompt|default:'' }}" placeholder="e.g. Name to engrave (max 12 letters) - empty = no personalization"></div>
+        <div class="field"><label for="pf_persmax">Longest answer (characters)</label><input id="pf_persmax" name="personalization_max" type="number" min="1" max="300" value="{{ p.personalization_max|default:60 }}"></div>
+        <label class="check small" style="align-self:end;padding-bottom:10px;"><input type="checkbox" name="personalization_required" value="1"{% if p.personalization_required %} checked{% endif %}> <span>Buyers must fill it in</span></label>
+        <label class="xf-wide check small"><input type="checkbox" name="accepts_offers" value="1"{% if p.accepts_offers %} checked{% endif %}> <span><strong>Make an offer</strong>: buyers can propose their own price (you accept or counter under Quotes)</span></label>
+        <div class="field"><label for="pf_floor">Auto-decline offers below</label><input id="pf_floor" name="offer_floor" inputmode="decimal" value="{{ p.offer_floor|default:'' }}" placeholder="optional"></div>
+        <div class="field"><label for="pf_sub">Subscribe &amp; Save discount (%)</label><input id="pf_sub" name="subscribe_percent" type="number" min="0" max="50" value="{{ p.subscribe_percent|default:0 }}"><small class="muted">For things people buy again (coffee, soap…). 0 = off.</small></div>
+        <label class="xf-wide check small"><input type="checkbox" name="is_auction" value="1"{% if p.is_auction %} checked{% endif %} data-auction-toggle> <span><strong>Sell by auction</strong>: buyers bid, the highest bid when time runs out wins (one item)</span></label>
+        <div class="field" data-auction-field><label for="pf_astart">Starting bid</label><input id="pf_astart" name="auction_start_price" inputmode="decimal" value="{{ p.auction_start_price|default:'' }}"></div>
+        <div class="field" data-auction-field><label for="pf_ares">Reserve price (hidden, optional)</label><input id="pf_ares" name="auction_reserve" inputmode="decimal" value="{{ p.auction_reserve|default:'' }}"></div>
+        <div class="field" data-auction-field><label for="pf_aend">Bidding ends</label><input id="pf_aend" name="auction_ends_at" type="datetime-local" value="{% if p.auction_ends_at %}{{ p.auction_ends_at|date:'Y-m-d\TH:i' }}{% endif %}"></div>
+    </div>
+</details>
+<script>
+(function () {
+    var t = document.querySelector('[data-auction-toggle]');
+    if (!t) return;
+    function sync() { document.querySelectorAll('[data-auction-field]').forEach(function (f) { f.hidden = !t.checked; }); }
+    t.addEventListener('change', sync); sync();
+})();
+</script>

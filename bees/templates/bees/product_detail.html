@@ -58,6 +58,40 @@
     .assurances { list-style: none; margin-top: 26px; border-top: 1px solid var(--line); }
     .assurances li { padding: 14px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 16px; }
     .assurances li span:last-child { color: var(--muted); text-align: right; }
+    .brand-line + .cond-badge { margin-left: 8px; }
+    .cond-badge { display: inline-block; padding: 2px 10px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 16%, var(--surface)); color: var(--ink); font-size: .8rem; font-weight: 800; vertical-align: 2px; }
+    .omnibus { margin-top: 4px; }
+    .bnpl-line { margin-top: 6px; }
+    .auction-box { margin-top: 14px; padding: 16px; border: 2px solid var(--ink); border-radius: var(--radius); display: grid; gap: 8px; }
+    .ab-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .ab-price { font-size: 1.6rem; font-family: var(--font-display, inherit); }
+    .ab-mine { color: var(--ok); font-weight: 800; }
+    .ab-form { display: flex; gap: 8px; }
+    .ab-form input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: 1.05rem; background: var(--surface); }
+    .pers-field { margin: 14px 0 12px; }
+    .sub-box { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); display: grid; gap: 8px; background: var(--surface); }
+    .sub-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .sub-row select { flex: 1; min-width: 140px; padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+    .offers-box { margin-top: 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .offers-box h2 { font-size: 1rem; margin: 0 0 8px; }
+    .ob-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+    .ob-row form { margin: 0; }
+    .fbt { display: grid; gap: 16px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .fbt-items { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+    .fbt-item { display: grid; grid-template-columns: auto 96px; grid-template-rows: auto auto; gap: 4px 10px; align-items: start; max-width: 260px; cursor: pointer; }
+    .fbt-item input { grid-row: span 2; margin-top: 4px; }
+    .fbt-item img { width: 96px; height: 96px; object-fit: cover; border-radius: var(--radius-sm); grid-row: span 2; }
+    .fbt-item span { grid-column: 3; font-size: .92rem; }
+    .fbt-item strong { grid-column: 3; }
+    .fbt-plus { font-size: 1.4rem; color: var(--muted); }
+    .fbt-buy { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+    .rv-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .rv-filter a { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); text-decoration: none; font-weight: 700; font-size: .86rem; }
+    .rv-filter a[aria-current] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+    .rv-photos { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .rv-photos img { width: 88px; height: 88px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--line); }
+    .rv-helpful { margin: 8px 0 0; }
+    .rv-helpful button[aria-pressed="true"] { color: var(--ok); font-weight: 700; }
     .gallery-video { position: absolute; inset: 0; background: #000; }
     .gallery-video iframe, .gallery-video video { width: 100%; height: 100%; border: 0; display: block; }
     .thumb-video { position: relative; }
@@ -164,17 +198,21 @@
 
         <div class="buybox">
             {% if product.brand %}<a class="brand-line" href="{% url 'search_products' %}?q={{ product.brand|urlencode }}" data-no-translate>{{ product.brand }}</a>{% endif %}
+            {% if product.condition != "new" %}<span class="cond-badge">{{ product.get_condition_display }}</span>{% endif %}
             <h1>{{ product.name }}</h1>{% if product.approval_status == "archived" %}<div class="callout" style="margin:8px 0;">This product is no longer sold. You can still review it if you bought it.</div>{% endif %}
             {% if product.seller_name %}<p class="seller-line">Sold by <a href="{% url 'store_page' product.seller_name %}" data-no-translate>{{ product.seller_name }}</a>{% if product.seller_account.has_badge %} <span class="pro-badge">★ Pro seller</span>{% endif %}{% if product.seller_account.verified_at %} <span class="seller-badge verified">✓ {{ t.verified_seller }}</span>{% endif %}{% if product.seller_account.top_seller %} <span class="seller-badge top">★ {{ t.top_seller }}</span>{% endif %}</p>{% endif %}
             {% if product.rating_count %}
             <div class="rating-line"><span class="stars" aria-hidden="true">{{ product.average_rating|stars }}</span><strong>{{ product.average_rating }}</strong><a href="#reviews">{{ product.rating_count }} review{{ product.rating_count|pluralize }}</a></div>
             {% endif %}
 
-            <div class="buy-price">
+            <div class="buy-price"{% if product.is_auction %} hidden{% endif %}>
                 <span class="price" id="buy-price">{{ product.price|price }}</span>
                 {% if product.old_price %}<span class="price-was"><span class="sr-only">Was </span>{{ product.old_price|price }}</span>{% endif %}
                 {% if product.discount_percent %}<span class="badge badge-sale">Save {{ product.discount_percent }}%</span>{% endif %}
             </div>
+            {% if lowest_30d %}<p class="muted small omnibus">Lowest price in the last 30 days: {{ lowest_30d|price }}</p>{% endif %}
+            {% if bnpl_part and not product.is_auction %}<p class="small bnpl-line">or <strong>{{ brand.bnpl_instalments }} interest-free payments of {{ bnpl_part|price }}</strong> with Klarna, Afterpay or Affirm at checkout</p>{% endif %}
+            {% if brand.membership_enabled and not is_member and not product.is_digital %}<p class="small"><a class="link" href="{% url 'membership' %}">Free shipping with {{ brand.site_name }} {{ brand.membership_name }}</a></p>{% endif %}
             {% if product.flash_countdown %}<div class="deal-timer" data-ends="{{ product.flash_sale_ends|date:'c' }}"><span>⚡ {{ t.deal_ends_in }}</span> <strong data-timer>--:--:--</strong></div>{% endif %}
             {% if product.has_bulk_offer %}<div class="bulk-offer">🏷️ {{ t.bulk_offer|fill:product }}</div>{% endif %}
             {% if product.is_digital %}<div class="pdp-note digital">⬇ <strong>Digital download</strong> - available in My orders right after you pay online. Nothing is shipped.</div>{% endif %}
@@ -193,15 +231,40 @@
             </div>
             {{ variants_json|json_script:"variant-data" }}
             {% endif %}
-            <p class="stock-line {% if product.stock <= 0 %}out{% elif product.stock <= 5 and not product.has_variants %}low{% else %}ok{% endif %}" id="stock-line">
+            <p {% if product.is_auction %}hidden {% endif %}class="stock-line {% if product.stock <= 0 %}out{% elif product.stock <= 5 and not product.has_variants %}low{% else %}ok{% endif %}" id="stock-line">
                 {% if product.stock <= 0 %}{{ t.out_of_stock }}{% elif product.has_variants %}Choose {% if variant_sizes and variant_colors %}a size and colour{% elif variant_sizes %}a size{% else %}a colour{% endif %}{% elif product.stock <= 5 %}Only {{ product.stock }} left — order soon{% else %}{{ t.in_stock }}{% endif %}
             </p>
 
-            <div class="buy-actions" id="buy-actions" {% if product.stock <= 0 %}hidden{% endif %}>
+            {% if product.ships_from %}<p class="small muted" style="margin-top:8px;">📦 Ships from {{ product.ships_from|country_name }}</p>{% endif %}
+            {% if auction %}
+            <section class="auction-box" id="auction" aria-label="Auction">
+                {% if auction.open %}
+                <div class="ab-row"><span>{% if auction.top %}Current bid{% else %}Starting bid{% endif %}</span><strong class="ab-price">{% if auction.top %}{{ auction.top.amount|price }}{% else %}{{ product.auction_start_price|price }}{% endif %}</strong></div>
+                <div class="ab-row small muted"><span>{{ auction.count }} bid{{ auction.count|pluralize }}{% if auction.top and not auction.reserve_met %} · reserve not met yet{% endif %}</span><span class="deal-timer" data-ends="{{ product.auction_ends_at|date:'c' }}">Ends in <strong data-timer>--:--:--</strong></span></div>
+                {% if auction.mine %}<p class="ab-mine">✓ You're the highest bidder</p>{% endif %}
+                {% if user.is_authenticated %}
+                <form method="post" action="{% url 'place_bid' product.id %}" class="ab-form">{% csrf_token %}
+                    <label class="sr-only" for="bid-amt">Your bid</label>
+                    <input id="bid-amt" name="amount" inputmode="decimal" required placeholder="{{ auction.next_min }} or more" value="{{ auction.next_min }}">
+                    <button class="btn btn-primary" type="submit">Place bid</button>
+                </form>
+                <p class="muted small">Enter {{ auction.next_min|price }} or more. Bids in the last 2 minutes add 2 minutes. The winner pays within 3 days.</p>
+                {% else %}<a class="btn btn-primary btn-block" href="{% url 'login' %}?next={{ request.path|urlencode }}%23auction">Sign in to bid</a>{% endif %}
+                {% else %}
+                <p><strong>This auction has ended.</strong>{% if auction.top and auction.reserve_met %} Winning bid: {{ auction.top.amount|price }}{% endif %}</p>
+                {% endif %}
+            </section>
+            {% endif %}
+            {% if product.personalization_prompt and not product.is_auction %}
+            <div class="field pers-field"><label for="pers">{{ product.personalization_prompt }}{% if product.personalization_required %} <span aria-hidden="true">*</span>{% else %} <span class="muted small">(optional)</span>{% endif %}</label>
+                <input id="pers" maxlength="{{ product.personalization_max }}" data-pers-source {% if product.personalization_required %}required{% endif %}></div>
+            {% endif %}
+            <div class="buy-actions" id="buy-actions" {% if product.stock <= 0 or product.is_auction %}hidden{% endif %}>
                 <form method="post" action="{% url 'add_to_cart' product.id %}" class="ajax-add-cart-form">
                     {% csrf_token %}
                     {% if product.has_variants %}<input type="hidden" name="variant" class="variant-input">{% endif %}
                     {% if order_limits.0 > 1 %}<input type="hidden" name="quantity" value="{{ order_limits.0 }}">{% endif %}
+                    {% if product.personalization_prompt %}<input type="hidden" name="personalization" data-pers-copy>{% endif %}
                     <button class="btn btn-secondary buy-btn" type="submit" {% if product.has_variants %}disabled{% endif %}>{{ t.add_to_cart }}</button>
                 </form>
                 <form method="post" action="{% url 'add_to_cart' product.id %}">
@@ -209,9 +272,19 @@
                     {% if product.has_variants %}<input type="hidden" name="variant" class="variant-input">{% endif %}
                     <input type="hidden" name="next" value="{% url 'checkout' %}">
                     {% if order_limits.0 > 1 %}<input type="hidden" name="quantity" value="{{ order_limits.0 }}">{% endif %}
+                    {% if product.personalization_prompt %}<input type="hidden" name="personalization" data-pers-copy>{% endif %}
                     <button class="btn btn-primary buy-btn" type="submit" {% if product.has_variants %}disabled{% endif %}>{{ t.buy_now }}</button>
                 </form>
             </div>
+            {% if subscribe_price and product.stock > 0 %}
+            <form method="post" action="{% url 'subscribe' product.id %}" class="sub-box">{% csrf_token %}
+                {% if product.has_variants %}<input type="hidden" name="variant" class="variant-input">{% endif %}
+                <div><strong>Subscribe &amp; Save {{ product.subscribe_percent }}%</strong> <span class="muted small">{{ subscribe_price|price }} each</span></div>
+                <span class="sub-row"><label class="sr-only" for="sub-every">How often</label><select id="sub-every" name="every_weeks"><option value="1">Every week</option><option value="2">Every 2 weeks</option><option value="4" selected>Every month</option><option value="8">Every 2 months</option><option value="12">Every 3 months</option></select>
+                <button class="btn btn-secondary btn-sm" type="submit"{% if product.has_variants %} disabled{% endif %}>{% if user.is_authenticated %}Subscribe{% else %}Sign in to subscribe{% endif %}</button></span>
+            </form>
+            {% endif %}
+            {% if product.accepts_offers and not product.is_auction and product.stock > 0 %}<a class="quote-cta" href="{% url 'make_offer' product.id %}" rel="nofollow"><span aria-hidden="true">🤝</span><span><strong>Make an offer</strong> - suggest your own price</span><span aria-hidden="true">→</span></a>{% endif %}
             {% if product.quote_only %}<a class="quote-cta" href="{% url 'request_quote' product.id %}" rel="nofollow"><span aria-hidden="true">📦</span><span><strong>Buying in bulk?</strong> Request a quote for a better price</span><span aria-hidden="true">→</span></a>{% endif %}
             <form method="post" action="{% url 'stock_alert' product.id %}" class="notify-form" id="notify-form" {% if product.stock > 0 %}hidden{% endif %}>
                 {% csrf_token %}
@@ -246,6 +319,16 @@
             </div>
             <a class="seller-fab" href="{% url 'message_seller' product.id %}" rel="nofollow" aria-label="{{ t.message_seller }}"><span class="dot" aria-hidden="true"></span>💬 <span class="txt-long">{{ t.message_seller }}</span></a>
             {% endwith %}{% endif %}
+            {% if other_offers %}
+            <section class="offers-box" aria-labelledby="offers-h">
+                <h2 id="offers-h">Other sellers on {{ brand.site_name }} ({{ other_offers|length }})</h2>
+                {% for o in other_offers %}<div class="ob-row"><div><strong>{{ o.price|price }}</strong> <span class="muted small">{{ o.get_condition_display }}</span><div class="small"><a href="{% url 'product_detail' o.id %}" data-no-translate>{{ o.seller_name }}</a></div></div>
+                    {% if not o.has_variants and not o.is_auction %}<form method="post" action="{% url 'add_to_cart' o.id %}">{% csrf_token %}<button class="btn btn-secondary btn-sm" type="submit">Add to cart</button></form>{% else %}<a class="btn btn-ghost btn-sm" href="{% url 'product_detail' o.id %}">See</a>{% endif %}</div>{% endfor %}
+                {% if user.is_authenticated and user.seller_account.status == "approved" and product.seller_account_id != user.seller_account.id %}<a class="small link" href="{% url 'seller_add_product' %}?offer_of={{ product.offer_of_id|default:product.id }}">Sell one like this</a>{% endif %}
+            </section>
+            {% elif user.is_authenticated and user.seller_account.status == "approved" and product.seller_account_id != user.seller_account.id %}
+            <p class="small"><a class="link" href="{% url 'seller_add_product' %}?offer_of={{ product.offer_of_id|default:product.id }}">Have one to sell? Sell one like this</a></p>
+            {% endif %}
             <ul class="assurances">
                 {% if has_shipping_zones %}
                 <li class="ship-est"><span>{{ t.delivery_to }}</span><span>
@@ -283,6 +366,7 @@
                 </dl>
             </details>
             {% endif %}
+            {% if product.seller_account and product.seller_account.status == "approved" %}{% include "bees/partials/seller_info.html" with sa=product.seller_account %}{% endif %}
         </section>
 
         <section class="panel guide-panel" id="guide" data-guide-panel {% if not product.guide %}data-empty{% endif %}>
@@ -353,7 +437,7 @@
                 </div>
                 {% endif %}
                 {% if can_review %}
-                <form method="post" class="stack" id="write-review" style="scroll-margin-top:110px;">
+                <form method="post" class="stack" id="write-review" style="scroll-margin-top:110px;" enctype="multipart/form-data">
                     {% csrf_token %}
                     <fieldset style="border:0;">
                         <legend class="label" style="margin-bottom:6px;">Your rating</legend>
@@ -367,6 +451,7 @@
                         <label for="comment">Your review</label>
                         <textarea id="comment" name="comment" rows="4" placeholder="What did you like or dislike? How did you use it?" required maxlength="2000"></textarea>
                     </div>
+                    <div class="field"><label for="rv-photos">Add photos (optional, up to 3)</label><input id="rv-photos" name="photos" type="file" accept="image/*" multiple></div>
                     <button type="submit" class="btn btn-primary">{{ t.submit_review }}</button>
                 </form>
                 {% elif review_block %}
@@ -376,6 +461,12 @@
                 {% endif %}
             </div>
             <div>
+                {% if product.rating_count %}<nav class="rv-filter" aria-label="Filter reviews">
+                    <a href="?#reviews" {% if not review_stars and not review_photos_only and not review_sort %}aria-current="true"{% endif %}>All</a>
+                    {% for n in "54321" %}<a href="?stars={{ n }}#reviews" {% if review_stars == n %}aria-current="true"{% endif %}>{{ n }}★</a>{% endfor %}
+                    <a href="?with_photos=1#reviews" {% if review_photos_only %}aria-current="true"{% endif %}>📷 With photos</a>
+                    <a href="?review_sort=helpful#reviews" {% if review_sort == "helpful" %}aria-current="true"{% endif %}>Most helpful</a>
+                </nav>{% endif %}
                 {% for review in reviews %}
                 <article class="review">
                     <div class="review-top">
@@ -385,6 +476,8 @@
                     </div>
                     <span class="muted small">{{ review.created_at|date:"M j, Y" }}</span>
                     <p data-no-translate>{{ review.comment }}</p>
+                    {% if review.photos.all %}<div class="rv-photos">{% for ph in review.photos.all %}<a href="{{ ph.image_url }}" target="_blank" rel="noopener"><img src="{{ ph.image_url }}" alt="Photo from {{ review.username }}" loading="lazy" width="88" height="88"></a>{% endfor %}</div>{% endif %}
+                    <form method="post" action="{% url 'review_helpful' review.id %}" class="rv-helpful">{% csrf_token %}<button type="submit" class="link-btn small"{% if review.id in voted_reviews %} aria-pressed="true"{% endif %}>👍 Helpful{% if review.helpful_count %} ({{ review.helpful_count }}){% endif %}</button></form>
                     {% if review.seller_reply %}<div class="seller-reply"><strong>Response from {% if product.seller_account %}<span data-no-translate>{{ product.seller_account.display_name }}</span>{% else %}{{ brand.site_name }}{% endif %}</strong><p data-no-translate>{{ review.seller_reply }}</p></div>{% endif %}
                 </article>
                 {% empty %}
@@ -405,6 +498,19 @@
             <button class="btn btn-secondary btn-sm" type="submit" style="justify-self:start;">Send report</button>
         </form>
     </details>
+
+    {% if bundle %}
+    <section class="section bundle" aria-labelledby="fbt-h">
+        <div class="section-head"><h2 id="fbt-h">Frequently bought together</h2></div>
+        <form method="post" action="{% url 'add_many' %}" class="fbt">{% csrf_token %}
+            <div class="fbt-items">
+                <label class="fbt-item"><input type="checkbox" name="ids" value="{{ product.id }}" checked data-price="{{ product.price }}"><img src="{{ product.image_url }}" alt="" width="96" height="96" loading="lazy"><span>This item: {{ product.name|truncatechars:40 }}</span><strong>{{ product.price|price }}</strong></label>
+                {% for b in bundle %}<span class="fbt-plus" aria-hidden="true">+</span><label class="fbt-item"><input type="checkbox" name="ids" value="{{ b.id }}" checked data-price="{{ b.price }}"><img src="{{ b.image_url }}" alt="" width="96" height="96" loading="lazy"><span>{{ b.name|truncatechars:40 }}</span><strong>{{ b.price|price }}</strong></label>{% endfor %}
+            </div>
+            <div class="fbt-buy"><span>Total: <strong data-fbt-total>{{ bundle_total|price }}</strong></span><button class="btn btn-primary" type="submit">Add selected to cart</button></div>
+        </form>
+    </section>
+    {% endif %}
 
     {% if also_bought %}
     <section class="section">
@@ -519,6 +625,20 @@
             box.innerHTML = ''; box.appendChild(el); box.hidden = false;
             document.querySelectorAll('.thumbs button').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
+        });
+        const pers = document.querySelector('[data-pers-source]');
+        if (pers) document.addEventListener('submit', function (e) {
+            const h = e.target.querySelector && e.target.querySelector('[data-pers-copy]');
+            if (!h) return;
+            h.value = pers.value.trim();
+            if (pers.required && !h.value) { e.preventDefault(); e.stopImmediatePropagation(); pers.reportValidity(); pers.focus(); }
+        }, true);
+        const fbt = document.querySelector('.fbt');
+        if (fbt) fbt.addEventListener('change', function () {
+            let total = 0;
+            fbt.querySelectorAll('input[name=ids]:checked').forEach(i => total += parseFloat(i.dataset.price));
+            const el = fbt.querySelector('[data-fbt-total]');
+            el.textContent = el.textContent.replace(/[\d.,]+/, total.toFixed(2));
         });
         const sg = document.getElementById('size-guide'), open = document.querySelector('[data-size-guide]');
         if (sg && open && sg.showModal) {

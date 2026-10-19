@@ -417,7 +417,7 @@ def products_bulk(request):
 
 @staff_required
 def product_form(request, pk=None):
-    from .views import (_product_fields_from_post, check_digital, parse_variant_rows, apply_variant_rows, variant_rows_for_form,
+    from .views import (_product_fields_from_post, check_digital, product_form_extras, parse_variant_rows, apply_variant_rows, variant_rows_for_form,
                         gallery_from_post, save_gallery)
     product = get_object_or_404(Product, pk=pk) if pk else None
     if request.method == "POST":
@@ -436,6 +436,7 @@ def product_form(request, pk=None):
             return _render(request, "product_form.html", {
                 "section": "products", "product": product, "form": request.POST, "categories": category_choices(),
                 "approval_choices": Product.APPROVAL_CHOICES, "variant_rows": variant_rows_for_form(request, product),
+                **product_form_extras(),
             })
         approval = request.POST.get("approval_status", "approved")
         if approval not in dict(Product.APPROVAL_CHOICES):
@@ -468,7 +469,7 @@ def product_form(request, pk=None):
         return redirect("manage_product_edit", pk=product.pk)
     return _render(request, "product_form.html", {
         "section": "products", "product": product, "categories": category_choices(),
-        "approval_choices": Product.APPROVAL_CHOICES,
+        "approval_choices": Product.APPROVAL_CHOICES, **product_form_extras(),
         "variant_rows": variant_rows_for_form(request, product),
     })
 
@@ -744,7 +745,8 @@ def customers(request):
 class CouponForm(forms.ModelForm):
     class Meta:
         model = Coupon
-        fields = ["code", "percent_off", "min_order_value", "expiry_date", "usage_limit", "per_user_limit", "active"]
+        fields = ["code", "title", "percent_off", "free_shipping", "min_order_value", "expiry_date", "usage_limit", "per_user_limit",
+                  "is_public", "active"]
         widgets = {"expiry_date": forms.DateInput(attrs={"type": "date"})}
 
     def clean_code(self):
@@ -752,8 +754,8 @@ class CouponForm(forms.ModelForm):
 
     def clean_percent_off(self):
         v = self.cleaned_data["percent_off"]
-        if not 1 <= v <= 100:
-            raise ValidationError("Use a value from 1 to 100.")
+        if not 0 <= v <= 100 or (v == 0 and not self.data.get("free_shipping")):
+            raise ValidationError("Use a value from 1 to 100 (or 0 with free shipping).")
         return v
 
 
@@ -1445,6 +1447,9 @@ class SiteSettingsForm(forms.ModelForm):
          ["auto_payouts", "min_auto_payout"]),
         ("Sponsored products", "Sellers pay per click to show products at the top of search, category pages and the homepage. Manage under Sponsored products.",
          ["ads_enabled", "ads_min_bid", "ads_slots"]),
+        ("Shopper perks", "Membership (free shipping, member price), daily check-in coins, gift options and 'pay in instalments' messages. Collection points are under Shipping.",
+         ["membership_enabled", "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points",
+          "gift_wrap_enabled", "bnpl_enabled", "bnpl_instalments"]),
         ("Gift cards", "Sell digital gift cards on /gift-cards/. Manage and send free ones under Gift cards.", ["gift_cards_enabled"]),
         ("Referral program", "Customers invite friends with their own link. Discount codes are created automatically.",
          ["referral_enabled", "referral_friend_percent", "referral_reward_percent"]),
@@ -1467,7 +1472,32 @@ class SiteSettingsForm(forms.ModelForm):
 
     OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent",
                 "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams", "duties_policy",
-                "cod_max_order", "cod_refusal_limit", "min_auto_payout", "auto_payouts", "ads_min_bid", "ads_slots")
+                "cod_max_order", "cod_refusal_limit", "min_auto_payout", "auto_payouts", "ads_min_bid", "ads_slots",
+                "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points", "bnpl_instalments")
+
+    def clean_membership_name(self):
+        return self._keep("membership_name") or "Plus"
+
+    def clean_membership_price(self):
+        return self._keep("membership_price")
+
+    def clean_membership_days(self):
+        return self._keep("membership_days") or 30
+
+    def clean_membership_discount(self):
+        value = self._keep("membership_discount")
+        if value is not None and value > 50:
+            raise ValidationError("Use 50% or less.")
+        return value
+
+    def clean_checkin_points(self):
+        return self._keep("checkin_points")
+
+    def clean_bnpl_instalments(self):
+        value = self._keep("bnpl_instalments")
+        if value is not None and not 2 <= value <= 12:
+            raise ValidationError("Use 2 to 12.")
+        return value
 
     def _clean_id(self, name, pattern, example):
         import re as _re

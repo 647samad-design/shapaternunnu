@@ -158,6 +158,7 @@ def brand(request):
         "store_currency": dj_settings.STORE_CURRENCY.upper(),
         "nav_categories": category_top_level(),
         "footer_pages": footer_pages(),
+        "photo_search": bool(getattr(dj_settings, "AI_API_KEY", "")),
         "demo_mode": getattr(dj_settings, "DEMO_MODE", False),
         "staging": getattr(dj_settings, "STAGING", False),
     }

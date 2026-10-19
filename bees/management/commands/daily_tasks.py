@@ -25,7 +25,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         failed = []
         from django.conf import settings
-        jobs = [("release_unpaid_orders",), ("order_automation",), ("send_cart_reminders",), ("price_drop_alerts",), ("notify_followers",), ("run_promotions",), ("auto_payouts",), ("plan_reminders",), ("update_seller_badges",), ("update_currency_rates",), ("backup_data",), ("clearsessions",)]
+        jobs = [("release_unpaid_orders",), ("order_automation",), ("send_cart_reminders",), ("price_drop_alerts",), ("notify_followers",), ("subscription_reminders",), ("run_promotions",), ("auto_payouts",), ("plan_reminders",), ("update_seller_badges",), ("update_currency_rates",), ("backup_data",), ("clearsessions",)]
         if getattr(settings, "DEMO_MODE", False):
             jobs.append(("demo_setup", "--reset"))
         for job in jobs:

@@ -212,3 +212,46 @@ def page_edit(request, pk=None, builtin=None):
             messages.success(request, f"'{page.title}' saved.")
             return redirect("manage_pages")
     return _render(request, "page_form.html", {"section": "pages", "page": page or Page(is_published=True, show_in_footer=True)})
+
+
+# ---------------------------------------------------------------------------
+# Collection points
+# ---------------------------------------------------------------------------
+
+@staff_required
+def pickup_points(request):
+    from decimal import Decimal, InvalidOperation
+    from .countries import COUNTRIES
+    from .models import PickupPoint
+    names = dict(COUNTRIES)
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "save":
+            point = PickupPoint.objects.filter(pk=request.POST.get("id") or 0).first() or PickupPoint()
+            country = request.POST.get("country", "").strip().upper()[:2]
+            try:
+                fee = Decimal(request.POST.get("fee") or "0").quantize(Decimal("0.01"))
+            except InvalidOperation:
+                fee = None
+            name, address, city = (request.POST.get(f, "").strip() for f in ("name", "address", "city"))
+            if not (name and address and city) or country not in names or fee is None or fee < 0:
+                messages.error(request, "Fill in the name, address, city, country and a fee (0 for free).")
+            else:
+                point.name, point.address, point.city, point.country, point.fee = name[:100], address[:255], city[:100], country, fee
+                point.postal_code = request.POST.get("postal_code", "").strip()[:20]
+                point.hours = request.POST.get("hours", "").strip()[:120]
+                point.active = True
+                point.save()
+                _log(request, f"Saved collection point {point}")
+                messages.success(request, f"{point} saved.")
+        elif action in ("toggle", "delete"):
+            point = get_object_or_404(PickupPoint, pk=request.POST.get("id"))
+            if action == "delete":
+                point.delete()
+            else:
+                point.active = not point.active
+                point.save(update_fields=["active"])
+            _log(request, f"Collection point {point}: {action}")
+        return redirect("manage_pickup_points")
+    points = [(p, names.get(p.country, p.country)) for p in PickupPoint.objects.all()]
+    return _render(request, "pickup_points.html", {"section": "shipping", "points": points, "countries": COUNTRIES})

@@ -33,6 +33,9 @@
             <div style="min-width:0;flex:1;">
                 <h1><span data-no-translate>{{ seller_name }}</span>{% if seller_account.has_badge %} <span class="pro-badge" title="This seller is on a Pro plan">★ Pro seller</span>{% endif %}{% if seller_account.verified_at %} <span class="seller-badge verified">✓ {{ t.verified_seller }}</span>{% endif %}{% if seller_account.top_seller %} <span class="seller-badge top">★ {{ t.top_seller }}</span>{% endif %}</h1>
                 {% if seller_account.store_description %}<p data-no-translate>{{ seller_account.store_description|truncatewords:40 }}</p>{% endif %}
+                {% if store_vouchers %}<div class="store-vouchers">{% for c in store_vouchers %}<form method="post" action="{% url 'collect_voucher' c.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button type="submit" class="sv-chip">🎟️ {% if c.percent_off %}{{ c.percent_off }}% off{% endif %}{% if c.percent_off and c.free_shipping %} + {% endif %}{% if c.free_shipping %}free shipping{% endif %}{% if c.min_order_value %} over {{ c.min_order_value|money }}{% endif %} · <u>Collect</u></button></form>{% endfor %}</div>
+                <style>.store-vouchers{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.store-vouchers form{margin:0}.sv-chip{border:1px dashed currentColor;background:transparent;color:inherit;border-radius:999px;padding:5px 12px;font-weight:700;cursor:pointer}</style>{% endif %}
+                {% include "bees/partials/seller_info.html" with sa=seller_account %}
                 <div class="store-facts">
                     {% if stats.n %}<span>★ {{ stats.avg|floatformat:1 }} ({{ stats.n }} review{{ stats.n|pluralize }})</span>{% endif %}
                     {% if stats.sold %}<span>{{ stats.sold }}+ sold</span>{% endif %}

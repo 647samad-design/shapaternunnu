@@ -6,15 +6,18 @@
     <p class="muted small">{% if store %}Codes for the whole store.{% else %}Only your products get cheaper; the discount comes off your sale price. Share the code on social media or with loyal customers.{% endif %}</p>
     <form method="post" class="promo-form">{% csrf_token %}<input type="hidden" name="action" value="coupon">
         <div class="field"><label for="pc-code">Code</label><input id="pc-code" name="code" required maxlength="30" placeholder="SUMMER20" style="text-transform:uppercase;" autocomplete="off"></div>
-        <div class="field"><label for="pc-pct">% off</label><input id="pc-pct" name="percent_off" type="number" min="1" max="90" value="10" required></div>
+        <div class="field"><label for="pc-pct">% off</label><input id="pc-pct" name="percent_off" type="number" min="{% if store %}0{% else %}1{% endif %}" max="90" value="10" required></div>
         <div class="field"><label for="pc-min">Min. order</label><input id="pc-min" name="min_order_value" type="number" min="0" step="0.01" value="0"></div>
         <div class="field"><label for="pc-exp">Ends (optional)</label><input id="pc-exp" name="expiry_date" type="date"></div>
         <div class="field"><label for="pc-lim">Total uses (optional)</label><input id="pc-lim" name="usage_limit" type="number" min="1"></div>
         <div class="field"><label for="pc-pu">Uses per customer</label><input id="pc-pu" name="per_user_limit" type="number" min="1" max="100" value="1"></div>
+        <div class="field"><label for="pc-title">Voucher title (optional)</label><input id="pc-title" name="title" maxlength="80" placeholder="Weekend deal"></div>
+        <label class="check small" style="align-self:end;padding-bottom:10px;"><input type="checkbox" name="is_public" value="1" checked> Show in the voucher centre</label>
+        {% if store %}<label class="check small" style="align-self:end;padding-bottom:10px;"><input type="checkbox" name="free_shipping" value="1"> Free shipping</label>{% endif %}
         <button class="btn btn-primary btn-sm" type="submit">Create code</button>
     </form>
     <div class="table-scroll" style="margin-top:12px;"><table class="table"><thead><tr><th>Code</th><th class="num">Off</th><th class="num">Used</th><th>Status</th><th></th></tr></thead><tbody>
-    {% for c in coupons %}<tr><td data-no-translate><code>{{ c.code }}</code>{% if c.min_order_value %}<br><span class="muted small">min {{ c.min_order_value|money }}</span>{% endif %}</td><td class="num">{{ c.percent_off }}%</td><td class="num">{{ c.used }}{% if c.usage_limit %}/{{ c.usage_limit }}{% endif %}</td>
+    {% for c in coupons %}<tr><td data-no-translate><code>{{ c.code }}</code>{% if c.min_order_value %}<br><span class="muted small">min {{ c.min_order_value|money }}</span>{% endif %}</td><td class="num">{{ c.percent_off }}%{% if c.free_shipping %}<br><span class="muted small">+ free ship</span>{% endif %}{% if c.is_public %}<br><span class="muted small">🎟️ public</span>{% endif %}</td><td class="num">{{ c.used }}{% if c.usage_limit %}/{{ c.usage_limit }}{% endif %}</td>
         <td>{% if not c.active %}<span class="pill">Paused</span>{% elif c.expiry_date and c.expiry_date < today %}<span class="pill">Ended</span>{% else %}<span class="pill ok">On</span>{% endif %}{% if c.expiry_date %}<br><span class="muted small">until {{ c.expiry_date|date:"M j" }}</span>{% endif %}</td>
         <td><form method="post" style="display:flex;gap:4px;margin:0;">{% csrf_token %}<input type="hidden" name="id" value="{{ c.id }}"><button class="btn btn-ghost btn-sm" name="action" value="coupon_toggle">{% if c.active %}Pause{% else %}Turn on{% endif %}</button><button class="btn btn-ghost btn-sm" name="action" value="coupon_delete" style="color:var(--sale);" onclick="return confirm('Delete this code?');">Delete</button></form></td></tr>
     {% empty %}<tr><td colspan="5" class="muted" style="text-align:center;padding:18px;">No codes yet.</td></tr>{% endfor %}

@@ -1,0 +1,8 @@
+{% extends "bees/emails/_base_email.html" %}
+{% load bees_extras %}
+{% block email_body %}{% site_brand as b %}
+    <h1 style="margin:0 0 8px;font-size:22px;">Your refill is ready</h1>
+    <p style="margin:0 0 16px;color:#56606B;">It's time for your next <strong data-no-translate>{{ sub.product.name }}</strong>. As a subscriber you pay <strong>{{ price|money }}</strong> each ({{ sub.product.subscribe_percent }}% off).</p>
+    <a href="{{ url }}" style="display:inline-block;background:{{ b.primary_color }};color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:8px;font-weight:bold;">Order {{ sub.quantity }} now</a>
+    <p style="margin:20px 0 0;color:#56606B;font-size:13px;">Change how often or stop anytime in your account under Subscriptions.</p>
+{% endblock %}

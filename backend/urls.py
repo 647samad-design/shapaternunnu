@@ -15,6 +15,7 @@ from bees import account_views
 from bees import manage_views as mv
 from bees import content_views
 from bees import quote_views as qv
+from bees import market_views as mkv
 from bees import seller_views as sv
 from bees import bulk_views as bv
 from bees import giftcards as gc
@@ -79,6 +80,7 @@ urlpatterns = [
     path('cart/', views.cart_view, name='cart'),
     path('cart/add/<int:pk>/', views.add_to_cart, name='add_to_cart'),
     path('cart/update/<str:key>/', views.update_cart_item, name='update_cart_item'),
+    path('cart/note/<str:key>/', views.cart_note, name='cart_note'),
     path('checkout/', views.checkout_view, name='checkout'),
     path('checkout/coupon/', views.apply_coupon, name='apply_coupon'),
     path('order/success/<int:order_id>/', views.order_success, name='order_success'),
@@ -207,6 +209,7 @@ urlpatterns = [
     path('manage/keys/', mv.keys, name='manage_keys'),
     path('manage/taxes/', mv.tax_rates, name='manage_taxes'),
     path('manage/categories/', content_views.categories, name='manage_categories'),
+    path('manage/shipping/collection-points/', content_views.pickup_points, name='manage_pickup_points'),
     path('manage/pages/', content_views.pages, name='manage_pages'),
     path('manage/pages/new/', content_views.page_edit, name='manage_page_new'),
     path('manage/pages/<int:pk>/', content_views.page_edit, name='manage_page_edit'),
@@ -217,6 +220,22 @@ urlpatterns = [
     path('seller/quotes/', sv.seller_required()(qv.seller_quotes), name='seller_quotes'),
     path('manage/quotes/', mv.staff_required(qv.manage_quotes), name='manage_quotes'),
     path('download/<int:item_id>/', qv.download, name='digital_download'),
+    path('review/<int:review_id>/helpful/', mkv.review_helpful, name='review_helpful'),
+    path('product/<int:pk>/offer/', mkv.make_offer, name='make_offer'),
+    path('product/<int:pk>/bid/', mkv.place_bid, name='place_bid'),
+    path('product/<int:pk>/subscribe/', mkv.subscribe, name='subscribe'),
+    path('account/subscriptions/', mkv.subscriptions, name='subscriptions'),
+    path('subscriptions/<int:sub_id>/reorder/', mkv.subscription_reorder, name='subscription_reorder'),
+    path('membership/', mkv.membership, name='membership'),
+    path('membership/done/<int:pay_id>/', mkv.membership_done, name='membership_done'),
+    path('check-in/', mkv.check_in, name='check_in'),
+    path('search/photo/', mkv.photo_search, name='photo_search'),
+    path('vouchers/', mkv.vouchers, name='vouchers'),
+    path('vouchers/<int:coupon_id>/collect/', mkv.collect_voucher, name='collect_voucher'),
+    path('cart/save-for-later/<str:key>/', mkv.save_for_later, name='save_for_later'),
+    path('cart/add-many/', mkv.add_many, name='add_many'),
+    path('wishlist/manage/', mkv.wishlist_manage, name='wishlist_manage'),
+    path('wishlist/s/<str:token>/', mkv.shared_wishlist, name='shared_wishlist'),
     path('store-follow/<int:seller_id>/', qv.follow_store, name='follow_store'),
     path('manage/problems/<int:pk>/', mv.claim_detail, name='manage_claim'),
     path('manage/cash-on-delivery/', mv.cod_protection, name='manage_cod'),

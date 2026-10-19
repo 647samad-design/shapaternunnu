@@ -2,7 +2,9 @@
     <a href="{% url 'profile' %}" {% if tab == 'profile' %}aria-current="page"{% endif %}>Profile &amp; addresses</a>
     <a href="{% url 'my_orders' %}">Orders</a>
     <a href="{% url 'messages_inbox' %}">{{ t.messages }}</a>
-    <a href="{% url 'my_quotes' %}" {% if tab == 'quotes' %}aria-current="page"{% endif %}>Quotes</a>
+    <a href="{% url 'my_quotes' %}" {% if tab == 'quotes' %}aria-current="page"{% endif %}>Quotes &amp; offers</a>
+    <a href="{% url 'subscriptions' %}" {% if tab == 'subscriptions' %}aria-current="page"{% endif %}>Subscriptions</a>
+    <a href="{% url 'vouchers' %}">Vouchers</a>
     {% if brand.referral_enabled %}<a href="{% url 'referrals' %}" {% if tab == 'referrals' %}aria-current="page"{% endif %}>{{ t.invite_friends }}</a>{% endif %}
     <a href="{% url 'account_security' %}" {% if tab == 'security' %}aria-current="page"{% endif %}>Password &amp; security</a>
     <a href="{% url 'gift_cards_mine' %}" {% if tab == 'gift_cards' %}aria-current="page"{% endif %}>Gift cards &amp; credit</a>

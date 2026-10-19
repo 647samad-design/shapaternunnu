@@ -1,0 +1,41 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Vouchers — {{ brand.site_name }}{% endblock %}
+{% block meta_description %}Collect discount and free-shipping vouchers from {{ brand.site_name }} and its sellers.{% endblock %}
+{% block content %}
+<div class="wrap page">
+    <div class="page-head"><div><h1>Voucher centre</h1><p>Collect vouchers now, use them at checkout. {% if user.is_authenticated %}Collected vouchers appear at checkout automatically.{% else %}<a class="link" href="{% url 'login' %}?next={% url 'vouchers' %}">Sign in</a> to collect.{% endif %}</p></div></div>
+    {% if user.is_authenticated and brand.checkin_points %}
+    <form method="post" action="{% url 'check_in' %}" class="checkin">{% csrf_token %}<input type="hidden" name="next" value="{% url 'vouchers' %}">
+        <span><strong>🪙 Daily check-in</strong> <span class="muted">Collect {{ brand.checkin_points }} coins every day - double on day 7. Coins turn into store credit.</span></span>
+        <button class="btn btn-accent btn-sm" type="submit">Collect today's coins</button></form>
+    {% endif %}
+    <div class="vgrid">
+        {% for c in coupons %}
+        <article class="voucher">
+            <div class="v-left"><strong>{% if c.percent_off %}{{ c.percent_off }}% off{% endif %}{% if c.percent_off and c.free_shipping %} + {% endif %}{% if c.free_shipping %}Free shipping{% endif %}</strong>
+                <span>{% if c.min_order_value %}On orders over {{ c.min_order_value|money }}{% else %}No minimum{% endif %}</span></div>
+            <div class="v-right">
+                <span class="v-title">{{ c.title|default:"Voucher" }}</span>
+                <span class="muted small">{% if c.seller_account %}<a href="{% url 'store_page' c.seller_account.display_name %}" data-no-translate>{{ c.seller_account.display_name }}</a> products{% else %}Whole store{% endif %}{% if c.expiry_date %} · until {{ c.expiry_date|date:"j M" }}{% endif %}</span>
+                {% if c.id in collected %}<span class="v-done">✓ Collected · <code>{{ c.code }}</code></span>
+                {% elif user.is_authenticated %}<form method="post" action="{% url 'collect_voucher' c.id %}">{% csrf_token %}<input type="hidden" name="next" value="{% url 'vouchers' %}"><button class="btn btn-primary btn-sm" type="submit">Collect</button></form>
+                {% else %}<a class="btn btn-secondary btn-sm" href="{% url 'login' %}?next={% url 'vouchers' %}">Sign in to collect</a>{% endif %}
+            </div>
+        </article>
+        {% empty %}<div class="panel empty"><h2>No vouchers right now</h2><p>Check back soon - new deals are added regularly.</p></div>{% endfor %}
+    </div>
+</div>
+<style>
+.checkin { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 14px 18px; margin-bottom: 18px; border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 18%, var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.vgrid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
+.voucher { display: grid; grid-template-columns: 130px 1fr; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); background: var(--surface); }
+.v-left { display: grid; align-content: center; gap: 4px; padding: 16px; background: var(--brand); color: var(--on-brand); border-right: 2px dashed color-mix(in srgb, var(--on-brand) 40%, transparent); }
+.v-left strong { font-size: 1.25rem; line-height: 1.15; }
+.v-left span { font-size: .8rem; opacity: .85; }
+.v-right { display: grid; gap: 6px; padding: 14px 16px; align-content: center; }
+.v-right form { margin: 0; }
+.v-title { font-weight: 800; }
+.v-done { color: var(--ok); font-weight: 700; font-size: .9rem; }
+</style>
+{% endblock %}

@@ -35,14 +35,14 @@
         <div style="text-align:right;"><strong>{{ seller.display_name }}</strong><div class="muted">via {% site_brand as b %}{{ b.site_name }}</div></div>
     </header>
     <div class="cols">
-        <div><h2>Ship to</h2><p><strong>{{ order.full_name }}</strong><br>{{ order.address }}<br>{{ order.city }}{% if order.state %}, {{ order.state }}{% endif %} {{ order.postal_code }}<br>{{ order.country|country_name }}<br>{{ order.phone }}</p></div>
+        <div><h2>Ship to</h2>{% include "bees/partials/order_extras.html" %}<p><strong>{{ order.full_name }}</strong><br>{{ order.address }}<br>{{ order.city }}{% if order.state %}, {{ order.state }}{% endif %} {{ order.postal_code }}<br>{{ order.country|country_name }}<br>{{ order.phone }}</p></div>
         <div><h2>Payment</h2><p>{% if order.payment_method == "cod" and order.payment_status != "paid" %}<strong>Cash on delivery</strong> - the courier collects payment{% else %}Paid online{% endif %}</p>{% if order.courier_name or order.tracking_number %}<h2 style="margin-top:14px;">Shipping</h2><p>{{ order.courier_name }} {{ order.tracking_number }}</p>{% endif %}</div>
     </div>
     <table>
         <thead><tr><th class="check">Packed</th><th>Item</th><th>Option / SKU</th><th class="qty">Qty</th></tr></thead>
         <tbody>
         {% for item in items %}
-        <tr><td class="check"><span class="box"></span></td><td>{{ item.product_name }}</td><td>{% if item.variant %}{{ item.variant.label }}{% if item.variant.sku %}<br><span class="muted">{{ item.variant.sku }}</span>{% endif %}{% else %}—{% endif %}</td><td class="qty"><strong>{{ item.quantity }}</strong></td></tr>
+        <tr><td class="check"><span class="box"></span></td><td>{{ item.product_name }}{% if item.personalization %}<br><strong>Personalize: {{ item.personalization }}</strong>{% endif %}</td><td>{% if item.variant %}{{ item.variant.label }}{% if item.variant.sku %}<br><span class="muted">{{ item.variant.sku }}</span>{% endif %}{% else %}—{% endif %}</td><td class="qty"><strong>{{ item.quantity }}</strong></td></tr>
         {% endfor %}
         </tbody>
     </table>

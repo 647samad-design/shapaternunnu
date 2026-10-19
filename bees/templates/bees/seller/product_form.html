@@ -6,6 +6,7 @@
     <p class="muted" style="margin-bottom:18px;">{% if product %}Price and stock changes go live right away. Changing the name, image, category or description sends the listing for a quick review.{% else %}New listings are reviewed by our team before they go live.{% endif %}</p>
     <form method="post" enctype="multipart/form-data">
         {% csrf_token %}
+        {% if offer_master %}<input type="hidden" name="offer_of" value="{{ offer_master.id }}"><div class="callout" style="margin-bottom:14px;">You're adding <strong>your own offer</strong> of <a href="{% url 'product_detail' offer_master.id %}" target="_blank" rel="noopener">{{ offer_master.name }}</a>. Shoppers will see it under "Other sellers" on that product. Set your price, stock and condition.</div>{% endif %}
         <div class="form-grid">
             <div class="field span-2"><label for="pf_name">Product name</label><input type="text" id="pf_name" name="name" value="{{ p.name|default:'' }}" required maxlength="255"></div>
             <div class="field"><label for="pf_cat">Category</label>

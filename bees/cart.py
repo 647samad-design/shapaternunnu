@@ -29,9 +29,9 @@ def lines(cart):
     from .models import Product, ProductVariant
 
     parsed = {}
-    quote_rows = _quote_lines(cart)
+    quote_rows = _quote_lines(cart) + _subscription_lines(cart)
     for key, qty in (cart or {}).items():
-        if str(key).startswith("q"):
+        if str(key)[:1] in ("q", "s"):
             continue
         ids = parse_key(key)
         try:
@@ -89,6 +89,32 @@ def _quote_lines(cart):
             "unit_price": q.offer_price, "subtotal": q.offer_price * q.quantity, "base_price": q.offer_price, "bundle": False,
             "label": (variant.label + " · " if variant else "") + f"Quote #{q.id}",
             "stock": variant.stock if variant else q.product.stock,
+        })
+    return rows
+
+
+def _subscription_lines(cart):
+    """Cart rows for Subscribe & Save reorders ("s12"): at the subscription price."""
+    from .market import subscription_price
+    from .models import Product, Subscription
+    ids = [int(k[1:]) for k in (cart or {}) if str(k).startswith("s") and str(k)[1:].isdigit()]
+    if not ids:
+        return []
+    live = set(Product.objects.live().filter(subscriptions__id__in=ids).values_list("id", flat=True))
+    rows = []
+    for sub in Subscription.objects.filter(id__in=ids, active=True).select_related("product__seller_account", "variant"):
+        if sub.product_id not in live or not sub.product.subscribe_percent:
+            continue
+        variant = sub.variant
+        if variant is not None:
+            variant.product = sub.product
+        unit = subscription_price(sub)
+        base = variant.unit_price if variant else sub.product.price
+        rows.append({
+            "key": f"s{sub.id}", "product": sub.product, "variant": variant, "qty": sub.quantity, "subscription": sub,
+            "unit_price": unit, "subtotal": unit * sub.quantity, "base_price": base, "bundle": unit != base,
+            "label": (variant.label + " · " if variant else "") + f"Subscribe & Save -{sub.product.subscribe_percent}%",
+            "stock": variant.stock if variant else sub.product.stock,
         })
     return rows
 

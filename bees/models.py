@@ -57,6 +57,11 @@ class ProductQuerySet(models.QuerySet):
             | models.Q(seller_account__status="approved", seller_account__vacation_mode=False)
         )
 
+    def listed(self):
+        """Live products for browsing and search: other sellers' offers of
+        the same product show on its page instead of as duplicates."""
+        return self.live().filter(offer_of__isnull=True)
+
     def flash(self):
         """Live products in a running flash sale (ended deals drop out)."""
         return self.live().filter(is_flash_sale=True).filter(
@@ -143,6 +148,8 @@ class QuoteRequest(models.Model):
     buyer = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="quotes")
     seller_account = models.ForeignKey("SellerAccount", null=True, blank=True, on_delete=models.CASCADE, related_name="quotes",
                                        help_text="Empty = the store's own product.")
+    KINDS = [("quote", "Quote"), ("offer", "Offer"), ("auction", "Auction win")]
+    kind = models.CharField(max_length=8, choices=KINDS, default="quote")
     quantity = models.PositiveIntegerField()
     target_price = models.DecimalField("Buyer's target unit price", max_digits=10, decimal_places=2, null=True, blank=True)
     company = models.CharField(max_length=120, blank=True)
@@ -235,6 +242,25 @@ class Product(models.Model):
     is_digital = models.BooleanField("Digital download", default=False)
     digital_file = models.FileField(upload_to="digital/%Y/%m/", storage=_private_storage, blank=True, null=True)
     download_limit = models.PositiveSmallIntegerField(default=5, help_text="How many times a buyer can download the file.")
+    CONDITIONS = [("new", "New"), ("refurbished", "Refurbished"), ("used_like_new", "Used - like new"),
+                  ("used_good", "Used - good"), ("used_fair", "Used - acceptable")]
+    condition = models.CharField(max_length=16, choices=CONDITIONS, default="new", db_index=True)
+    ships_from = models.CharField("Ships from (country code)", max_length=2, blank=True, help_text="2-letter code, e.g. PT. Empty = the seller's country.")
+    personalization_prompt = models.CharField("Personalization", max_length=120, blank=True,
+                                              help_text="Ask buyers for custom text, e.g. 'Name to engrave (max 12 letters)'. Empty = off.")
+    personalization_required = models.BooleanField(default=False)
+    personalization_max = models.PositiveSmallIntegerField(default=60)
+    accepts_offers = models.BooleanField("Accept offers", default=False, help_text="Buyers can offer their own price (Make an offer).")
+    offer_floor = models.DecimalField("Auto-decline offers below", max_digits=10, decimal_places=2, null=True, blank=True)
+    offer_of = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="other_offers",
+                                 help_text="This listing is another seller's offer of that product (shown under 'Other sellers').")
+    subscribe_percent = models.PositiveSmallIntegerField("Subscribe & Save discount (%)", default=0, help_text="0 = no subscriptions.")
+    is_auction = models.BooleanField("Auction", default=False)
+    auction_start_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    auction_reserve = models.DecimalField("Reserve price", max_digits=10, decimal_places=2, null=True, blank=True,
+                                          help_text="Lowest price you'll sell for (hidden). Empty = none.")
+    auction_ends_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    auction_closed = models.BooleanField(default=False, editable=False)
     # EU General Product Safety Regulation (GPSR): who made it and who is responsible in the EU.
     manufacturer = models.CharField(max_length=300, blank=True, help_text="Manufacturer's name, postal address and email or website.")
     eu_responsible_person = models.CharField("EU responsible person", max_length=300, blank=True, help_text="Name, address and contact of the person in the EU responsible for this product (needed when the maker is outside the EU).")
@@ -447,6 +473,7 @@ class Review(models.Model):
     rating = models.PositiveSmallIntegerField(default=5)
     comment = models.TextField()
     is_verified_purchase = models.BooleanField(default=False)
+    helpful_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -520,6 +547,9 @@ class Order(models.Model):
     tax_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     tax_included = models.BooleanField(default=False, help_text="Prices already included this tax (shown, not added).")
     customer_tax_id = models.CharField("Customer VAT / tax number", max_length=40, blank=True)
+    gift_wrap = models.BooleanField(default=False)
+    gift_message = models.CharField(max_length=300, blank=True)
+    pickup_point = models.ForeignKey("PickupPoint", null=True, blank=True, on_delete=models.SET_NULL, related_name="orders")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending", db_index=True)
     coupon_code = models.CharField(max_length=30, blank=True)
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -865,6 +895,7 @@ class OrderItem(models.Model):
     delivered_at = models.DateTimeField(null=True, blank=True)
     shipped_at = models.DateTimeField(null=True, blank=True)
     downloads = models.PositiveSmallIntegerField(default=0, editable=False)
+    personalization = models.CharField(max_length=300, blank=True)
     quote = models.ForeignKey("QuoteRequest", null=True, blank=True, on_delete=models.SET_NULL, related_name="order_items")
 
     @property
@@ -926,6 +957,7 @@ class OrderItem(models.Model):
 class Wishlist(models.Model):
     user = models.ForeignKey("auth.User", related_name="wishlist_items", on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    list_name = models.CharField(max_length=40, blank=True, default="", help_text="Empty = the main wishlist.")
     created_at = models.DateTimeField(auto_now_add=True)
     # Price-drop alerts compare against the last price the shopper saw.
     price_seen = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -954,6 +986,9 @@ class Coupon(models.Model):
     seller_account = models.ForeignKey("SellerAccount", null=True, blank=True, on_delete=models.CASCADE, related_name="coupons")
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     percent_off = models.PositiveIntegerField(default=10)
+    free_shipping = models.BooleanField(default=False, help_text="Also (or only, with 0%) makes shipping free.")
+    is_public = models.BooleanField("Show in the voucher centre", default=False, help_text="Shoppers can collect it on /vouchers/ and the store page.")
+    title = models.CharField(max_length=80, blank=True, help_text="Shown in the voucher centre, e.g. 'Weekend deal'.")
     active = models.BooleanField(default=True)
     expiry_date = models.DateField(
         null=True, blank=True,
@@ -1046,6 +1081,10 @@ class Profile(models.Model):
     staff_role = models.CharField(max_length=12, blank=True, help_text="Store team role (only for staff). Empty = manager.")
     price_drop_alerts = models.BooleanField(default=True, help_text="Email when something in the wishlist gets cheaper.")
     store_credit = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    wishlist_token = models.CharField(max_length=24, blank=True, help_text="Set when the wishlist is shared.")
+    last_checkin = models.DateField(null=True, blank=True)
+    checkin_streak = models.PositiveSmallIntegerField(default=0)
+    member_until = models.DateTimeField(null=True, blank=True, help_text="Paid membership ends at this time.")
     # Stripe customer that holds this person's saved cards. Card numbers
     # never touch our servers - Stripe stores them.
     stripe_customer_id = models.CharField(max_length=255, blank=True)
@@ -1208,6 +1247,9 @@ class SellerAccount(models.Model):
     quick_replies = models.TextField(
         blank=True, default="Thanks for your message! I'll get back to you shortly.\nYes, it's in stock and ready to ship.\nIt usually arrives in 3-7 working days.\nYes, we ship to your country.",
         help_text="Saved replies for Messages, one per line.")
+    company_registration = models.CharField("Company registration number", max_length=60, blank=True)
+    trader_email = models.EmailField("Public contact email", blank=True)
+    trader_declared_at = models.DateTimeField(null=True, blank=True, help_text="When the seller confirmed it only sells products that follow EU law (DSA).")
     store_logo = models.ImageField(upload_to=seller_logo_path, blank=True, null=True)
     store_banner = models.ImageField(upload_to=seller_banner_path, blank=True, null=True)
 
@@ -1670,6 +1712,16 @@ class SiteSettings(models.Model):
     ads_enabled = models.BooleanField("Sponsored products", default=True, help_text="Sellers can pay per click to show products at the top of search and category pages. Paid from their earnings.")
     ads_min_bid = models.DecimalField("Lowest cost per click", max_digits=6, decimal_places=2, default="0.10")
     ads_slots = models.PositiveSmallIntegerField("Sponsored places per page", default=2)
+    bnpl_enabled = models.BooleanField("Show 'pay in instalments'", default=False,
+                                       help_text="Turn on after enabling Klarna / Afterpay / Affirm in your Stripe Dashboard. Shows 'Pay in 4' on product pages.")
+    bnpl_instalments = models.PositiveSmallIntegerField("Instalments shown", default=4)
+    gift_wrap_enabled = models.BooleanField("Gift options at checkout", default=True, help_text="Free gift wrap and a gift message (prices hidden on the packing slip).")
+    membership_enabled = models.BooleanField("Paid membership", default=False, help_text="Shoppers pay for free shipping and member prices (needs card payments).")
+    membership_name = models.CharField(max_length=40, default="Plus")
+    membership_price = models.DecimalField(max_digits=8, decimal_places=2, default="4.99")
+    membership_days = models.PositiveSmallIntegerField("Membership length (days)", default=30)
+    membership_discount = models.PositiveSmallIntegerField("Member discount (%)", default=0, help_text="Extra % off for members on every order (the store pays it). 0 = only free shipping.")
+    checkin_points = models.PositiveSmallIntegerField("Daily check-in coins", default=5, help_text="Reward points for visiting each day (7-day streak gets double). 0 = off.")
     gift_cards_enabled = models.BooleanField(default=True, help_text="Sell digital gift cards (needs card or PayPal payments). Redeemed as store credit.")
     require_seller_2fa = models.BooleanField(default=False, help_text="Sellers must turn on two-step sign-in before using Seller Center.")
     cookie_banner = models.BooleanField(default=True, help_text="Ask visitors before using analytics/marketing cookies (required in the EU/UK).")
@@ -2353,3 +2405,106 @@ class ApiToken(models.Model):
     def is_expired(self):
         from django.utils import timezone
         return self.expires_at is not None and self.expires_at <= timezone.now()
+
+
+
+# ---------------------------------------------------------------------------
+# Marketplace parity (Amazon / eBay / Etsy / Daraz features)
+# ---------------------------------------------------------------------------
+
+class ReviewPhoto(models.Model):
+    review = models.ForeignKey(Review, related_name="photos", on_delete=models.CASCADE)
+    image_url = models.CharField(max_length=500)
+
+
+class ReviewVote(models.Model):
+    review = models.ForeignKey(Review, related_name="votes", on_delete=models.CASCADE)
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="+")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["review", "user"], name="one_helpful_vote")]
+
+
+class CouponClaim(models.Model):
+    """A voucher a shopper collected from the voucher centre."""
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="collected_coupons")
+    coupon = models.ForeignKey(Coupon, on_delete=models.CASCADE, related_name="claims")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "coupon"], name="one_claim_per_coupon")]
+
+
+class PriceHistory(models.Model):
+    """Every price a product had, for the EU 'lowest price in the last 30
+    days' rule (Omnibus Directive) shown next to discounts."""
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="price_history")
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    recorded_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["product", "recorded_at"])]
+
+
+class Bid(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="bids")
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="bids")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-amount", "created_at"]
+
+
+class Subscription(models.Model):
+    """Subscribe & Save: every N weeks the shopper gets a one-click reorder
+    at the subscription discount."""
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="subscriptions")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="subscriptions")
+    variant = models.ForeignKey("ProductVariant", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    quantity = models.PositiveSmallIntegerField(default=1)
+    every_weeks = models.PositiveSmallIntegerField(default=4)
+    next_date = models.DateField(db_index=True)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["next_date"]
+
+
+class PickupPoint(models.Model):
+    """A collection point (shop, locker) where customers can pick up orders."""
+    name = models.CharField(max_length=100)
+    address = models.CharField(max_length=255)
+    city = models.CharField(max_length=100)
+    postal_code = models.CharField(max_length=20, blank=True)
+    country = models.CharField(max_length=2)
+    hours = models.CharField("Opening hours", max_length=120, blank=True)
+    fee = models.DecimalField(max_digits=8, decimal_places=2, default=0, help_text="Shipping fee when collecting here.")
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["country", "city", "name"]
+
+    def __str__(self):
+        return f"{self.name}, {self.city}"
+
+
+class MembershipPayment(models.Model):
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="membership_payments")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    days = models.PositiveSmallIntegerField()
+    stripe_session_id = models.CharField(max_length=255, blank=True)
+    status = models.CharField(max_length=10, default="pending")  # pending / paid
+    created_at = models.DateTimeField(auto_now_add=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+
+@receiver(post_save, sender=Product)
+def _remember_price(sender, instance, created, **kwargs):
+    fields = kwargs.get("update_fields")
+    if fields is not None and "price" not in fields:
+        return
+    last = PriceHistory.objects.filter(product=instance).order_by("-recorded_at").values_list("price", flat=True).first()
+    if last is None or last != instance.price:
+        PriceHistory.objects.create(product=instance, price=instance.price)

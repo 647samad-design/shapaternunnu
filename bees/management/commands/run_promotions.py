@@ -10,4 +10,6 @@ class Command(BaseCommand):
         tick()
         from bees.campaigns import continue_sending
         continue_sending()
-        self.stdout.write("  sales checked, email campaigns continued")
+        from bees.market import close_auctions
+        ended = close_auctions()
+        self.stdout.write(f"  sales checked, email campaigns continued, {ended} auction(s) ended")

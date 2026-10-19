@@ -43,6 +43,7 @@
                 {% if item.product %}<img src="{{ item.product.image_url }}" alt="">{% else %}<span class="thumb" style="width:56px;height:56px;"></span>{% endif %}
                 <div>
                     <strong>{{ item.product_name }}</strong>{% if item.variant_id %} <span class="muted">({{ item.variant.label }})</span>{% endif %}
+                    {% if item.personalization %}<div class="small" style="margin-top:2px;">✍️ Personalization: <strong>{{ item.personalization }}</strong></div>{% endif %}
                     <div class="muted small">{% if item.variant.sku %}SKU {{ item.variant.sku }} · {% endif %}{{ item.quantity }} × {{ item.price|money }} = {{ item.subtotal|money }}</div>
                     <div class="small">Commission {{ item.commission_rate|floatformat:"-1" }}% ({{ item.commission_amount|money }}) · <strong>you earn {{ item.seller_earning|money }}</strong></div>
                     {% if item.open_return %}<div style="margin-top:4px;"><span class="pill warn">Return {{ item.open_return.get_status_display|lower }}</span></div>{% elif item.was_refunded %}<div style="margin-top:4px;"><span class="pill bad">Refunded after return</span></div>{% endif %}
@@ -88,6 +89,7 @@
     <div class="col-stack">
         <section class="panel">
             <h2>Ship to</h2>
+            {% include "bees/partials/order_extras.html" %}
             <p class="addr" id="ship-addr">{{ order.full_name }}
 {{ order.address }}
 {{ order.city }}{% if order.state %}, {{ order.state }}{% endif %} {{ order.postal_code }}

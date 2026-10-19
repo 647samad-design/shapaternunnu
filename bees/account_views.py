@@ -363,6 +363,7 @@ def delete_account(request):
 STORE_TEXT_FIELDS = {
     "store_description": 5000, "phone": 30, "business_address": 255, "city": 100, "country": 100,
     "bank_details": 255, "tax_info": 100, "brand_info": 5000, "pickup_state": 100, "pickup_postal_code": 20,
+    "company_registration": 60,
 }
 
 
@@ -397,6 +398,18 @@ def store_settings(request):
                 seller.business_name = name
             for field, limit in STORE_TEXT_FIELDS.items():
                 setattr(seller, field, request.POST.get(field, "").strip()[:limit])
+            trader_email = request.POST.get("trader_email", "").strip()[:254]
+            try:
+                if trader_email:
+                    from django.core.validators import validate_email
+                    validate_email(trader_email)
+                seller.trader_email = trader_email
+            except ValidationError:
+                messages.warning(request, "The public contact email wasn't valid, so it wasn't changed.")
+            if request.POST.get("trader_declared") and not seller.trader_declared_at:
+                seller.trader_declared_at = timezone.now()
+            elif not request.POST.get("trader_declared"):
+                seller.trader_declared_at = None
             from .images import BANNER_MAX, LOGO_MAX, optimize
             for field in ("store_logo", "store_banner"):
                 if request.FILES.get(field):
