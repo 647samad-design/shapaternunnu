@@ -13,7 +13,9 @@
             {% if brand.logo %}<img src="{{ brand.logo }}" alt="{{ brand.site_name }}" style="height:30px;">{% else %}<span class="logo-text">{{ brand.site_name }}</span>{% endif %}
         </a>
         <span class="tag hide-xs">Admin</span>
+        <form method="get" action="{% url 'manage_search' %}" class="adm-search" role="search"><label class="sr-only" for="adm-q">Search orders, products, customers</label><input id="adm-q" name="q" placeholder="Search order #, email, product…" autocomplete="off"></form>
         <nav class="links" aria-label="Admin shortcuts">
+            <a href="{% url 'manage_search' %}" class="adm-search-link">Search</a>
             <a href="{% url 'home' %}" target="_blank" rel="noopener">View store</a>
             <a href="{% url 'admin:index' %}" class="hide-sm">Advanced</a>
             <button type="button" onclick="toggleTheme()" class="hide-sm" aria-label="Toggle dark mode">Theme</button>

@@ -696,6 +696,7 @@
                         <li><a href="{% url 'buyer_protection' %}">Buyer protection</a></li>
                         {% if brand.support_email %}<li><a href="mailto:{{ brand.support_email }}">{{ brand.support_email }}</a></li>{% endif %}
                         {% if brand.support_phone %}<li><a href="tel:{{ brand.support_phone }}">{{ brand.support_phone }}</a></li>{% endif %}
+                        {% if brand.whatsapp_number %}<li><a href="{{ brand.whatsapp_number|wa_link }}" target="_blank" rel="noopener">💬 WhatsApp us</a></li>{% endif %}
                     </ul>
                 </div>
                 <div>

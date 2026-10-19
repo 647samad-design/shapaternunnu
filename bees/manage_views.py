@@ -1442,7 +1442,7 @@ class SiteSettingsForm(forms.ModelForm):
                 ("Order rules", "Automatic steps that keep orders moving and protect your money. Runs with the daily tasks.",
          ["auto_cancel_days", "auto_deliver_days", "claim_reply_days"]),
                 ("Contact & social", "Shown in the footer, emails and help page.",
-         ["support_email", "support_phone", "company_address", "facebook_url", "instagram_url", "twitter_url", "youtube_url"]),
+         ["support_email", "support_phone", "whatsapp_number", "company_address", "facebook_url", "instagram_url", "twitter_url", "youtube_url"]),
         ("Seller payouts", "Sellers choose PayPal or Stripe in Seller Center > Earnings. Only money past the return window is sent. Bank-transfer sellers are still paid by hand.",
          ["auto_payouts", "min_auto_payout"]),
         ("Sponsored products", "Sellers pay per click to show products at the top of search, category pages and the homepage. Manage under Sponsored products.",
@@ -1450,6 +1450,8 @@ class SiteSettingsForm(forms.ModelForm):
         ("Shopper perks", "Membership (free shipping, member price), daily check-in coins, gift options and 'pay in instalments' messages. Collection points are under Shipping.",
          ["membership_enabled", "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points",
           "gift_wrap_enabled", "bnpl_enabled", "bnpl_instalments", "affiliate_percent"]),
+        ("Save time", "Less manual work: trusted sellers' products go live by themselves, everyone gets a morning summary, and order texts can go by WhatsApp.",
+         ["auto_approve_trusted", "daily_digest", "message_channel"]),
         ("Gift cards", "Sell digital gift cards on /gift-cards/. Manage and send free ones under Gift cards.", ["gift_cards_enabled"]),
         ("Referral program", "Customers invite friends with their own link. Discount codes are created automatically.",
          ["referral_enabled", "referral_friend_percent", "referral_reward_percent"]),
@@ -1473,7 +1475,10 @@ class SiteSettingsForm(forms.ModelForm):
     OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent",
                 "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams", "duties_policy",
                 "cod_max_order", "cod_refusal_limit", "min_auto_payout", "auto_payouts", "ads_min_bid", "ads_slots",
-                "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points", "bnpl_instalments", "affiliate_percent")
+                "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points", "bnpl_instalments", "affiliate_percent", "message_channel")
+
+    def clean_message_channel(self):
+        return self.cleaned_data.get("message_channel") or self.instance.message_channel or "sms"
 
     def clean_affiliate_percent(self):
         value = self._keep("affiliate_percent")

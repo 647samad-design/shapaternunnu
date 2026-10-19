@@ -466,3 +466,53 @@ def shop_assistant(request):
     result = shopping_ai.answer(question, request) if question else None
     return render(request, "bees/assistant.html", {"question": question, "result": result,
                                                    "examples": shopping_ai.EXAMPLES})
+
+
+def _can_list(request):
+    from .views import get_seller_account_for_user
+    if not request.user.is_authenticated:
+        return False
+    if request.user.is_staff:
+        return True
+    seller, _role = get_seller_account_for_user(request.user)
+    return bool(seller and seller.status == "approved")
+
+
+@require_POST
+@ratelimit("listing_photo", rate_limit=30, window_seconds=3600, redirect_to="home")
+def listing_from_photo(request):
+    from django.core.exceptions import ValidationError
+    from django.http import JsonResponse
+    from .categories import choices
+    from .images import optimize
+    from .security import validate_image_upload
+    if not _can_list(request):
+        return JsonResponse({"error": "Only approved sellers and store staff can use this."}, status=403)
+    f = request.FILES.get("photo")
+    if not f:
+        return JsonResponse({"error": "Choose a photo."}, status=400)
+    if not market.image_search_enabled():
+        return JsonResponse({"error": "The AI helper isn't turned on for this store (add the AI key under Keys & passwords)."}, status=400)
+    try:
+        validate_image_upload(f)
+    except ValidationError as exc:
+        return JsonResponse({"error": " ".join(exc.messages)}, status=400)
+    opt = optimize(f, 900)
+    opt.seek(0)
+    media = getattr(opt, "content_type", "") or "image/jpeg"
+    draft = market.listing_from_photo(opt.read(), media if media in ("image/jpeg", "image/png", "image/webp") else "image/jpeg", choices())
+    if not draft:
+        return JsonResponse({"error": "We couldn't read that photo. Try a clearer one, on a plain background."}, status=422)
+    return JsonResponse({"draft": draft})
+
+
+def price_tips(request):
+    from django.http import JsonResponse
+    from .templatetags.bees_extras import money
+    if not _can_list(request):
+        return JsonResponse({}, status=403)
+    pid = request.GET.get("product", "")
+    tips = market.price_tips(request.GET.get("category", ""), int(pid) if pid.isdigit() else None)
+    if not tips:
+        return JsonResponse({"tips": None})
+    return JsonResponse({"tips": {k: (money(v) if k != "count" else v) for k, v in tips.items()}})

@@ -1,0 +1,17 @@
+{% extends "bees/emails/_base_email.html" %}
+{% load bees_extras %}
+{% block email_body %}{% site_brand as b %}
+    <h1 style="margin:0 0 6px;font-size:22px;">Good morning ☀️</h1>
+    <p style="margin:0 0 18px;color:#56606B;">Here's {{ s.day|date:"l j F" }} at a glance.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:18px;"><tr>
+        <td style="padding:12px;border:1px solid #DDE2E6;border-radius:8px;text-align:center;"><div style="font-size:24px;font-weight:bold;">{{ s.orders }}</div><div style="color:#56606B;font-size:13px;">orders</div></td>
+        <td style="width:8px;"></td>
+        <td style="padding:12px;border:1px solid #DDE2E6;border-radius:8px;text-align:center;"><div style="font-size:24px;font-weight:bold;">{{ s.revenue|money }}</div><div style="color:#56606B;font-size:13px;">sales</div></td>
+        <td style="width:8px;"></td>
+        <td style="padding:12px;border:1px solid #DDE2E6;border-radius:8px;text-align:center;"><div style="font-size:24px;font-weight:bold;">{{ s.customers }}</div><div style="color:#56606B;font-size:13px;">new customers</div></td>
+    </tr></table>
+    {% if s.todo %}<h2 style="font-size:16px;margin:0 0 8px;">Waiting for you</h2><ul style="margin:0 0 18px;padding-left:18px;color:#141A1F;">{% for label, n, url in s.todo %}<li style="margin:4px 0;"><strong>{{ n }}</strong> {{ label }}</li>{% endfor %}</ul>{% else %}<p style="color:#1E7B4F;font-weight:bold;">✓ Nothing waiting - all caught up.</p>{% endif %}
+    {% if s.low_stock %}<h2 style="font-size:16px;margin:0 0 8px;">Running low (store products)</h2><ul style="margin:0 0 18px;padding-left:18px;">{% for name, stock in s.low_stock %}<li data-no-translate>{{ name }} - {{ stock }} left</li>{% endfor %}</ul>{% endif %}
+    <a href="{{ admin_url }}" style="display:inline-block;background:{{ b.primary_color }};color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:8px;font-weight:bold;">Open the admin</a>
+    <p style="margin:20px 0 0;color:#56606B;font-size:12px;">Turn this off in Store settings > Save time.</p>
+{% endblock %}

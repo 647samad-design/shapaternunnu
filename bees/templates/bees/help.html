@@ -1,4 +1,5 @@
 {% extends "bees/base.html" %}
+{% load bees_extras %}
 {% block title %}Help center — {{ brand.site_name }}{% endblock %}
 {% block extra_css %}
     .faq details { border-bottom: 1px solid var(--line); }
@@ -13,7 +14,7 @@
 {% endblock %}
 {% block content %}
 <div class="wrap page">
-    <div class="page-head"><div><h1>How can we help?</h1><p>Answers to the questions we hear most.</p></div></div>
+    <div class="page-head"><div><h1>How can we help?</h1><p>Answers to the questions we hear most.</p></div>{% if brand.whatsapp_number %}<a class="btn btn-primary" href="{{ brand.whatsapp_number|wa_link:'Hi! I need help with' }}" target="_blank" rel="noopener">💬 Chat on WhatsApp</a>{% endif %}</div>
     <div class="help-grid">
         <section class="panel faq" id="returns">
             {% for question, answer in faqs %}

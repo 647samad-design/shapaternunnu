@@ -120,6 +120,26 @@ Either side can report a conversation; staff review them at /manage/messages/.
 - Badges: staff mark a seller "Verified" after checking documents; "Top seller" is given daily
   (10+ orders in 90 days and 4.5★ from 3+ reviews, see TOP_SELLER_* settings).
 
+## Time savers for sellers, shoppers and the owner
+
+- **List from a photo:** on Add product, sellers snap a picture and the AI fills in the title, category,
+  description and details (needs `ANTHROPIC_API_KEY`). The photo also becomes the product image.
+- **Price tips:** pick a category and the form shows what similar products sell for (low, typical, high).
+- **Move from another shop:** Bulk import reads Shopify, WooCommerce, Amazon, Etsy and eBay export
+  files as they are: column names, sale prices, kg weights, several images and HTML descriptions
+  are converted automatically.
+- **Trusted sellers skip the queue:** turn on "Auto-approve trusted sellers" in Store settings > Save time.
+  Verified, approved sellers with good or excellent performance then go live right away.
+- **Morning summary email:** the owner gets yesterday's sales, orders to ship, open returns and items
+  waiting for approval; each seller gets their own (they can switch it off in Store settings).
+  Sent by `daily_tasks` (or `python manage.py send_digests`).
+- **Admin search:** the box at the top of the admin finds orders (#123), emails, phones, products,
+  customers and sellers in one place. An exact match opens straight away.
+- **WhatsApp:** add a WhatsApp number in Store settings > Contact for "Chat on WhatsApp" buttons
+  (footer, Help, My orders). Sellers can add their own for their store page. Set
+  "Customer texts by" to WhatsApp to send order texts through Twilio's WhatsApp sender
+  (`TWILIO_WHATSAPP_FROM`, or `TWILIO_FROM` if that number is WhatsApp-enabled).
+
 ## Demo copy for clients
 
 On a separate copy of the store (never your live store):

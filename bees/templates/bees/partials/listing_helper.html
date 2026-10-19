@@ -1,0 +1,53 @@
+{% if photo_search %}
+<div class="lh-box">
+    <div><strong>✨ Start from a photo</strong> <span class="muted small">Snap or upload the product - we'll fill in the title, category, description and details for you to check.</span></div>
+    <label class="btn btn-secondary btn-sm lh-btn"><input type="file" accept="image/*" capture="environment" hidden data-lh-photo> Choose photo</label>
+    <span class="small" data-lh-status aria-live="polite"></span>
+</div>
+{% endif %}
+<p class="small lh-price" data-lh-price hidden></p>
+<style>
+    .lh-box { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; padding: 14px 16px; margin-bottom: 16px; border-radius: var(--radius); border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+    .lh-box > div { flex: 1 1 260px; }
+    .lh-btn { cursor: pointer; }
+    .lh-price { margin: 4px 0 0; color: var(--muted); }
+</style>
+<script>
+(function () {
+    const form = document.currentScript.closest('form');
+    if (!form) return;
+    // The fields come after this script, so wait until the page is parsed.
+    document.addEventListener('DOMContentLoaded', function () {
+    const $ = n => form.querySelector('[name="' + n + '"]');
+    const csrf = form.querySelector('[name=csrfmiddlewaretoken]').value;
+    const photo = form.querySelector('[data-lh-photo]'), status = form.querySelector('[data-lh-status]');
+    if (photo) photo.addEventListener('change', function () {
+        if (!photo.files.length) return;
+        status.textContent = 'Looking at your photo…';
+        const fd = new FormData(); fd.append('photo', photo.files[0]); fd.append('csrfmiddlewaretoken', csrf);
+        fetch('{% url "listing_from_photo" %}', { method: 'POST', body: fd, credentials: 'same-origin' }).then(r => r.json()).then(j => {
+            if (!j.draft) { status.textContent = j.error || 'Please try another photo.'; return; }
+            const d = j.draft, set = (n, v) => { const el = $(n); if (el && v && !el.value.trim()) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); } };
+            set('name', d.name); set('description', d.description); set('brand', d.brand); set('specs', d.specs);
+            if (d.category && $('category')) { $('category').value = d.category; $('category').dispatchEvent(new Event('change', { bubbles: true })); }
+            // Use the same photo as the product picture.
+            const img = $('image_file');
+            if (img && !img.files.length && window.DataTransfer) { const dt = new DataTransfer(); dt.items.add(photo.files[0]); img.files = dt.files; img.dispatchEvent(new Event('change', { bubbles: true })); }
+            status.textContent = '✓ Filled in - check everything before saving.';
+        }).catch(() => { status.textContent = 'Something went wrong. Please try again.'; });
+    });
+    const cat = $('category'), price = $('price'), tip = form.querySelector('[data-lh-price]');
+    function tips() {
+        if (!cat || !tip) return;
+        fetch('{% url "price_tips" %}?category=' + encodeURIComponent(cat.value) + '{% if product %}&product={{ product.id }}{% endif %}', { credentials: 'same-origin' })
+            .then(r => r.json()).then(j => {
+                if (!j.tips) { tip.hidden = true; return; }
+                tip.textContent = '💡 Similar products here sell for ' + j.tips.low + ' – ' + j.tips.high + ' (typical ' + j.tips.typical + ', ' + j.tips.count + ' products).';
+                tip.hidden = false;
+                if (price && price.parentNode && tip.parentNode !== price.parentNode) price.parentNode.appendChild(tip);
+            }).catch(() => {});
+    }
+    if (cat) { cat.addEventListener('change', tips); tips(); }
+    });
+})();
+</script>
