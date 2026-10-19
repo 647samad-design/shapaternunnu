@@ -6952,3 +6952,95 @@ class ReviewsPriceAndTraderTests(TestCase):
         with self.settings(AI_API_KEY="test"), mock.patch("bees.market.describe_image", return_value="red running shoes"):
             r = self.client.post(reverse("photo_search"), {"photo": SimpleUploadedFile("s.jpg", buf.getvalue(), content_type="image/jpeg")})
         self.assertIn("q=red+running+shoes", r["Location"])
+
+
+class StoreBestTests(TestCase):
+    """Round 3: signals, alerts, tiers, affiliates, deals and the assistant."""
+
+    def _sell(self, product, qty, user=None):
+        user = user or User.objects.create_user(f"b{Order.objects.count()}x", f"b{Order.objects.count()}@example.com", "x")
+        order = Order.objects.create(user=user, email=user.email, full_name="B", address="1", city="X", country="US", phone="+15550100",
+                                     payment_method="cod", status="confirmed")
+        OrderItem.objects.create(order=order, product=product, product_name=product.name, price=product.price, quantity=qty)
+        return order
+
+    def test_bought_count_best_seller_and_sort(self):
+        a = make_product(name="Hot Hoodie", category="hoodies")
+        b = make_product(name="Cool Hoodie", category="hoodies")
+        self._sell(a, 60)
+        self._sell(b, 4)
+        page = self.client.get(reverse("product_detail", args=[a.id]))
+        self.assertContains(page, "50+ bought in the past month")
+        self.assertContains(page, "#1 Best Seller")
+        listing = self.client.get(reverse("category_products", args=["hoodies"]), {"sort": "popular"})
+        self.assertEqual(listing.context["products"][0].id, a.id)
+        self.assertContains(page, "Arrives")
+
+    def test_price_alert_notifies_once(self):
+        u = User.objects.create_user("pa", "pa@example.com", "pass12345")
+        p = make_product(name="Fancy Kettle", price=Decimal("80"))
+        self.client.force_login(u)
+        self.client.post(reverse("price_alert", args=[p.id]), {"target_price": "90"})  # not below the price
+        from .models import PriceAlert
+        self.assertFalse(PriceAlert.objects.exists())
+        self.client.post(reverse("price_alert", args=[p.id]), {"target_price": "60"})
+        p.price = Decimal("70")
+        p.save()
+        self.assertFalse(Notification.objects.filter(user=u, message__contains="Price alert").exists())
+        p.price = Decimal("59")
+        p.save()
+        p.price = Decimal("58")
+        p.save()
+        self.assertEqual(Notification.objects.filter(user=u, message__contains="Price alert").count(), 1)
+
+    def test_loyalty_tier_multiplies_points(self):
+        from .models import Profile
+        from . import loyalty
+        u = User.objects.create_user("lt", "lt@example.com", "pass12345")
+        p = make_product(price=Decimal("300"))
+        old = self._sell(p, 2, u)
+        Order.objects.filter(pk=old.pk).update(status="delivered")
+        self.assertEqual(loyalty.tier_for(u)["key"], "gold")  # 600 spent
+        new = self._sell(make_product(price=Decimal("10")), 1, u)
+        new.status = "delivered"
+        new.save()
+        self.assertEqual(Profile.objects.get(user=u).loyalty_points, 15)  # 10 x 1.5
+        self.client.force_login(u)
+        self.assertContains(self.client.get(reverse("profile")), "Gold level")
+
+    def test_affiliate_earns_on_delivery(self):
+        from django.db import transaction
+        from .models import Profile
+        SiteSettings.objects.filter(pk=1).update(affiliate_percent=5)
+        aff = User.objects.create_user("af", "af@example.com", "pass12345")
+        Profile.objects.update_or_create(user=aff, defaults={"referral_code": "AFFCODE1"})
+        buyer = User.objects.create_user("abuy", "abuy@example.com", "pass12345")
+        p = make_product(price=Decimal("40"))
+        self.client.force_login(buyer)
+        self.client.get(reverse("product_detail", args=[p.id]), {"ref": "AFFCODE1"})
+        self.client.post(reverse("add_to_cart", args=[p.id]))
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "email": "abuy@example.com", "payment_method": "cod"})
+        order = Order.objects.get(user=buyer)
+        self.assertEqual(order.affiliate_code, "AFFCODE1")
+        with self.captureOnCommitCallbacks(execute=True):
+            order.status = "delivered"
+            order.save()
+        self.assertEqual(Profile.objects.get(user=aff).store_credit, Decimal("2.00"))
+        from . import loyalty
+        self.assertIsNone(loyalty.pay_affiliate(Order.objects.get(pk=order.pk)))  # only once
+        _ = transaction
+
+    def test_deals_assistant_and_protection_pages(self):
+        make_product(name="Big Discount Mug", discount_percent=40, old_price=Decimal("900"))
+        self.assertContains(self.client.get(reverse("deals")), "Big Discount Mug")
+        r = self.client.post(reverse("shop_assistant"), {"q": "discount mug"})
+        self.assertContains(r, "Big Discount Mug")
+        self.assertContains(self.client.get(reverse("buyer_protection")), "money back")
+
+    def test_recommended_for_you_from_viewed_category(self):
+        seen = make_product(name="Seen Sneaker", category="sneakers")
+        other = make_product(name="Other Sneaker", category="sneakers")
+        self.client.get(reverse("product_detail", args=[seen.id]))
+        home = self.client.get("/")
+        self.assertIn(other.id, [p.id for p in home.context["recommended"]])
+        self.assertNotIn(seen.id, [p.id for p in home.context["recommended"]])

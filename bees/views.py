@@ -36,6 +36,7 @@ from .models import (
     OrganizationMember, ChatThread, ChatMessage, ProductVariant, OrderEvent,
 )
 from .cart import persist as _persist_cart
+from . import loyalty as loyalty_mod
 from .images import BANNER_MAX, LOGO_MAX, optimize
 from .ratelimit import ratelimit
 from .security import (
@@ -123,6 +124,13 @@ def _apply_sort(qs, sort):
         return qs.order_by("-created_at")
     if sort == "rating":
         return qs.order_by(F("avg_rating").desc(nulls_last=True), "-id")
+    if sort == "popular":
+        from django.db.models import Case, IntegerField, Value, When
+        from .insights import _sales_30d
+        top = sorted(_sales_30d().items(), key=lambda kv: -kv[1])[:300]
+        if top:
+            rank = Case(*[When(pk=pid, then=Value(i)) for i, (pid, _n) in enumerate(top)], default=Value(10_000), output_field=IntegerField())
+            return qs.annotate(_rank=rank).order_by("_rank", "-id")
     return qs.order_by("-id")
 
 
@@ -293,7 +301,9 @@ def home(request):
     flash_sale_products = with_ratings(Product.objects.flash())[:10]
     just_for_you_products = with_ratings(Product.objects.listed()).order_by("-created_at")[:15]
     from . import ads, content
+    from . import insights
     return render(request, "bees/index.html", {
+        "recommended": with_ratings(Product.objects.filter(pk__in=[p.pk for p in insights.recommended_for(request, 10)])) if not is_speculative(request) else [],
         "sponsored": ads.pick(limit=4) if not is_speculative(request) else [],
         "flash_sale_products": flash_sale_products,
         "just_for_you_products": just_for_you_products,
@@ -457,7 +467,13 @@ def _market_context(request, product, also):
     instalments, Subscribe & Save and membership."""
     from . import market
     brand = _brand()
-    ctx = {"other_offers": market.other_offers(product), "is_member": market.is_member(request.user)}
+    from . import insights
+    ctx = {"other_offers": market.other_offers(product), "is_member": market.is_member(request.user),
+           "bought_label": insights.bought_label(product.pk), "best_seller": insights.best_seller_badge(product),
+           "delivery_window": insights.delivery_window(product)}
+    if request.user.is_authenticated:
+        from .models import PriceAlert
+        ctx["price_alert"] = PriceAlert.objects.filter(user=request.user, product=product, notified_at__isnull=True).first()
     if product.old_price or product.discount_percent:
         ctx["lowest_30d"] = market.lowest_price_30d(product)
     if product.is_auction:
@@ -1054,6 +1070,7 @@ def profile_view(request):
     return render(request, "bees/profile.html", {
         "profile": profile,
         "points_per_unit": Profile.POINTS_PER_UNIT,
+        "tier": loyalty_mod.tier_for(request.user),
         "redeemable_points": redeemable_points,
         "redeemable_credit": Decimal(redeemable_points // Profile.POINTS_PER_UNIT),
         "addresses": addresses,
@@ -1420,6 +1437,18 @@ def _price_cart(subtotal, coupon=None, country=None, items=1, lines=None, digita
         "total": discounted + (shipping or Decimal("0")) + (Decimal("0") if tax["included"] else tax["amount"]),
         "tax_percent": tax["rate"] if tax["rate"] is not None else brand.tax_percent,
     }
+
+
+def _affiliate_code(request):
+    """The code from the shared link this shopper arrived with (?ref=),
+    unless it's their own or affiliates are off."""
+    code = (request.session.get("aff") or "")[:16]
+    if not code or not _brand().affiliate_percent:
+        return ""
+    profile = Profile.objects.filter(referral_code=code).only("user_id").first()
+    if profile is None or (request.user.is_authenticated and profile.user_id == request.user.id):
+        return ""
+    return code
 
 
 def _all_digital(products):
@@ -1801,6 +1830,7 @@ def _place_order(request, items, data, payment_method, use_credit=False):
             tax_included=pricing["tax_included"],
             customer_tax_id=request.POST.get("customer_tax_id", "").strip()[:40],
             gift_wrap=data.get("gift_wrap", False), gift_message=data.get("gift_message", ""),
+            affiliate_code=_affiliate_code(request),
             pickup_point=data.get("pickup_point"),
             estimated_delivery=order_emails.default_delivery_date(country=data["country"]),
             courier_name=tracking.suggest_courier(data["country"]),
@@ -2450,8 +2480,29 @@ def _privacy_content():
     }
 
 
+def _protection_content():
+    name = _store_name()
+    days = _brand().return_days
+    return {
+        "page_title": f"{name} Buyer Protection",
+        "sections": [
+            ("Get what you ordered, or your money back", f"Every order on {name} is protected - whichever seller you buy from. If an item doesn't arrive, arrives damaged, or isn't as described, we make it right."),
+            ("Item didn't arrive", "If your order hasn't arrived by the latest delivery date, open a problem report from My orders. The seller has a few days to respond; if they can't fix it, we refund you in full."),
+            ("Not as described or damaged", "Report a problem from My orders with a photo. You'll get a replacement or a full refund, including shipping."),
+            (f"{days}-day returns", f"Changed your mind? Most items can be returned within {days} days of delivery. Downloads and personalised items are the exception."),
+            ("Safe payments", "Card and PayPal payments are processed by Stripe and PayPal - sellers never see your card details, and sellers are only paid after your return window has passed."),
+        ],
+        "cta_url": reverse("my_orders"), "cta_label": "Go to My orders",
+    }
+
+
 BUILT_IN_PAGES = {"sell": lambda: _sell_content(), "about": lambda: _about_content(),
-                  "terms": lambda: _terms_content(), "privacy": lambda: _privacy_content()}
+                  "terms": lambda: _terms_content(), "privacy": lambda: _privacy_content(),
+                  "protection": lambda: _protection_content()}
+
+
+def buyer_protection(request):
+    return _static_page(request, "protection", _protection_content())
 
 
 def _static_page(request, slug, default):

@@ -415,3 +415,54 @@ def add_many(request):
     if added:
         messages.success(request, f"Added {added} item{'s' if added != 1 else ''} to your cart.")
     return redirect("cart")
+
+
+@require_POST
+@login_required
+def price_alert(request, pk):
+    from .models import PriceAlert
+    product = get_object_or_404(Product.objects.live(), pk=pk)
+    if request.POST.get("action") == "remove":
+        PriceAlert.objects.filter(user=request.user, product=product).delete()
+        messages.info(request, "Price alert removed.")
+    else:
+        target = _decimal(request.POST.get("target_price", ""))
+        if target is None or target >= product.price:
+            messages.error(request, f"Choose a price below the current {product.price}.")
+        else:
+            PriceAlert.objects.update_or_create(user=request.user, product=product,
+                                                defaults={"target_price": target, "notified_at": None})
+            messages.success(request, f"We'll tell you when {product.name} drops to {target} or less.")
+    return redirect(reverse("product_detail", args=[pk]))
+
+
+# ---------------------------------------------------------------------------
+# Deals page and AI shopping assistant
+# ---------------------------------------------------------------------------
+
+def deals(request):
+    from .views import with_ratings
+    from .categories import top_level, with_children
+    cat = request.GET.get("cat", "")
+    base = Product.objects.listed().filter(stock__gt=0)
+    if cat:
+        base = base.filter(category__in=with_children(cat))
+    flash = with_ratings(base.filter(is_flash_sale=True).filter(Q(flash_sale_ends__isnull=True) | Q(flash_sale_ends__gt=timezone.now()))
+                         .order_by("flash_sale_ends"))[:12]
+    discounts = with_ratings(base.filter(discount_percent__gt=0).order_by("-discount_percent"))[:24]
+    auctions = with_ratings(base.filter(is_auction=True, auction_closed=False, auction_ends_at__gt=timezone.now()).order_by("auction_ends_at"))[:8]
+    vouchers_count = _public_coupons().count()
+    return render(request, "bees/deals.html", {"flash": flash, "discounts": discounts, "auctions": auctions, "cat": cat,
+                                               "cats": top_level(), "vouchers_count": vouchers_count})
+
+
+@ratelimit("shop_assistant", rate_limit=20, window_seconds=600, redirect_to="home", methods=("POST",),
+           message="You've asked a lot of questions. Please wait a few minutes.")
+def shop_assistant(request):
+    """'Ask Lumen': describe what you need, get matching products and a
+    short answer (written by Claude when the AI key is set)."""
+    from . import shopping_ai
+    question = (request.POST.get("q") or "").strip()[:300]
+    result = shopping_ai.answer(question, request) if question else None
+    return render(request, "bees/assistant.html", {"question": question, "result": result,
+                                                   "examples": shopping_ai.EXAMPLES})

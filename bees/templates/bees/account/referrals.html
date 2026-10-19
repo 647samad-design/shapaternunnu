@@ -1,4 +1,5 @@
 {% extends "bees/base.html" %}
+{% load bees_extras %}
 {% block title %}{{ t.invite_friends }} — {{ brand.site_name }}{% endblock %}
 {% block robots_meta %}noindex, nofollow{% endblock %}
 {% block extra_css %}
@@ -36,6 +37,13 @@
             </div>
         </section>
 
+        {% if affiliate %}
+        <section class="panel">
+            <h2>Earn {{ site.affiliate_percent }}% as an affiliate</h2>
+            <p class="muted" style="margin-top:4px;">Add <code>?ref={{ profile.referral_code }}</code> to <strong>any</strong> product link you share (or use the share button on product pages). When someone orders through it, you get {{ site.affiliate_percent }}% of the order as store credit once it's delivered.</p>
+            <div class="ref-kpis" style="margin-top:12px;"><div><strong>{{ affiliate.orders }}</strong><span>Orders from your links</span></div><div><strong>{{ affiliate.earned|money }}</strong><span>Earned</span></div><div><strong>{{ affiliate.pending }}</strong><span>Waiting for delivery</span></div></div>
+        </section>
+        {% endif %}
         <section class="panel">
             <h2>Your link</h2>
             <div class="ref-link" style="margin:10px 0 12px;">

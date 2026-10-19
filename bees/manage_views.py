@@ -1449,7 +1449,7 @@ class SiteSettingsForm(forms.ModelForm):
          ["ads_enabled", "ads_min_bid", "ads_slots"]),
         ("Shopper perks", "Membership (free shipping, member price), daily check-in coins, gift options and 'pay in instalments' messages. Collection points are under Shipping.",
          ["membership_enabled", "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points",
-          "gift_wrap_enabled", "bnpl_enabled", "bnpl_instalments"]),
+          "gift_wrap_enabled", "bnpl_enabled", "bnpl_instalments", "affiliate_percent"]),
         ("Gift cards", "Sell digital gift cards on /gift-cards/. Manage and send free ones under Gift cards.", ["gift_cards_enabled"]),
         ("Referral program", "Customers invite friends with their own link. Discount codes are created automatically.",
          ["referral_enabled", "referral_friend_percent", "referral_reward_percent"]),
@@ -1473,7 +1473,13 @@ class SiteSettingsForm(forms.ModelForm):
     OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent",
                 "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams", "duties_policy",
                 "cod_max_order", "cod_refusal_limit", "min_auto_payout", "auto_payouts", "ads_min_bid", "ads_slots",
-                "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points", "bnpl_instalments")
+                "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points", "bnpl_instalments", "affiliate_percent")
+
+    def clean_affiliate_percent(self):
+        value = self._keep("affiliate_percent")
+        if value is not None and value > 30:
+            raise ValidationError("Use 30% or less.")
+        return value
 
     def clean_membership_name(self):
         return self._keep("membership_name") or "Plus"
