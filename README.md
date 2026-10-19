@@ -27,6 +27,12 @@ tax and contact details from **Admin → Site settings** — no code changes.
 - Digital downloads (e-books, music, templates…) delivered in My orders after online payment
 - **Request a quote** for bulk orders: the seller offers a price, the buyer accepts, counters or declines
 - Follow stores and get told about their new products
+- Item condition (new / used / refurbished), "Other sellers" for the same product, **Make an offer** and **auctions** with anti-sniping
+- Personalization (e.g. engraving text), free gift wrap and gift message, collection points instead of home delivery
+- Voucher centre (collect store and seller vouchers, free-shipping vouchers), daily check-in coins, paid **membership** (free shipping, member price)
+- Subscribe & Save, "Frequently bought together", Save for later, several wishlists and shareable wishlists
+- Review photos, "Helpful" votes and review filters; search by photo (with AI on); "pay in instalments" message for Klarna/Afterpay via Stripe
+- EU rules: lowest price of the last 30 days next to discounts (Omnibus) and seller trader information (DSA)
 - Cart with live updates, saved addresses, coupons, shipping and tax calculation
 - **Stripe Checkout** — cards, Apple Pay, Google Pay, Link (whatever you enable in Stripe)
 - Order tracking, PDF invoices, one-click cancel with **automatic refund**, return requests, buy again
@@ -51,7 +57,7 @@ tax and contact details from **Admin → Site settings** — no code changes.
 - Rate limiting, upload validation, private storage for seller ID documents, safe production defaults
 - REST API with token sign-in and OpenAPI docs (`/api/v1/docs/`)
 - Docker setup with PostgreSQL, Redis and a background scheduler
-- 440+ automated tests, run on SQLite, PostgreSQL and Docker by GitHub Actions: `python manage.py test bees`
+- 460+ automated tests, run on SQLite, PostgreSQL and Docker by GitHub Actions: `python manage.py test bees`
 
 ## Seller Center (/seller/)
 
