@@ -57,8 +57,13 @@ def send_now(to, body):
     if not is_configured() or not to:
         return False
     sid, sender = _env("TWILIO_ACCOUNT_SID"), _env("TWILIO_FROM")
-    data = {"To": to, "Body": body[:600]}
-    data["MessagingServiceSid" if sender.startswith("MG") else "From"] = sender
+    if _store().message_channel == "whatsapp":
+        # Same Twilio account; WhatsApp numbers carry a "whatsapp:" prefix.
+        wa_from = _env("TWILIO_WHATSAPP_FROM") or sender
+        data = {"To": f"whatsapp:{to}", "Body": body[:600], "From": wa_from if wa_from.startswith("whatsapp:") else f"whatsapp:{wa_from}"}
+    else:
+        data = {"To": to, "Body": body[:600]}
+        data["MessagingServiceSid" if sender.startswith("MG") else "From"] = sender
     auth = base64.b64encode(f"{sid}:{_env('TWILIO_AUTH_TOKEN')}".encode()).decode()
     req = urllib.request.Request(f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
                                  data=urllib.parse.urlencode(data).encode(), method="POST",

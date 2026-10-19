@@ -1257,6 +1257,8 @@ class SellerAccount(models.Model):
         blank=True, default="Thanks for your message! I'll get back to you shortly.\nYes, it's in stock and ready to ship.\nIt usually arrives in 3-7 working days.\nYes, we ship to your country.",
         help_text="Saved replies for Messages, one per line.")
     company_registration = models.CharField("Company registration number", max_length=60, blank=True)
+    whatsapp = models.CharField("WhatsApp number", max_length=20, blank=True, help_text="Optional. Shows 'Chat on WhatsApp' on your store page.")
+    digest_emails = models.BooleanField("Daily summary email", default=True)
     trader_email = models.EmailField("Public contact email", blank=True)
     trader_declared_at = models.DateTimeField(null=True, blank=True, help_text="When the seller confirmed it only sells products that follow EU law (DSA).")
     store_logo = models.ImageField(upload_to=seller_logo_path, blank=True, null=True)
@@ -1730,6 +1732,14 @@ class SiteSettings(models.Model):
     membership_price = models.DecimalField(max_digits=8, decimal_places=2, default="4.99")
     membership_days = models.PositiveSmallIntegerField("Membership length (days)", default=30)
     membership_discount = models.PositiveSmallIntegerField("Member discount (%)", default=0, help_text="Extra % off for members on every order (the store pays it). 0 = only free shipping.")
+    whatsapp_number = models.CharField("Store WhatsApp number", max_length=20, blank=True,
+                                       help_text="With country code, e.g. +923001234567. Shows a 'Chat on WhatsApp' button for customers.")
+    message_channel = models.CharField("Send order texts by", max_length=10, choices=[("sms", "SMS"), ("whatsapp", "WhatsApp")], default="sms",
+                                       help_text="WhatsApp needs a WhatsApp sender in Twilio (TWILIO_WHATSAPP_FROM) and approved message templates.")
+    auto_approve_trusted = models.BooleanField("Auto-approve trusted sellers", default=False,
+                                               help_text="New and edited products from verified sellers with Good or Excellent performance go live without review.")
+    daily_digest = models.BooleanField("Daily summary emails", default=True,
+                                       help_text="Every morning: the owner gets yesterday's sales and to-dos, sellers get their orders to ship and questions to answer.")
     affiliate_percent = models.PositiveSmallIntegerField("Affiliate commission (%)", default=0,
                                                          help_text="Anyone who shares a link with their code earns this % of delivered orders as store credit. 0 = off.")
     checkin_points = models.PositiveSmallIntegerField("Daily check-in coins", default=5, help_text="Reward points for visiting each day (7-day streak gets double). 0 = off.")

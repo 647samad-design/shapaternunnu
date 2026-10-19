@@ -363,7 +363,7 @@ def delete_account(request):
 STORE_TEXT_FIELDS = {
     "store_description": 5000, "phone": 30, "business_address": 255, "city": 100, "country": 100,
     "bank_details": 255, "tax_info": 100, "brand_info": 5000, "pickup_state": 100, "pickup_postal_code": 20,
-    "company_registration": 60,
+    "company_registration": 60, "whatsapp": 20,
 }
 
 
@@ -406,6 +406,7 @@ def store_settings(request):
                 seller.trader_email = trader_email
             except ValidationError:
                 messages.warning(request, "The public contact email wasn't valid, so it wasn't changed.")
+            seller.digest_emails = bool(request.POST.get("digest_emails"))
             if request.POST.get("trader_declared") and not seller.trader_declared_at:
                 seller.trader_declared_at = timezone.now()
             elif not request.POST.get("trader_declared"):

@@ -37,6 +37,7 @@ from .models import (
 )
 from .cart import persist as _persist_cart
 from . import loyalty as loyalty_mod
+from .trust import trusted as trusted_seller
 from .images import BANNER_MAX, LOGO_MAX, optimize
 from .ratelimit import ratelimit
 from .security import (
@@ -2940,12 +2941,13 @@ def seller_add_product(request):
                 **fields,
                 seller_account=seller,
                 seller_name=seller.display_name,
-                approval_status="pending",
+                approval_status="approved" if trusted_seller(seller) else "pending",
             )
             if variant_rows:
                 apply_variant_rows(product, variant_rows)
             save_gallery(product, *gallery)
-        messages.success(request, "Product submitted for review. It will go live once approved by an admin.")
+        messages.success(request, "Product is live - you're a trusted seller." if product.approval_status == "approved"
+                         else "Product submitted for review. It will go live once approved by an admin.")
         return redirect("seller_products")
     start = {"stock": 10, "discount_percent": 0}
     if master is not None:
@@ -2986,7 +2988,7 @@ def seller_edit_product(request, pk):
         needs_review = any(getattr(product, f) != fields[f] for f in REVIEWED_FIELDS) or bool(gallery[1]) or bool(set(gallery[0]) - set(old_gallery))
         for key, value in fields.items():
             setattr(product, key, value)
-        if needs_review and product.approval_status != "pending":
+        if needs_review and product.approval_status != "pending" and not trusted_seller(seller):
             product.approval_status = "pending"
             messages.success(request, "Product updated. Because the listing details changed, it will go live again after a quick review.")
         else:

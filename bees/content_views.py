@@ -255,3 +255,47 @@ def pickup_points(request):
         return redirect("manage_pickup_points")
     points = [(p, names.get(p.country, p.country)) for p in PickupPoint.objects.all()]
     return _render(request, "pickup_points.html", {"section": "shipping", "points": points, "countries": COUNTRIES})
+
+
+# ---------------------------------------------------------------------------
+# Search everything (admin header)
+# ---------------------------------------------------------------------------
+
+@staff_required
+def admin_search(request):
+    from django.contrib.auth import get_user_model
+    from django.db.models import Q
+    from .models import Order, SellerAccount
+    from . import staff_roles
+    q = request.GET.get("q", "").strip()[:100]
+    results = {"orders": [], "products": [], "customers": [], "sellers": []}
+    if q:
+        digits = q.lstrip("#").strip()
+        oq = Q(email__iexact=q) | Q(full_name__icontains=q) | Q(phone__icontains=q) if len(q) >= 3 else Q(pk=-1)
+        if digits.isdigit():
+            oq |= Q(pk=int(digits))
+        if staff_roles.can(request.user, "orders"):
+            results["orders"] = list(Order.objects.filter(oq).order_by("-id")[:10])
+        if staff_roles.can(request.user, "products"):
+            pq = Q(name__icontains=q) | Q(brand__icontains=q) | Q(seller_name__icontains=q)
+            if digits.isdigit():
+                pq |= Q(pk=int(digits))
+            results["products"] = list(Product.objects.filter(pq).order_by("-id")[:10])
+        if staff_roles.can(request.user, "customers"):
+            results["customers"] = list(get_user_model().objects.filter(
+                Q(email__icontains=q) | Q(username__icontains=q) | Q(first_name__icontains=q) | Q(last_name__icontains=q))[:10])
+        if staff_roles.can(request.user, "sellers"):
+            results["sellers"] = list(SellerAccount.objects.filter(
+                Q(business_name__icontains=q) | Q(organization_name__icontains=q) | Q(full_name__icontains=q) | Q(user__email__icontains=q))[:10])
+        # One exact match: go straight there.
+        found = [(k, v) for k, v in results.items() if v]
+        if len(found) == 1 and len(found[0][1]) == 1:
+            kind, obj = found[0][0], found[0][1][0]
+            if kind == "orders":
+                return redirect("manage_order", pk=obj.pk)
+            if kind == "products":
+                return redirect("manage_product_edit", pk=obj.pk)
+            if kind == "sellers":
+                return redirect("manage_seller", pk=obj.pk)
+    return _render(request, "search.html", {"section": "", "q": q, "results": results,
+                                            "nothing": q and not any(results.values())})

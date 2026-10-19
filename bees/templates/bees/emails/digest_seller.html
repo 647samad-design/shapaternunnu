@@ -1,0 +1,15 @@
+{% extends "bees/emails/_base_email.html" %}
+{% load bees_extras %}
+{% block email_body %}{% site_brand as b %}
+    <h1 style="margin:0 0 6px;font-size:22px;">Your day at <span data-no-translate>{{ seller.display_name }}</span></h1>
+    <p style="margin:0 0 18px;color:#56606B;">{% if s.sold %}You sold {{ s.sold }} item{{ s.sold|pluralize }} in the last 24 hours. {% endif %}Here's what's waiting:</p>
+    <ul style="margin:0 0 18px;padding-left:18px;">
+        {% if s.to_ship %}<li style="margin:4px 0;"><strong>{{ s.to_ship }}</strong> order{{ s.to_ship|pluralize }} to pack and ship</li>{% endif %}
+        {% if s.questions %}<li style="margin:4px 0;"><strong>{{ s.questions }}</strong> customer question{{ s.questions|pluralize }}</li>{% endif %}
+        {% if s.quotes %}<li style="margin:4px 0;"><strong>{{ s.quotes }}</strong> quote request{{ s.quotes|pluralize }} or offer{{ s.quotes|pluralize }}</li>{% endif %}
+        {% if s.returns %}<li style="margin:4px 0;"><strong>{{ s.returns }}</strong> return request{{ s.returns|pluralize }}</li>{% endif %}
+        {% for name, stock in s.low_stock %}<li style="margin:4px 0;" data-no-translate>Low stock: {{ name }} ({{ stock }} left)</li>{% endfor %}
+    </ul>
+    <a href="{{ center_url }}" style="display:inline-block;background:{{ b.primary_color }};color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:8px;font-weight:bold;">Open Seller Center</a>
+    <p style="margin:20px 0 0;color:#56606B;font-size:12px;">Turn this off in Seller Center > Store settings.</p>
+{% endblock %}
