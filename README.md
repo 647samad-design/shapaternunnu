@@ -33,6 +33,8 @@ tax and contact details from **Admin → Site settings** — no code changes.
 - Subscribe & Save, "Frequently bought together", Save for later, several wishlists and shareable wishlists
 - Review photos, "Helpful" votes and review filters; search by photo (with AI on); "pay in instalments" message for Klarna/Afterpay via Stripe
 - EU rules: lowest price of the last 30 days next to discounts (Omnibus) and seller trader information (DSA)
+- AI shopping assistant ("Ask"), deals page, "Recommended for you", price alerts, delivery dates, "50+ bought in the past month" and "#1 Best Seller" badges, voice search, image zoom
+- Loyalty levels (Bronze to Platinum, up to 2x points), affiliate commission on shared links, Buyer Protection page
 - Cart with live updates, saved addresses, coupons, shipping and tax calculation
 - **Stripe Checkout** — cards, Apple Pay, Google Pay, Link (whatever you enable in Stripe)
 - Order tracking, PDF invoices, one-click cancel with **automatic refund**, return requests, buy again
@@ -57,7 +59,7 @@ tax and contact details from **Admin → Site settings** — no code changes.
 - Rate limiting, upload validation, private storage for seller ID documents, safe production defaults
 - REST API with token sign-in and OpenAPI docs (`/api/v1/docs/`)
 - Docker setup with PostgreSQL, Redis and a background scheduler
-- 460+ automated tests, run on SQLite, PostgreSQL and Docker by GitHub Actions: `python manage.py test bees`
+- 465+ automated tests, run on SQLite, PostgreSQL and Docker by GitHub Actions: `python manage.py test bees`
 
 ## Seller Center (/seller/)
 
@@ -117,6 +119,26 @@ Either side can report a conversation; staff review them at /manage/messages/.
   gets a "Track package" button and email link; any other courier uses 17TRACK.
 - Badges: staff mark a seller "Verified" after checking documents; "Top seller" is given daily
   (10+ orders in 90 days and 4.5★ from 3+ reviews, see TOP_SELLER_* settings).
+
+## Time savers for sellers, shoppers and the owner
+
+- **List from a photo:** on Add product, sellers snap a picture and the AI fills in the title, category,
+  description and details (needs `ANTHROPIC_API_KEY`). The photo also becomes the product image.
+- **Price tips:** pick a category and the form shows what similar products sell for (low, typical, high).
+- **Move from another shop:** Bulk import reads Shopify, WooCommerce, Amazon, Etsy and eBay export
+  files as they are: column names, sale prices, kg weights, several images and HTML descriptions
+  are converted automatically.
+- **Trusted sellers skip the queue:** turn on "Auto-approve trusted sellers" in Store settings > Save time.
+  Verified, approved sellers with good or excellent performance then go live right away.
+- **Morning summary email:** the owner gets yesterday's sales, orders to ship, open returns and items
+  waiting for approval; each seller gets their own (they can switch it off in Store settings).
+  Sent by `daily_tasks` (or `python manage.py send_digests`).
+- **Admin search:** the box at the top of the admin finds orders (#123), emails, phones, products,
+  customers and sellers in one place. An exact match opens straight away.
+- **WhatsApp:** add a WhatsApp number in Store settings > Contact for "Chat on WhatsApp" buttons
+  (footer, Help, My orders). Sellers can add their own for their store page. Set
+  "Customer texts by" to WhatsApp to send order texts through Twilio's WhatsApp sender
+  (`TWILIO_WHATSAPP_FROM`, or `TWILIO_FROM` if that number is WhatsApp-enabled).
 
 ## Demo copy for clients
 

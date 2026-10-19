@@ -363,7 +363,7 @@ def delete_account(request):
 STORE_TEXT_FIELDS = {
     "store_description": 5000, "phone": 30, "business_address": 255, "city": 100, "country": 100,
     "bank_details": 255, "tax_info": 100, "brand_info": 5000, "pickup_state": 100, "pickup_postal_code": 20,
-    "company_registration": 60,
+    "company_registration": 60, "whatsapp": 20,
 }
 
 
@@ -406,6 +406,7 @@ def store_settings(request):
                 seller.trader_email = trader_email
             except ValidationError:
                 messages.warning(request, "The public contact email wasn't valid, so it wasn't changed.")
+            seller.digest_emails = bool(request.POST.get("digest_emails"))
             if request.POST.get("trader_declared") and not seller.trader_declared_at:
                 seller.trader_declared_at = timezone.now()
             elif not request.POST.get("trader_declared"):
@@ -596,6 +597,7 @@ def referrals(request):
     today = timezone.localdate()
     for c in rewards:
         c.state = "used" if c.code in used_codes else ("expired" if c.expiry_date and c.expiry_date < today else "ready")
+    from . import loyalty
     link = request.build_absolute_uri(reverse("signup")) + f"?ref={profile.referral_code}"
     shop_link = request.build_absolute_uri(reverse("home")) + f"?ref={profile.referral_code}"
     return render(request, "bees/account/referrals.html", {
@@ -604,6 +606,7 @@ def referrals(request):
         "stats": {"joined": len(friends), "bought": sum(1 for f in friends if f.referral_rewarded),
                   "earned": sum(1 for c in rewards if c.purpose == "referral_reward")},
         "site": site,
+        "affiliate": loyalty.affiliate_stats(profile) if site.affiliate_percent else None,
         "share_text": f"Here's {site.referral_friend_percent}% off your first order at {site.site_name}: {link}",
         "share_short": f"Get {site.referral_friend_percent}% off your first order at {site.site_name}",
     })

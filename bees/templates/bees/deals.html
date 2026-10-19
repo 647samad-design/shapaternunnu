@@ -1,0 +1,14 @@
+{% extends "bees/base.html" %}
+{% block title %}Today's deals — {{ brand.site_name }}{% endblock %}
+{% block meta_description %}Flash sales, the biggest discounts and live auctions at {{ brand.site_name }}.{% endblock %}
+{% block content %}
+<div class="wrap page">
+    <div class="page-head"><div><h1>Today's deals</h1><p>Flash sales, big discounts and live auctions - updated all day.</p></div>
+        {% if vouchers_count %}<a class="btn btn-accent" href="{% url 'vouchers' %}">🎟️ {{ vouchers_count }} voucher{{ vouchers_count|pluralize }} to collect</a>{% endif %}</div>
+    <nav class="subcats" aria-label="Deal categories"><a href="{% url 'deals' %}" class="{% if not cat %}on{% endif %}">All deals</a>{% for slug, name in cats %}<a href="?cat={{ slug }}" class="{% if cat == slug %}on{% endif %}">{{ name }}</a>{% endfor %}</nav>
+    {% if flash %}<section class="section"><div class="section-head"><h2>⚡ Flash sales</h2></div><div class="grid-products">{% for product in flash %}{% include "bees/partials/product_card.html" %}{% endfor %}</div></section>{% endif %}
+    {% if auctions %}<section class="section"><div class="section-head"><h2>🔨 Ending soon</h2></div><div class="grid-products">{% for product in auctions %}{% include "bees/partials/product_card.html" %}{% endfor %}</div></section>{% endif %}
+    {% if discounts %}<section class="section"><div class="section-head"><h2>Biggest discounts</h2></div><div class="grid-products">{% for product in discounts %}{% include "bees/partials/product_card.html" %}{% endfor %}</div></section>{% endif %}
+    {% if not flash and not discounts and not auctions %}<div class="panel empty"><h2>No deals here right now</h2><p>Check back soon, or ask our shopping assistant.</p><a class="btn btn-primary" href="{% url 'shop_assistant' %}">Ask {{ brand.site_name }}</a></div>{% endif %}
+</div>
+{% endblock %}

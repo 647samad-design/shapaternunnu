@@ -415,3 +415,104 @@ def add_many(request):
     if added:
         messages.success(request, f"Added {added} item{'s' if added != 1 else ''} to your cart.")
     return redirect("cart")
+
+
+@require_POST
+@login_required
+def price_alert(request, pk):
+    from .models import PriceAlert
+    product = get_object_or_404(Product.objects.live(), pk=pk)
+    if request.POST.get("action") == "remove":
+        PriceAlert.objects.filter(user=request.user, product=product).delete()
+        messages.info(request, "Price alert removed.")
+    else:
+        target = _decimal(request.POST.get("target_price", ""))
+        if target is None or target >= product.price:
+            messages.error(request, f"Choose a price below the current {product.price}.")
+        else:
+            PriceAlert.objects.update_or_create(user=request.user, product=product,
+                                                defaults={"target_price": target, "notified_at": None})
+            messages.success(request, f"We'll tell you when {product.name} drops to {target} or less.")
+    return redirect(reverse("product_detail", args=[pk]))
+
+
+# ---------------------------------------------------------------------------
+# Deals page and AI shopping assistant
+# ---------------------------------------------------------------------------
+
+def deals(request):
+    from .views import with_ratings
+    from .categories import top_level, with_children
+    cat = request.GET.get("cat", "")
+    base = Product.objects.listed().filter(stock__gt=0)
+    if cat:
+        base = base.filter(category__in=with_children(cat))
+    flash = with_ratings(base.filter(is_flash_sale=True).filter(Q(flash_sale_ends__isnull=True) | Q(flash_sale_ends__gt=timezone.now()))
+                         .order_by("flash_sale_ends"))[:12]
+    discounts = with_ratings(base.filter(discount_percent__gt=0).order_by("-discount_percent"))[:24]
+    auctions = with_ratings(base.filter(is_auction=True, auction_closed=False, auction_ends_at__gt=timezone.now()).order_by("auction_ends_at"))[:8]
+    vouchers_count = _public_coupons().count()
+    return render(request, "bees/deals.html", {"flash": flash, "discounts": discounts, "auctions": auctions, "cat": cat,
+                                               "cats": top_level(), "vouchers_count": vouchers_count})
+
+
+@ratelimit("shop_assistant", rate_limit=20, window_seconds=600, redirect_to="home", methods=("POST",),
+           message="You've asked a lot of questions. Please wait a few minutes.")
+def shop_assistant(request):
+    """'Ask Lumen': describe what you need, get matching products and a
+    short answer (written by Claude when the AI key is set)."""
+    from . import shopping_ai
+    question = (request.POST.get("q") or "").strip()[:300]
+    result = shopping_ai.answer(question, request) if question else None
+    return render(request, "bees/assistant.html", {"question": question, "result": result,
+                                                   "examples": shopping_ai.EXAMPLES})
+
+
+def _can_list(request):
+    from .views import get_seller_account_for_user
+    if not request.user.is_authenticated:
+        return False
+    if request.user.is_staff:
+        return True
+    seller, _role = get_seller_account_for_user(request.user)
+    return bool(seller and seller.status == "approved")
+
+
+@require_POST
+@ratelimit("listing_photo", rate_limit=30, window_seconds=3600, redirect_to="home")
+def listing_from_photo(request):
+    from django.core.exceptions import ValidationError
+    from django.http import JsonResponse
+    from .categories import choices
+    from .images import optimize
+    from .security import validate_image_upload
+    if not _can_list(request):
+        return JsonResponse({"error": "Only approved sellers and store staff can use this."}, status=403)
+    f = request.FILES.get("photo")
+    if not f:
+        return JsonResponse({"error": "Choose a photo."}, status=400)
+    if not market.image_search_enabled():
+        return JsonResponse({"error": "The AI helper isn't turned on for this store (add the AI key under Keys & passwords)."}, status=400)
+    try:
+        validate_image_upload(f)
+    except ValidationError as exc:
+        return JsonResponse({"error": " ".join(exc.messages)}, status=400)
+    opt = optimize(f, 900)
+    opt.seek(0)
+    media = getattr(opt, "content_type", "") or "image/jpeg"
+    draft = market.listing_from_photo(opt.read(), media if media in ("image/jpeg", "image/png", "image/webp") else "image/jpeg", choices())
+    if not draft:
+        return JsonResponse({"error": "We couldn't read that photo. Try a clearer one, on a plain background."}, status=422)
+    return JsonResponse({"draft": draft})
+
+
+def price_tips(request):
+    from django.http import JsonResponse
+    from .templatetags.bees_extras import money
+    if not _can_list(request):
+        return JsonResponse({}, status=403)
+    pid = request.GET.get("product", "")
+    tips = market.price_tips(request.GET.get("category", ""), int(pid) if pid.isdigit() else None)
+    if not tips:
+        return JsonResponse({"tips": None})
+    return JsonResponse({"tips": {k: (money(v) if k != "count" else v) for k, v in tips.items()}})

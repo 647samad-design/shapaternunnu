@@ -6952,3 +6952,193 @@ class ReviewsPriceAndTraderTests(TestCase):
         with self.settings(AI_API_KEY="test"), mock.patch("bees.market.describe_image", return_value="red running shoes"):
             r = self.client.post(reverse("photo_search"), {"photo": SimpleUploadedFile("s.jpg", buf.getvalue(), content_type="image/jpeg")})
         self.assertIn("q=red+running+shoes", r["Location"])
+
+
+class StoreBestTests(TestCase):
+    """Round 3: signals, alerts, tiers, affiliates, deals and the assistant."""
+
+    def _sell(self, product, qty, user=None):
+        user = user or User.objects.create_user(f"b{Order.objects.count()}x", f"b{Order.objects.count()}@example.com", "x")
+        order = Order.objects.create(user=user, email=user.email, full_name="B", address="1", city="X", country="US", phone="+15550100",
+                                     payment_method="cod", status="confirmed")
+        OrderItem.objects.create(order=order, product=product, product_name=product.name, price=product.price, quantity=qty)
+        return order
+
+    def test_bought_count_best_seller_and_sort(self):
+        a = make_product(name="Hot Hoodie", category="hoodies")
+        b = make_product(name="Cool Hoodie", category="hoodies")
+        self._sell(a, 60)
+        self._sell(b, 4)
+        page = self.client.get(reverse("product_detail", args=[a.id]))
+        self.assertContains(page, "50+ bought in the past month")
+        self.assertContains(page, "#1 Best Seller")
+        listing = self.client.get(reverse("category_products", args=["hoodies"]), {"sort": "popular"})
+        self.assertEqual(listing.context["products"][0].id, a.id)
+        self.assertContains(page, "Arrives")
+
+    def test_price_alert_notifies_once(self):
+        u = User.objects.create_user("pa", "pa@example.com", "pass12345")
+        p = make_product(name="Fancy Kettle", price=Decimal("80"))
+        self.client.force_login(u)
+        self.client.post(reverse("price_alert", args=[p.id]), {"target_price": "90"})  # not below the price
+        from .models import PriceAlert
+        self.assertFalse(PriceAlert.objects.exists())
+        self.client.post(reverse("price_alert", args=[p.id]), {"target_price": "60"})
+        p.price = Decimal("70")
+        p.save()
+        self.assertFalse(Notification.objects.filter(user=u, message__contains="Price alert").exists())
+        p.price = Decimal("59")
+        p.save()
+        p.price = Decimal("58")
+        p.save()
+        self.assertEqual(Notification.objects.filter(user=u, message__contains="Price alert").count(), 1)
+
+    def test_loyalty_tier_multiplies_points(self):
+        from .models import Profile
+        from . import loyalty
+        u = User.objects.create_user("lt", "lt@example.com", "pass12345")
+        p = make_product(price=Decimal("300"))
+        old = self._sell(p, 2, u)
+        Order.objects.filter(pk=old.pk).update(status="delivered")
+        self.assertEqual(loyalty.tier_for(u)["key"], "gold")  # 600 spent
+        new = self._sell(make_product(price=Decimal("10")), 1, u)
+        new.status = "delivered"
+        new.save()
+        self.assertEqual(Profile.objects.get(user=u).loyalty_points, 15)  # 10 x 1.5
+        self.client.force_login(u)
+        self.assertContains(self.client.get(reverse("profile")), "Gold level")
+
+    def test_affiliate_earns_on_delivery(self):
+        from django.db import transaction
+        from .models import Profile
+        SiteSettings.objects.filter(pk=1).update(affiliate_percent=5)
+        aff = User.objects.create_user("af", "af@example.com", "pass12345")
+        Profile.objects.update_or_create(user=aff, defaults={"referral_code": "AFFCODE1"})
+        buyer = User.objects.create_user("abuy", "abuy@example.com", "pass12345")
+        p = make_product(price=Decimal("40"))
+        self.client.force_login(buyer)
+        self.client.get(reverse("product_detail", args=[p.id]), {"ref": "AFFCODE1"})
+        self.client.post(reverse("add_to_cart", args=[p.id]))
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "email": "abuy@example.com", "payment_method": "cod"})
+        order = Order.objects.get(user=buyer)
+        self.assertEqual(order.affiliate_code, "AFFCODE1")
+        with self.captureOnCommitCallbacks(execute=True):
+            order.status = "delivered"
+            order.save()
+        self.assertEqual(Profile.objects.get(user=aff).store_credit, Decimal("2.00"))
+        from . import loyalty
+        self.assertIsNone(loyalty.pay_affiliate(Order.objects.get(pk=order.pk)))  # only once
+        _ = transaction
+
+    def test_deals_assistant_and_protection_pages(self):
+        make_product(name="Big Discount Mug", discount_percent=40, old_price=Decimal("900"))
+        self.assertContains(self.client.get(reverse("deals")), "Big Discount Mug")
+        r = self.client.post(reverse("shop_assistant"), {"q": "discount mug"})
+        self.assertContains(r, "Big Discount Mug")
+        self.assertContains(self.client.get(reverse("buyer_protection")), "money back")
+
+    def test_recommended_for_you_from_viewed_category(self):
+        seen = make_product(name="Seen Sneaker", category="sneakers")
+        other = make_product(name="Other Sneaker", category="sneakers")
+        self.client.get(reverse("product_detail", args=[seen.id]))
+        home = self.client.get("/")
+        self.assertIn(other.id, [p.id for p in home.context["recommended"]])
+        self.assertNotIn(seen.id, [p.id for p in home.context["recommended"]])
+
+
+class EasyModeTests(TestCase):
+    """Time savers: imports from other shops, trusted sellers, digests,
+    admin search, WhatsApp, photo listings and price tips."""
+
+    def test_shopify_and_woocommerce_exports_are_understood(self):
+        from .bulk import _to_dicts, _clean
+        shopify = [["Handle", "Title", "Body (HTML)", "Vendor", "Variant Price", "Variant Compare At Price", "Variant Inventory Qty", "Image Src", "Type"],
+                   ["tee", "Cotton Tee", "<p>Soft <b>cotton</b></p>", "Acme", "19.00", "25.00", "7", "https://cdn.example.com/t.jpg", "Hoodie"],
+                   ["tee", "", "", "", "", "", "", "https://cdn.example.com/t2.jpg", ""]]
+        rows = _to_dicts(shopify)
+        self.assertEqual(len(rows), 1)  # the extra image row is skipped
+        clean = _clean(rows[0])
+        self.assertEqual((clean["name"], clean["price"], clean["old_price"], clean["stock"], clean["brand"]),
+                         ("Cotton Tee", Decimal("19.00"), Decimal("25.00"), 7, "Acme"))
+        self.assertEqual(clean["description"], "Soft cotton")
+        self.assertEqual(clean["category"], "hoodies")
+        woo = [["Name", "Regular price", "Sale price", "Stock", "Images", "Categories", "Weight (kg)"],
+               ["Desk Lamp", "40", "30", "3", "https://x.example.com/a.jpg, https://x.example.com/b.jpg", "Home & Kitchen > Table lamp", "1.2"]]
+        clean = _clean(_to_dicts(woo)[0])
+        self.assertEqual((clean["price"], clean["old_price"], clean["image_url"], clean["category"], clean["weight_grams"]),
+                         (Decimal("30"), Decimal("40"), "https://x.example.com/a.jpg", "table-lamp", 1200))
+
+    def test_trusted_seller_products_go_live(self):
+        from django.utils import timezone
+        user = User.objects.create_user("ts", "ts@example.com", "pass12345")
+        seller = SellerAccount.objects.create(user=user, status="approved", business_name="Trusty", verified_at=timezone.now(),
+                                              performance_level="excellent")
+        self.client.force_login(user)
+        form = {"name": "Trusted Mug", "category": "casserole-pot", "price": "10", "stock": "5", "discount_percent": "0",
+                "image_url": "https://example.com/m.jpg"}
+        self.client.post(reverse("seller_add_product"), form)
+        self.assertEqual(Product.objects.get(name="Trusted Mug").approval_status, "pending")  # setting is off
+        st = SiteSettings.load(); st.auto_approve_trusted = True; st.save()
+        self.client.post(reverse("seller_add_product"), dict(form, name="Trusted Mug 2"))
+        self.assertEqual(Product.objects.get(name="Trusted Mug 2").approval_status, "approved")
+        _ = seller
+
+    def test_daily_digests(self):
+        from django.core import mail
+        from django.core.management import call_command
+        User.objects.create_user("own", "owner@example.com", "x", is_staff=True, is_superuser=True)
+        seller = SellerAccount.objects.create(user=User.objects.create_user("ds", "ds@example.com", "x"), status="approved", business_name="Digest Shop")
+        make_product(name="Last One", stock=1, seller_account=seller, seller_name="Digest Shop")
+        quiet = SellerAccount.objects.create(user=User.objects.create_user("qq", "qq@example.com", "x"), status="approved", business_name="Quiet")
+        with self.captureOnCommitCallbacks(execute=True):
+            call_command("send_digests", stdout=open(os.devnull, "w"))
+        to = [m.to[0] for m in mail.outbox]
+        self.assertIn("owner@example.com", to)
+        self.assertIn("ds@example.com", to)
+        self.assertNotIn("qq@example.com", to)  # nothing to tell them
+        _ = quiet
+
+    def test_admin_search(self):
+        staff = User.objects.create_user("ad", "ad@example.com", "pass12345", is_staff=True, is_superuser=True)
+        self.client.force_login(staff)
+        order = Order.objects.create(email="find@example.com", full_name="Fin Der", address="1", city="X", country="US", phone="+15550100")
+        r = self.client.get(reverse("manage_search"), {"q": f"#{order.id}"})
+        self.assertRedirects(r, reverse("manage_order", args=[order.id]), fetch_redirect_response=False)
+        make_product(name="Searchable Lamp")
+        make_product(name="Searchable Lamp Two")
+        self.assertContains(self.client.get(reverse("manage_search"), {"q": "searchable"}), "Searchable Lamp Two")
+
+    def test_whatsapp_link_and_channel(self):
+        from unittest import mock
+        from .templatetags.bees_extras import wa_link
+        self.assertEqual(wa_link("+92 300 1234567", "Hi"), "https://wa.me/923001234567?text=Hi")
+        st = SiteSettings.load(); st.whatsapp_number = "+923001234567"; st.message_channel = "whatsapp"; st.save()
+        self.assertContains(self.client.get(reverse("help_support")), "wa.me/923001234567")
+        from . import sms
+        env = {"TWILIO_ACCOUNT_SID": "AC" + "0" * 32, "TWILIO_AUTH_TOKEN": "0" * 32, "TWILIO_FROM": "+15550001111"}
+        with mock.patch.dict(os.environ, env), mock.patch("urllib.request.urlopen") as op:
+            op.return_value.__enter__.return_value.status = 201
+            sms.send_now("+923001234567", "Your order shipped")
+            body = op.call_args[0][0].data.decode()
+        self.assertIn("To=whatsapp%3A%2B923001234567", body)
+        self.assertIn("From=whatsapp%3A%2B15550001111", body)
+
+    def test_listing_from_photo_and_price_tips(self):
+        from io import BytesIO
+        from unittest import mock
+        from PIL import Image
+        user = User.objects.create_user("lp", "lp@example.com", "pass12345")
+        SellerAccount.objects.create(user=user, status="approved", business_name="Photo Shop")
+        for price in ("10", "20", "30", "40"):
+            make_product(category="sneakers", price=Decimal(price))
+        self.client.force_login(user)
+        tips = self.client.get(reverse("price_tips"), {"category": "sneakers"}).json()["tips"]
+        self.assertEqual(tips["count"], 4)
+        buf = BytesIO()
+        Image.new("RGB", (40, 40), "white").save(buf, "JPEG")
+        draft = {"name": "White Sneakers", "category": "sneakers", "description": "Clean white sneakers.", "brand": "", "specs": "Colour: White"}
+        with self.settings(AI_API_KEY="k"), mock.patch("bees.market.listing_from_photo", return_value=draft):
+            r = self.client.post(reverse("listing_from_photo"), {"photo": SimpleUploadedFile("s.jpg", buf.getvalue(), content_type="image/jpeg")})
+        self.assertEqual(r.json()["draft"]["name"], "White Sneakers")
+        self.client.logout()
+        self.assertEqual(self.client.post(reverse("listing_from_photo")).status_code, 403)

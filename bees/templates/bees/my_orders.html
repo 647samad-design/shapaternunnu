@@ -34,7 +34,7 @@
     {% if guest %}
     <div class="page-head"><div><h1>Your order</h1><p>Keep the link from your email to come back to this page.</p></div></div>
     {% else %}
-    <div class="page-head"><div><h1>{{ t.my_orders }}</h1><p>Track deliveries, download invoices and request returns.</p></div></div>
+    <div class="page-head"><div><h1>{{ t.my_orders }}</h1><p>Track deliveries, download invoices and request returns.</p></div>{% if brand.whatsapp_number %}<a class="btn btn-secondary btn-sm" href="{{ brand.whatsapp_number|wa_link:'Hi! A question about my order' }}" target="_blank" rel="noopener">💬 WhatsApp support</a>{% endif %}</div>
     {% endif %}
     {% for order in orders %}
     <article class="panel order" id="order-{{ order.id }}" style="scroll-margin-top:110px;">

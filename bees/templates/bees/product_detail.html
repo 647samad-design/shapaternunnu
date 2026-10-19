@@ -59,6 +59,15 @@
     .assurances li { padding: 14px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 16px; }
     .assurances li span:last-child { color: var(--muted); text-align: right; }
     .brand-line + .cond-badge { margin-left: 8px; }
+    .bs-badge { display: inline-flex; gap: 4px; align-items: center; margin: 2px 0 6px 8px; padding: 3px 10px; border-radius: 4px; background: #C45500; color: #fff; font-weight: 800; font-size: .8rem; text-decoration: none; }
+    .bs-badge span { font-weight: 600; opacity: .95; }
+    .bought-line { margin-top: 6px; font-weight: 700; }
+    .deliv-line { margin: 10px 0 12px; }
+    .pa-box { position: relative; }
+    .pa-box summary { cursor: pointer; text-decoration: underline; list-style: none; color: inherit; font-weight: 700; }
+    .pa-box summary::-webkit-details-marker { display: none; }
+    .pa-form { display: flex; gap: 6px; margin-top: 8px; }
+    .pa-form input { width: 120px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
     .cond-badge { display: inline-block; padding: 2px 10px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 16%, var(--surface)); color: var(--ink); font-size: .8rem; font-weight: 800; vertical-align: 2px; }
     .omnibus { margin-top: 4px; }
     .bnpl-line { margin-top: 6px; }
@@ -93,6 +102,12 @@
     .rv-helpful { margin: 8px 0 0; }
     .rv-helpful button[aria-pressed="true"] { color: var(--ok); font-weight: 700; }
     .gallery-video { position: absolute; inset: 0; background: #000; }
+    #main-image { transition: transform .12s ease-out; }
+    .img-lightbox { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 94vh; }
+    .img-lightbox::backdrop { background: rgba(0,0,0,.82); }
+    .img-lightbox img { max-width: 96vw; max-height: 90vh; object-fit: contain; display: block; border-radius: 8px; background: #fff; }
+    .img-lightbox button { position: fixed; top: 14px; right: 18px; background: #fff; border: 0; border-radius: 999px; width: 40px; height: 40px; font-size: 1.1rem; cursor: pointer; }
+    @media (prefers-reduced-motion: reduce) { #main-image { transition: none; } }
     .gallery-video iframe, .gallery-video video { width: 100%; height: 100%; border: 0; display: block; }
     .thumb-video { position: relative; }
     .thumb-video span { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 1.3rem; background: rgba(0,0,0,.35); }
@@ -199,6 +214,7 @@
         <div class="buybox">
             {% if product.brand %}<a class="brand-line" href="{% url 'search_products' %}?q={{ product.brand|urlencode }}" data-no-translate>{{ product.brand }}</a>{% endif %}
             {% if product.condition != "new" %}<span class="cond-badge">{{ product.get_condition_display }}</span>{% endif %}
+            {% if best_seller %}<a class="bs-badge" href="{% url 'category_products' best_seller.category %}?sort=popular">#{{ best_seller.rank }} Best Seller <span>in {{ best_seller.label }}</span></a>{% endif %}
             <h1>{{ product.name }}</h1>{% if product.approval_status == "archived" %}<div class="callout" style="margin:8px 0;">This product is no longer sold. You can still review it if you bought it.</div>{% endif %}
             {% if product.seller_name %}<p class="seller-line">Sold by <a href="{% url 'store_page' product.seller_name %}" data-no-translate>{{ product.seller_name }}</a>{% if product.seller_account.has_badge %} <span class="pro-badge">★ Pro seller</span>{% endif %}{% if product.seller_account.verified_at %} <span class="seller-badge verified">✓ {{ t.verified_seller }}</span>{% endif %}{% if product.seller_account.top_seller %} <span class="seller-badge top">★ {{ t.top_seller }}</span>{% endif %}</p>{% endif %}
             {% if product.rating_count %}
@@ -210,6 +226,7 @@
                 {% if product.old_price %}<span class="price-was"><span class="sr-only">Was </span>{{ product.old_price|price }}</span>{% endif %}
                 {% if product.discount_percent %}<span class="badge badge-sale">Save {{ product.discount_percent }}%</span>{% endif %}
             </div>
+            {% if bought_label %}<p class="small bought-line">🔥 {{ bought_label }}</p>{% endif %}
             {% if lowest_30d %}<p class="muted small omnibus">Lowest price in the last 30 days: {{ lowest_30d|price }}</p>{% endif %}
             {% if bnpl_part and not product.is_auction %}<p class="small bnpl-line">or <strong>{{ brand.bnpl_instalments }} interest-free payments of {{ bnpl_part|price }}</strong> with Klarna, Afterpay or Affirm at checkout</p>{% endif %}
             {% if brand.membership_enabled and not is_member and not product.is_digital %}<p class="small"><a class="link" href="{% url 'membership' %}">Free shipping with {{ brand.site_name }} {{ brand.membership_name }}</a></p>{% endif %}
@@ -235,6 +252,7 @@
                 {% if product.stock <= 0 %}{{ t.out_of_stock }}{% elif product.has_variants %}Choose {% if variant_sizes and variant_colors %}a size and colour{% elif variant_sizes %}a size{% else %}a colour{% endif %}{% elif product.stock <= 5 %}Only {{ product.stock }} left — order soon{% else %}{{ t.in_stock }}{% endif %}
             </p>
 
+            {% if delivery_window and product.stock > 0 and not product.is_auction %}<p class="small deliv-line">🚚 Arrives <strong>{{ delivery_window.0|date:"D j M" }} - {{ delivery_window.1|date:"D j M" }}</strong>{% if brand.free_shipping_threshold %} · free shipping over {{ brand.free_shipping_threshold|money }}{% endif %}</p>{% endif %}
             {% if product.ships_from %}<p class="small muted" style="margin-top:8px;">📦 Ships from {{ product.ships_from|country_name }}</p>{% endif %}
             {% if auction %}
             <section class="auction-box" id="auction" aria-label="Auction">
@@ -305,6 +323,8 @@
                     <button type="submit">{% if in_wishlist %}Saved to wishlist{% else %}Save to wishlist{% endif %}</button>
                 </form>
                 {% endif %}
+                {% if user.is_authenticated and not product.is_auction %}<details class="pa-box"><summary>🔔 {% if price_alert %}Alert at {{ price_alert.target_price|price }}{% else %}Price alert{% endif %}</summary>
+                    <form method="post" action="{% url 'price_alert' product.id %}" class="pa-form">{% csrf_token %}<label class="sr-only" for="pa-t">Tell me when the price is at or below</label><input id="pa-t" name="target_price" inputmode="decimal" placeholder="e.g. {{ product.price|floatformat:0 }}" value="{{ price_alert.target_price|default:'' }}"><button class="btn btn-secondary btn-sm" type="submit">Set</button>{% if price_alert %}<button class="btn btn-ghost btn-sm" name="action" value="remove" formnovalidate>Remove</button>{% endif %}</form></details>{% endif %}
                 <a href="{% url 'toggle_compare' product.id %}" rel="nofollow">{% if product.id in compare_ids %}Remove from compare{% else %}Add to compare{% endif %}</a>
                 <button type="button" class="link-btn" data-share-product data-url="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}{% if user.is_authenticated and brand.referral_enabled and user.profile.referral_code %}?ref={{ user.profile.referral_code }}{% endif %}" data-title="{{ product.name }}">↗ Share</button>
             </div>
@@ -340,6 +360,7 @@
                 {% endif %}
                 <li {% if has_shipping_zones %}hidden{% endif %}><span>Shipping</span><span>{% if has_shipping_zones %}By country, shown at checkout{% elif brand.free_shipping_threshold %}Free over {{ brand.free_shipping_threshold|money }}{% elif brand.shipping_flat_fee %}{{ brand.shipping_flat_fee|money }} flat rate{% else %}Free{% endif %}</span></li>
                 {% if product.is_digital %}<li><span>Returns</span><span>Downloads can't be returned</span></li>{% else %}<li><span>Returns</span><span>{{ brand.return_days }} days from delivery</span></li>{% endif %}
+                <li><span>Protection</span><span><a href="{% url 'buyer_protection' %}" class="link">🛡️ Money back if it's not as described</a></span></li>
                 <li><span>Payment</span><span>{% if stripe_enabled %}Secure card checkout via Stripe{% else %}{{ t.cash_on_delivery }}{% endif %}</span></li>
             </ul>
         </div>
@@ -626,6 +647,27 @@
             document.querySelectorAll('.thumbs button').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
         });
+        // Hover to zoom (desktop), tap to see the full picture.
+        const gm = document.querySelector('.gallery-main'), mi = document.getElementById('main-image');
+        if (gm && mi) {
+            if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+                gm.addEventListener('mousemove', e => {
+                    const r = gm.getBoundingClientRect();
+                    mi.style.transformOrigin = ((e.clientX - r.left) / r.width * 100) + '% ' + ((e.clientY - r.top) / r.height * 100) + '%';
+                    mi.style.transform = 'scale(2)';
+                });
+                gm.addEventListener('mouseleave', () => { mi.style.transform = ''; });
+            }
+            mi.style.cursor = 'zoom-in';
+            mi.addEventListener('click', () => {
+                const d = document.createElement('dialog');
+                d.className = 'img-lightbox';
+                d.innerHTML = '<button type="button" aria-label="Close">✕</button>';
+                const big = document.createElement('img'); big.src = mi.src; big.alt = mi.alt; d.appendChild(big);
+                document.body.appendChild(d); d.showModal();
+                d.addEventListener('click', () => { d.close(); d.remove(); });
+            });
+        }
         const pers = document.querySelector('[data-pers-source]');
         if (pers) document.addEventListener('submit', function (e) {
             const h = e.target.querySelector && e.target.querySelector('[data-pers-copy]');

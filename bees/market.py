@@ -247,3 +247,51 @@ def describe_image(data, media_type):
     text = "".join(b.get("text", "") for b in out.get("content", []) if b.get("type") == "text")
     words = [w for w in "".join(ch if ch.isalnum() or ch == " " else " " for ch in text.lower()).split()][:6]
     return " ".join(words)
+
+
+def listing_from_photo(data, media_type, categories):
+    """Drafts a listing from a product photo: {"name", "category",
+    "description", "brand", "specs"}. Empty dict on any problem."""
+    if not image_search_enabled():
+        return {}
+    cats = ", ".join(f"{slug} ({name})" for slug, name in categories)[:3000]
+    prompt = ("You help a seller list this product in an online shop. Look at the photo and reply with only JSON: "
+              '{"name": "clear product title, max 80 chars", "category": "one slug from the list", '
+              '"brand": "brand if visible, else empty", "description": "3-5 short sentences for shoppers, no claims you cannot see", '
+              '"specs": ["Name: value", "..."] (2-5 facts you can see, like colour or material)}. Categories: ' + cats)
+    body = json.dumps({"model": settings.AI_MODEL, "max_tokens": 500, "messages": [{"role": "user", "content": [
+        {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(data).decode()}},
+        {"type": "text", "text": prompt}]}]}).encode()
+    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST", headers={
+        "x-api-key": settings.AI_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            out = json.loads(resp.read().decode())
+        text = "".join(b.get("text", "") for b in out.get("content", []) if b.get("type") == "text")
+        draft = json.loads(text[text.index("{"):text.rindex("}") + 1])
+    except Exception:
+        logger.exception("Listing from photo failed")
+        return {}
+    valid = {slug for slug, _n in categories}
+    specs = draft.get("specs") or []
+    return {
+        "name": str(draft.get("name") or "")[:120], "brand": str(draft.get("brand") or "")[:80],
+        "category": draft.get("category") if draft.get("category") in valid else "",
+        "description": str(draft.get("description") or "")[:2000],
+        "specs": "\n".join(str(s)[:120] for s in specs if ":" in str(s))[:1000] if isinstance(specs, list) else "",
+    }
+
+
+def price_tips(category, exclude_id=None):
+    """Prices of live products in the same category: {"low", "typical",
+    "high", "count"} or None if there are fewer than 3."""
+    from .models import Product
+    from .categories import with_children
+    qs = Product.objects.listed().filter(category__in=with_children(category))
+    if exclude_id:
+        qs = qs.exclude(pk=exclude_id)
+    prices = sorted(qs.values_list("price", flat=True)[:500])
+    if len(prices) < 3:
+        return None
+    n = len(prices)
+    return {"low": prices[n // 10], "typical": prices[n // 2], "high": prices[min(n - 1, n * 9 // 10)], "count": n}

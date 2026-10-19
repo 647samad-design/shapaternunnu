@@ -47,6 +47,7 @@ GROUPS = [
         ("TWILIO_ACCOUNT_SID", "Account SID", False, r"^AC[0-9a-fA-F]{32}$"),
         ("TWILIO_AUTH_TOKEN", "Auth token", True, r"^[0-9a-fA-F]{32}$"),
         ("TWILIO_FROM", "Send from (number or MG... service SID)", False, r"^(\+[1-9]\d{6,14}|MG[0-9a-fA-F]{32}|[A-Za-z0-9 ]{3,11})$"),
+        ("TWILIO_WHATSAPP_FROM", "WhatsApp sender (optional, e.g. +14155238886)", False, r"^(whatsapp:)?\+[1-9]\d{6,14}$"),
     ]),
     ("Phone notifications (web push)", "Free - no account needed. Tick 'Create push keys' below and save; keep them once created (changing them turns off notifications people already allowed).", [
         ("VAPID_PUBLIC_KEY", "Public key", False, r"^[A-Za-z0-9_-]{80,90}$"),

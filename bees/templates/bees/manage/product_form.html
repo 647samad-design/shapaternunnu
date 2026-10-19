@@ -9,6 +9,7 @@
 </div>
 <form method="post" enctype="multipart/form-data" class="two-col">
     {% csrf_token %}
+    <div style="grid-column:1/-1;">{% include "bees/partials/listing_helper.html" %}</div>
     <div class="col-stack">
         <section class="panel">
             <h2>Details</h2>

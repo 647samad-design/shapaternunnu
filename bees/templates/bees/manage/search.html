@@ -1,0 +1,12 @@
+{% extends "bees/manage/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Search{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Search</h1><p>Order number, email, phone, name, product or seller.</p></div></div>
+<form method="get" class="panel" style="display:flex;gap:8px;"><label class="sr-only" for="as-q">Search</label><input id="as-q" class="input" name="q" value="{{ q }}" autofocus style="flex:1;"><button class="btn btn-primary" type="submit">Search</button></form>
+{% if nothing %}<section class="panel"><p class="muted">Nothing found for “{{ q }}”.</p></section>{% endif %}
+{% if results.orders %}<section class="panel"><h2>Orders</h2><div class="table-scroll"><table class="table"><tbody>{% for o in results.orders %}<tr><td><a class="rowlink" href="{% url 'manage_order' o.id %}">#{{ o.id }}</a></td><td>{{ o.full_name }}</td><td class="muted small">{{ o.email }}</td><td>{{ o.get_status_display }}</td><td class="num">{{ o.total|money }}</td><td class="muted small">{{ o.created_at|date:"j M Y" }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+{% if results.products %}<section class="panel"><h2>Products</h2><div class="table-scroll"><table class="table"><tbody>{% for p in results.products %}<tr><td><a class="rowlink" href="{% url 'manage_product_edit' p.id %}">{{ p.name }}</a></td><td class="muted small">{{ p.seller_name }}</td><td class="num">{{ p.price|money }}</td><td>{{ p.get_approval_status_display }}</td><td class="num">{{ p.stock }} in stock</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+{% if results.customers %}<section class="panel"><h2>Customers</h2><div class="table-scroll"><table class="table"><tbody>{% for u in results.customers %}<tr><td><a class="rowlink" href="{% url 'manage_customers' %}?q={{ u.email|urlencode }}">{{ u.get_full_name|default:u.username }}</a></td><td class="muted small">{{ u.email }}</td><td class="muted small">joined {{ u.date_joined|date:"j M Y" }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+{% if results.sellers %}<section class="panel"><h2>Sellers</h2><div class="table-scroll"><table class="table"><tbody>{% for s in results.sellers %}<tr><td><a class="rowlink" href="{% url 'manage_seller' s.id %}">{{ s.display_name }}</a></td><td class="muted small">{{ s.user.email }}</td><td>{{ s.get_status_display }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+{% endblock %}

@@ -128,11 +128,17 @@
         </a>{% endfor %}
     </section>
     {% endif %}
+    {% if recommended %}
+    <section class="section" id="for-you">
+        <div class="section-head"><h2>Recommended for you</h2><a href="{% url 'shop_assistant' %}">✨ Ask for ideas</a></div>
+        <div class="grid-products">{% for product in recommended %}{% include "bees/partials/product_card.html" %}{% endfor %}</div>
+    </section>
+    {% endif %}
     {% if flash_sale_products %}
     <section class="section" id="deals">
         <div class="section-head">
             <h2>Today's deals</h2>
-            <a href="{% url 'all_products' %}?sort=price_asc">{{ t.view_all }}</a>
+            <a href="{% url 'deals' %}">{{ t.view_all }}</a>
         </div>
         <div class="grid-products">
             {% for product in flash_sale_products %}{% include "bees/partials/product_card.html" %}{% endfor %}

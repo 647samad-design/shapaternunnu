@@ -239,3 +239,22 @@ def social_providers():
 def split(value, sep=" "):
     """'a b c'|split -> ['a', 'b', 'c']."""
     return str(value).split(sep)
+
+
+@register.filter
+def best_seller_rank(product_id):
+    """1-3 if the product is a top seller in its category, else ''."""
+    from bees.insights import best_sellers
+    hit = best_sellers().get(product_id)
+    return hit[0] if hit else ""
+
+
+@register.filter
+def wa_link(number, text=""):
+    """WhatsApp chat link for a phone number ('+92 300 1234567')."""
+    import re
+    from urllib.parse import quote
+    digits = re.sub(r"\D", "", str(number or ""))
+    if len(digits) < 8:
+        return ""
+    return f"https://wa.me/{digits}" + (f"?text={quote(str(text))}" if text else "")

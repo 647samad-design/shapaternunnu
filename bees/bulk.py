@@ -25,7 +25,59 @@ from .categories import choices as category_choices
 MAX_ROWS = 2000
 MAX_BYTES = 5 * 1024 * 1024
 COLUMNS = ["id", "name", "category", "price", "old_price", "stock", "description", "image_url",
-           "weight_grams", "seo_title", "seo_description"]
+           "weight_grams", "seo_title", "seo_description", "brand"]
+
+# Exports from other platforms work as they are: their column names are
+# read as ours (Shopify, WooCommerce, Amazon, Etsy, eBay).
+ALIASES = {
+    # Shopify
+    "title": "name", "body_(html)": "description", "variant_price": "price", "variant_compare_at_price": "old_price",
+    "variant_inventory_qty": "stock", "image_src": "image_url", "variant_grams": "weight_grams", "vendor": "brand",
+    "product_category": "category", "type": "category",
+    # WooCommerce
+    "regular_price": "_regular_price", "sale_price": "_sale_price", "images": "image_url", "short_description": "_short_description",
+    "categories": "category", "brands": "brand", "weight_(kg)": "_weight_kg",
+    # Amazon / Etsy / eBay
+    "item_name": "name", "product_name": "name", "standard_price": "price", "quantity": "stock", "main_image_url": "image_url",
+    "product_description": "description", "brand_name": "brand", "image1": "image_url", "image_1": "image_url",
+    "picurl": "image_url", "start_price": "price", "*title": "name", "*startprice": "price", "*quantity": "stock",
+}
+
+
+def _from_other_platform(row):
+    """Maps another platform's row onto our columns. None for Shopify's
+    extra variant/image rows (same handle, no title)."""
+    if row.get("handle") and not row.get("title") and not row.get("name") and not row.get("id"):
+        return None
+    out = {}
+    for key, value in row.items():
+        out.setdefault(ALIASES.get(key, key), value)
+    regular, sale = out.pop("_regular_price", ""), out.pop("_sale_price", "")
+    if regular or sale:
+        out.setdefault("price", sale or regular)
+        if sale and regular:
+            out.setdefault("old_price", regular)
+    short = out.pop("_short_description", "")
+    if short and not out.get("description"):
+        out["description"] = short
+    kg = out.pop("_weight_kg", "")
+    if kg and not out.get("weight_grams"):
+        try:
+            out["weight_grams"] = str(int(Decimal(kg.replace(",", ".")) * 1000))
+        except Exception:
+            pass
+    if out.get("image_url") and "," in out["image_url"]:
+        out["image_url"] = out["image_url"].split(",")[0].strip()  # WooCommerce lists every image
+    if out.get("description") and "<" in out["description"]:
+        import re
+        from html import unescape
+        out["description"] = unescape(re.sub(r"<\s*(br|/p|/li)\s*/?>", "\n", out["description"], flags=re.I))
+        out["description"] = re.sub(r"<[^>]+>", "", out["description"]).strip()
+    if out.get("category") and ">" in out["category"]:
+        out["category"] = out["category"].split(">")[-1].strip()  # "Apparel > Shirts" -> "Shirts"
+    if out.get("category") and "," in out["category"]:
+        out["category"] = out["category"].split(",")[0].strip()
+    return out
 EXPORT_ONLY = ["status", "has_options", "link"]
 HELP = {
     "id": "Leave empty to add a new product. Keep it to update an existing one.",
@@ -39,6 +91,7 @@ HELP = {
     "weight_grams": "Optional, for courier rates.",
     "seo_title": "Optional (max 70).",
     "seo_description": "Optional (max 160).",
+    "brand": "Optional brand or maker.",
 }
 REVIEWED = ("name", "category", "image_url", "description")
 OPTION_COLUMNS = ["product", "size", "color", "price", "stock", "sku"]
@@ -152,11 +205,15 @@ def _to_dicts(table, need=None):
     header = [str(h).strip().lower().replace(" ", "_").replace("colour", "color") for h in table[0]]
     if need and not all(n in header for n in need):
         raise BulkError("The options sheet needs a 'product' column (product id or name), plus size, color and stock.")
-    if not need and "name" not in header and "id" not in header and "product" not in header:
+    known = {"name", "id", "product"} | {k for k, v in ALIASES.items() if v == "name"}
+    if not need and not (known & set(header)):
         raise BulkError("The first row must be the column names (id, name, category, price, stock, ...). Download the template to see them.")
     rows = []
     for r in table[1:]:
-        rows.append({header[i]: str(r[i]).strip() for i in range(min(len(header), len(r))) if header[i]})
+        row = {header[i]: str(r[i]).strip() for i in range(min(len(header), len(r))) if header[i]}
+        row = row if need else _from_other_platform(row)
+        if row is not None:
+            rows.append(row)
     return rows
 
 
@@ -206,7 +263,12 @@ def _category(value):
         by_label.setdefault(row["name"].lower(), row["slug"])
     if value.lower() in by_label:
         return by_label[value.lower()]
-    raise BulkError(f"unknown category '{value[:30]}'")
+    # Close names from other shops: "T-Shirts" -> "Fashion", "Hoodie" -> "Hoodies & Sweatshirts".
+    low = value.lower().rstrip("s")
+    for name, code in by_label.items():
+        if len(low) >= 4 and (low in name or name.rstrip("s") in low):
+            return code
+    raise BulkError(f"unknown category '{value[:30]}' - use one of the category names from the 'categories' sheet")
 
 
 def _clean(row):
@@ -237,6 +299,8 @@ def _clean(row):
         out["seo_title"] = row["seo_title"][:70]
     if row.get("seo_description"):
         out["seo_description"] = " ".join(row["seo_description"].split())[:170]
+    if row.get("brand"):
+        out["brand"] = " ".join(row["brand"].split())[:80]
     return out
 
 
@@ -414,6 +478,8 @@ def unstash(user):
 
 def apply(entries, products, seller=None, store=False, user=None):
     """Saves a stashed plan. Returns (created, updated, sent_to_review)."""
+    from .trust import trusted
+    store = store or trusted(seller)  # trusted sellers' changes go live straight away
     from django.db import transaction
     from .models import AuditLog, Product
     created = updated = review = 0
