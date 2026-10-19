@@ -3,8 +3,9 @@
 {% block title %}{{ t.your_cart }} — {{ brand.site_name }}{% endblock %}
 {% block robots_meta %}noindex, nofollow{% endblock %}
 {% block extra_css %}
-    .cart-note { display: grid; gap: 4px; margin: 8px 0; max-width: 420px; }
-    .cart-note span { display: flex; gap: 6px; }
+    .cart-note { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin: 8px 0; width: 100%; max-width: 420px; }
+    .cart-note label { overflow-wrap: anywhere; }
+    .cart-note span { display: flex; gap: 6px; min-width: 0; }
     .cart-note input { flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
     .cart-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 28px; align-items: start; }
     .line { display: grid; grid-template-columns: auto 96px minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 18px 0; border-bottom: 1px solid var(--line); }

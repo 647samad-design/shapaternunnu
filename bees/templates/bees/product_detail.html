@@ -58,7 +58,8 @@
     .assurances { list-style: none; margin-top: 26px; border-top: 1px solid var(--line); }
     .assurances li { padding: 14px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 16px; }
     .assurances li span:last-child { color: var(--muted); text-align: right; }
-    .cond-badge { display: inline-block; margin-left: 8px; padding: 2px 10px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 16%, var(--surface)); color: var(--ink); font-size: .8rem; font-weight: 800; vertical-align: 2px; }
+    .brand-line + .cond-badge { margin-left: 8px; }
+    .cond-badge { display: inline-block; padding: 2px 10px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 16%, var(--surface)); color: var(--ink); font-size: .8rem; font-weight: 800; vertical-align: 2px; }
     .omnibus { margin-top: 4px; }
     .bnpl-line { margin-top: 6px; }
     .auction-box { margin-top: 14px; padding: 16px; border: 2px solid var(--ink); border-radius: var(--radius); display: grid; gap: 8px; }
@@ -67,7 +68,7 @@
     .ab-mine { color: var(--ok); font-weight: 800; }
     .ab-form { display: flex; gap: 8px; }
     .ab-form input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: 1.05rem; background: var(--surface); }
-    .pers-field { margin-top: 14px; }
+    .pers-field { margin: 14px 0 12px; }
     .sub-box { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); display: grid; gap: 8px; background: var(--surface); }
     .sub-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .sub-row select { flex: 1; min-width: 140px; padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
@@ -230,7 +231,7 @@
             </div>
             {{ variants_json|json_script:"variant-data" }}
             {% endif %}
-            <p class="stock-line {% if product.stock <= 0 %}out{% elif product.stock <= 5 and not product.has_variants %}low{% else %}ok{% endif %}" id="stock-line">
+            <p {% if product.is_auction %}hidden {% endif %}class="stock-line {% if product.stock <= 0 %}out{% elif product.stock <= 5 and not product.has_variants %}low{% else %}ok{% endif %}" id="stock-line">
                 {% if product.stock <= 0 %}{{ t.out_of_stock }}{% elif product.has_variants %}Choose {% if variant_sizes and variant_colors %}a size and colour{% elif variant_sizes %}a size{% else %}a colour{% endif %}{% elif product.stock <= 5 %}Only {{ product.stock }} left — order soon{% else %}{{ t.in_stock }}{% endif %}
             </p>
 

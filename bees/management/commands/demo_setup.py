@@ -55,6 +55,7 @@ class Command(BaseCommand):
             if options["reset"] or not Order.objects.filter(user=users["shopper"]).exists():
                 self._orders(users["shopper"], products)
             self._showcase(users, seller, products, reset=options["reset"])
+            self._marketplace(users, seller, products, reset=options["reset"])
         site = SiteSettings.load()
         site.setup_completed = True
         site.show_language_menu = True  # show off languages and currencies in the demo
@@ -158,6 +159,65 @@ class Command(BaseCommand):
             offered.log("buyer", "Asked for 60 pcs at 13.00 each")
             offered.log("seller", "Offered 14.50 each, valid 6 days - Includes your logo glazed on the side. Ships in 3 weeks.")
             offered.save()
+
+    def _marketplace(self, users, seller, products, reset=False):
+        """Auction, offers, other sellers, personalization, Subscribe & Save,
+        vouchers, collection points, membership and coins in the demo."""
+        from bees.models import Coupon, PickupPoint, Profile
+        site = SiteSettings.load()
+        site.membership_enabled = True
+        site.membership_discount = 5
+        site.bnpl_enabled = True
+        site.save()
+        mug, tote, candle, kit, beanie = products
+        Product.objects.filter(pk=mug.pk).update(personalization_prompt="Name to glaze on the mug (max 12 letters)", personalization_max=12,
+                                                 accepts_offers=True, offer_floor=Decimal("12.00"))
+        Product.objects.filter(pk=candle.pk).update(subscribe_percent=10)
+        Product.objects.filter(pk=beanie.pk).update(accepts_offers=True, ships_from="PT")
+        # An auction that's always running in the demo.
+        auction = Product.objects.filter(seller_account=seller, name="Vintage Film Camera").first()
+        if auction is None or reset or auction.auction_closed:
+            from bees.management.commands.seed_data import _demo_image
+            if auction is None:
+                auction = Product(name="Vintage Film Camera", category="electronics", seller_account=seller, seller_name=seller.display_name,
+                                  image_url=_demo_image("Vintage Film Camera", "electronics"), approval_status="approved")
+            auction.price, auction.stock, auction.condition = Decimal("80.00"), 1, "used_good"
+            auction.description = "A working 35 mm film camera from the 1980s with a 50 mm lens. Light seals replaced, shutter tested."
+            auction.is_auction, auction.auction_closed = True, False
+            auction.auction_start_price, auction.auction_reserve = Decimal("40.00"), Decimal("60.00")
+            auction.auction_ends_at = timezone.now() + timedelta(days=3, hours=4)
+            auction.save()
+            auction.bids.all().delete()
+        # Another seller offering the same linen tote (used), under "Other sellers".
+        other = User.objects.filter(username="demo_market_seller").first()
+        if other is None:
+            other = User.objects.create(username="demo_market_seller", first_name="Marta", email="marta@demo.invalid")
+            other.set_unusable_password()
+            other.save()
+        second = SellerAccount.objects.filter(user=other).first() or SellerAccount(user=other)
+        second.status, second.business_name, second.city, second.country = "approved", "Second Hand Lisboa", "Lisbon", "Portugal"
+        second.account_type, second.trader_email, second.trader_declared_at = "individual", "marta@demo.invalid", timezone.now()
+        second.save()
+        if not Product.objects.filter(seller_account=second, offer_of=tote).exists():
+            Product.objects.create(name=tote.name, category=tote.category, image_url=tote.image_url, description=tote.description,
+                                   price=Decimal("15.00"), stock=2, condition="used_like_new", seller_account=second,
+                                   seller_name=second.display_name, approval_status="approved", offer_of=tote)
+        seller.trader_email = seller.trader_email or "hello@demo.invalid"
+        seller.company_registration = seller.company_registration or "PT 509 123 456"
+        seller.trader_declared_at = seller.trader_declared_at or timezone.now()
+        seller.save(update_fields=["trader_email", "company_registration", "trader_declared_at"])
+        for code, pct, free, title, owner in [("WELCOME10", 10, False, "New here? 10% off", None),
+                                              ("FREESHIP", 0, True, "Free delivery weekend", None),
+                                              ("STUDIO15", 15, False, "Demo Studio favourites", seller)]:
+            Coupon.objects.update_or_create(code=code, defaults={"percent_off": pct, "free_shipping": free, "title": title,
+                                                                 "is_public": True, "active": True, "seller_account": owner,
+                                                                 "per_user_limit": 1})
+        for name, address, city, country, fee in [("Lumen Locker - Baixa", "Rua Augusta 100", "Lisbon", "PT", "0"),
+                                                  ("Corner Shop Pickup", "Calle Mayor 12", "Madrid", "ES", "1.50"),
+                                                  ("Station Locker", "Hauptbahnhof 1", "Berlin", "DE", "1.00")]:
+            PickupPoint.objects.get_or_create(name=name, defaults={"address": address, "city": city, "country": country,
+                                                                   "fee": Decimal(fee), "hours": "Every day 7:00-22:00"})
+        Profile.objects.filter(user=users["shopper"]).update(loyalty_points=120)
 
     def _orders(self, shopper, products):
         Order.objects.filter(user=shopper).delete()
