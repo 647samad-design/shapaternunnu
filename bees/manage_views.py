@@ -1225,14 +1225,22 @@ def tax_rates(request):
                 rate = Decimal(request.POST.get("rate", "").strip())
             except Exception:
                 rate = None
+            try:
+                duty = Decimal(request.POST.get("duty_rate", "").strip() or "0")
+                duty_free = Decimal(request.POST.get("duty_free_up_to", "").strip() or "0")
+            except Exception:
+                duty = duty_free = None
             if code not in names:
                 messages.error(request, "Choose a country.")
             elif rate is None or rate < 0 or rate > 50:
                 messages.error(request, "Use a rate between 0 and 50%.")
+            elif duty is None or duty < 0 or duty > 100 or duty_free < 0 or duty_free > 1000000:
+                messages.error(request, "Import duty: use 0-100%, and a duty-free amount of 0 or more.")
             else:
                 TaxRate.objects.update_or_create(country=code, defaults={
                     "name": (request.POST.get("name", "").strip() or "VAT")[:20], "rate": rate,
-                    "includes_shipping": bool(request.POST.get("includes_shipping")), "active": True})
+                    "includes_shipping": bool(request.POST.get("includes_shipping")), "active": True,
+                    "duty_rate": duty, "duty_free_up_to": duty_free})
                 _log(request, f"Tax rate {code} = {rate}%")
                 messages.success(request, f"{names[code]}: {rate}% saved.")
         elif action in ("toggle", "delete"):
@@ -1452,6 +1460,10 @@ class SiteSettingsForm(forms.ModelForm):
           "gift_wrap_enabled", "bnpl_enabled", "bnpl_instalments", "affiliate_percent"]),
         ("Save time", "Less manual work: trusted sellers' products go live by themselves, everyone gets a morning summary, and order texts can go by WhatsApp.",
          ["auto_approve_trusted", "daily_digest", "message_channel"]),
+        ("Sales channels", "Product feeds for Google, Facebook, Instagram and TikTok are always on - find the links under Sales channels. Here you choose whether AI shopping assistants may build checkouts.",
+         ["ai_agents"]),
+        ("Reviews", "Reviews sell. A few days after delivery customers get an email asking how it went; photo reviews earn reward points.",
+         ["review_requests", "review_photo_points"]),
         ("Gift cards", "Sell digital gift cards on /gift-cards/. Manage and send free ones under Gift cards.", ["gift_cards_enabled"]),
         ("Referral program", "Customers invite friends with their own link. Discount codes are created automatically.",
          ["referral_enabled", "referral_friend_percent", "referral_reward_percent"]),
@@ -1475,7 +1487,13 @@ class SiteSettingsForm(forms.ModelForm):
     OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent",
                 "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams", "duties_policy",
                 "cod_max_order", "cod_refusal_limit", "min_auto_payout", "auto_payouts", "ads_min_bid", "ads_slots",
-                "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points", "bnpl_instalments", "affiliate_percent", "message_channel")
+                "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points", "bnpl_instalments", "affiliate_percent", "message_channel", "review_photo_points")
+
+    def clean_review_photo_points(self):
+        value = self._keep("review_photo_points")
+        if value is not None and value > 1000:
+            raise ValidationError("Use 1000 points or less.")
+        return value
 
     def clean_message_channel(self):
         return self.cleaned_data.get("message_channel") or self.instance.message_channel or "sms"

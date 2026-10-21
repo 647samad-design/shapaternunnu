@@ -46,6 +46,40 @@
             <a class="btn btn-primary" href="{% url 'two_factor_setup' %}">Set up</a>
             {% endif %}
         </section>
+        <section class="panel" id="passkeys">
+            <h2>Passkeys {% if passkeys %}<span class="badge badge-ok">{{ passkeys|length }}</span>{% endif %}</h2>
+            <p class="muted" style="margin:6px 0 14px;">Sign in with your fingerprint, face or device PIN instead of a password. Passkeys can't be phished or guessed, and they work on this device and others signed in to the same Apple, Google or Microsoft account.</p>
+            {% if passkeys %}<ul class="pk-list">{% for k in passkeys %}<li><div><strong>{{ k.name|default:"Passkey" }}</strong><span class="muted small">Added {{ k.created_at|date:"j M Y" }}{% if k.last_used_at %} · last used {{ k.last_used_at|timesince }} ago{% endif %}</span></div><form method="post" action="{% url 'passkey_delete' k.id %}" style="margin:0;">{% csrf_token %}<button class="btn btn-ghost btn-sm" type="submit" style="color:var(--sale);">Remove</button></form></li>{% endfor %}</ul>{% endif %}
+            <div data-pk-add hidden>
+                <button class="btn btn-primary" type="button" data-pk-btn>Add a passkey</button>
+                <span class="small muted" data-pk-msg aria-live="polite" style="margin-left:8px;"></span>
+            </div>
+            <p class="small muted" data-pk-unsupported hidden>This browser can't create passkeys. Try an up-to-date Chrome, Safari, Edge or Firefox.</p>
+        </section>
+        {% include "bees/partials/passkey_js.html" %}
+        <script>
+        (function () {
+            var box = document.querySelector('[data-pk-add]');
+            if (!window.lmPasskey.supported()) { document.querySelector('[data-pk-unsupported]').hidden = false; return; }
+            box.hidden = false;
+            var btn = box.querySelector('[data-pk-btn]'), msg = box.querySelector('[data-pk-msg]');
+            btn.addEventListener('click', function () {
+                btn.disabled = true; msg.textContent = 'Follow the steps on your device…';
+                lmPasskey.register('{% url "passkey_register_options" %}', '{% url "passkey_register" %}', '').then(function (j) {
+                    if (j.ok) { location.hash = 'passkeys'; location.reload(); return; }
+                    throw new Error(j.error);
+                }).catch(function (e) {
+                    msg.textContent = (e && e.name === 'NotAllowedError') ? 'Cancelled.' : (e && e.name === 'InvalidStateError') ? 'This device already has a passkey for your account.' : (e.message || 'Something went wrong.');
+                    btn.disabled = false;
+                });
+            });
+        })();
+        </script>
+        <style>
+            .pk-list { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 8px; }
+            .pk-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+            .pk-list li div { display: grid; min-width: 0; }
+        </style>
         <section class="panel">
             <h2>Signed-in devices</h2>
             <p class="muted" style="margin:6px 0 14px;">

@@ -47,8 +47,13 @@ def product(request, product, reviews):
         "@context": "https://schema.org", "@type": "Product", "@id": url + "#product", "name": product.name, "url": url,
         "image": [i for i in images if i], "description": (product.seo_description or product.description or product.name)[:5000],
         "sku": str(product.pk), "category": product.get_category_display(),
-        "brand": {"@type": "Brand", "name": product.seller_name or site.site_name}, "offers": offer,
+        "brand": {"@type": "Brand", "name": product.brand or product.seller_name or site.site_name}, "offers": offer,
     }
+    gtin = getattr(product, "gtin", "")
+    if gtin:
+        data["gtin" + (str(len(gtin)) if len(gtin) in (8, 12, 13, 14) else "")] = gtin
+    if getattr(product, "mpn", ""):
+        data["mpn"] = product.mpn
     if getattr(product, "weight_grams", None):
         data["weight"] = {"@type": "QuantitativeValue", "value": product.weight_grams, "unitCode": "GRM"}
     reviews = list(reviews[:5])

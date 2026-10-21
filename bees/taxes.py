@@ -50,6 +50,24 @@ def compute(goods, shipping, country):
     return {"amount": amount.quantize(CENT, rounding=ROUND_HALF_UP), "name": name, "rate": Decimal(rate), "included": included}
 
 
+def duty_estimate(goods, country):
+    """Estimated import duty for an international order, or None when no
+    estimate applies (home country, no rate set, or duties included)."""
+    from .models import SiteSettings, TaxRate
+    site = SiteSettings.load()
+    code = (country or "").upper()
+    home = (site.ship_from_country or "").upper()
+    if not code or not home or code == home or site.duties_policy == "included":
+        return None
+    rate = TaxRate.objects.filter(country=code, active=True).first()
+    if not rate or not rate.duty_rate:
+        return None
+    goods = Decimal(goods)
+    if rate.duty_free_up_to and goods <= rate.duty_free_up_to:
+        return Decimal("0")
+    return (goods * rate.duty_rate / 100).quantize(CENT, rounding=ROUND_HALF_UP)
+
+
 def table():
     """For the checkout page script."""
     from .models import SiteSettings, TaxRate
@@ -58,7 +76,8 @@ def table():
     return {
         "included": site.prices_include_tax,
         "default": {"name": "Tax", "rate": default, "ship": False} if default else None,
-        "countries": {t.country: {"name": t.name, "rate": float(t.rate), "ship": t.includes_shipping}
+        "countries": {t.country: {"name": t.name, "rate": float(t.rate), "ship": t.includes_shipping,
+                                  "duty": float(t.duty_rate or 0), "duty_free": float(t.duty_free_up_to or 0)}
                       for t in TaxRate.objects.filter(active=True)},
         "home": (site.ship_from_country or "").upper(),
         "duties": site.duties_policy,

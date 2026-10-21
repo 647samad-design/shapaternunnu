@@ -472,7 +472,7 @@
                         <label for="comment">Your review</label>
                         <textarea id="comment" name="comment" rows="4" placeholder="What did you like or dislike? How did you use it?" required maxlength="2000"></textarea>
                     </div>
-                    <div class="field"><label for="rv-photos">Add photos (optional, up to 3)</label><input id="rv-photos" name="photos" type="file" accept="image/*" multiple></div>
+                    <div class="field"><label for="rv-photos">Add photos (optional, up to 3){% if brand.review_photo_points %} <span class="badge badge-ok">+{{ brand.review_photo_points }} points</span>{% endif %}</label><input id="rv-photos" name="photos" type="file" accept="image/*" multiple></div>
                     <button type="submit" class="btn btn-primary">{{ t.submit_review }}</button>
                 </form>
                 {% elif review_block %}

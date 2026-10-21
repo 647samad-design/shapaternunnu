@@ -29,6 +29,7 @@ compatible releases under the same licences.
 | gunicorn | 26.2 | MIT | https://gunicorn.org/ |
 | qrcode | 8.2 | BSD-3-Clause | https://github.com/lincolnloop/python-qrcode |
 | PyJWT (with cryptography) | 2.14 | MIT | https://github.com/jpadilla/pyjwt |
+| webauthn (py_webauthn, passkeys; uses cbor2 MIT, pyOpenSSL Apache-2.0, pyasn1 BSD-2-Clause) | 2.8 | BSD-3-Clause | https://github.com/duo-labs/py_webauthn |
 | redis | 8.1 | MIT | https://github.com/redis/redis-py |
 | openpyxl | 3.1 | MIT | https://openpyxl.readthedocs.io/ |
 

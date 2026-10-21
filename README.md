@@ -140,6 +140,26 @@ Either side can report a conversation; staff review them at /manage/messages/.
   "Customer texts by" to WhatsApp to send order texts through Twilio's WhatsApp sender
   (`TWILIO_WHATSAPP_FROM`, or `TWILIO_FROM` if that number is WhatsApp-enabled).
 
+## Sales channels, AI shopping agents and more
+
+- **Google, Facebook, Instagram, TikTok:** Admin > Sales channels shows two feed addresses that stay in
+  sync by themselves: `/feeds/google.xml` (Google Merchant Center) and `/feeds/products.csv`
+  (Meta Commerce Manager and TikTok catalogs). Products have a **barcode (GTIN)** and part number field
+  (also in bulk import: `gtin`, `mpn`, and Shopify's "Variant Barcode" etc.).
+- **AI shopping assistants:** the store publishes a Universal Commerce Protocol profile at
+  `/.well-known/ucp` and the checkout API under `/ucp/v1/checkout-sessions`. An agent (e.g. Google
+  Gemini / AI Mode) builds the cart; the shopper gets a link that fills their cart and opens the normal
+  checkout, so payment never goes through the agent. `/llms.txt` describes the store for AI crawlers.
+  Turn agents off in Store settings > Sales channels.
+- **Review requests:** 3 days after delivery customers get a "How was your order?" email (daily task
+  `send_review_requests`); a verified review with a photo earns reward points (Store settings > Reviews).
+- **Passkeys:** customers add a passkey under Password & security and then sign in with fingerprint,
+  face or device PIN. Needs HTTPS on the real domain (or `localhost` while developing).
+- **Import duty estimate:** set "Import duty %" and "Duty-free up to" per country under Tax rates;
+  international shoppers see the estimate at checkout.
+- **Chat translation:** buyers and sellers tap "Translate" on a message to read it in their own
+  language (needs `ANTHROPIC_API_KEY`).
+
 ## Demo copy for clients
 
 On a separate copy of the store (never your live store):

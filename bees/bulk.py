@@ -25,7 +25,7 @@ from .categories import choices as category_choices
 MAX_ROWS = 2000
 MAX_BYTES = 5 * 1024 * 1024
 COLUMNS = ["id", "name", "category", "price", "old_price", "stock", "description", "image_url",
-           "weight_grams", "seo_title", "seo_description", "brand"]
+           "weight_grams", "seo_title", "seo_description", "brand", "gtin", "mpn"]
 
 # Exports from other platforms work as they are: their column names are
 # read as ours (Shopify, WooCommerce, Amazon, Etsy, eBay).
@@ -33,14 +33,17 @@ ALIASES = {
     # Shopify
     "title": "name", "body_(html)": "description", "variant_price": "price", "variant_compare_at_price": "old_price",
     "variant_inventory_qty": "stock", "image_src": "image_url", "variant_grams": "weight_grams", "vendor": "brand",
+    "variant_barcode": "gtin",
     "product_category": "category", "type": "category",
     # WooCommerce
     "regular_price": "_regular_price", "sale_price": "_sale_price", "images": "image_url", "short_description": "_short_description",
     "categories": "category", "brands": "brand", "weight_(kg)": "_weight_kg",
+    "gtin,_upc,_ean,_or_isbn": "gtin", "gtin,_upc,_ean_or_isbn": "gtin",
     # Amazon / Etsy / eBay
     "item_name": "name", "product_name": "name", "standard_price": "price", "quantity": "stock", "main_image_url": "image_url",
     "product_description": "description", "brand_name": "brand", "image1": "image_url", "image_1": "image_url",
-    "picurl": "image_url", "start_price": "price", "*title": "name", "*startprice": "price", "*quantity": "stock",
+    "picurl": "image_url", "external_product_id": "gtin", "upc": "gtin", "ean": "gtin", "isbn": "gtin", "barcode": "gtin",
+    "manufacturer_part_number": "mpn", "part_number": "mpn", "start_price": "price", "*title": "name", "*startprice": "price", "*quantity": "stock",
 }
 
 
@@ -92,6 +95,8 @@ HELP = {
     "seo_title": "Optional (max 70).",
     "seo_description": "Optional (max 160).",
     "brand": "Optional brand or maker.",
+    "gtin": "Optional barcode number (EAN, UPC, ISBN). Needed by Google Shopping for branded products.",
+    "mpn": "Optional manufacturer part number.",
 }
 REVIEWED = ("name", "category", "image_url", "description")
 OPTION_COLUMNS = ["product", "size", "color", "price", "stock", "sku"]
@@ -301,6 +306,18 @@ def _clean(row):
         out["seo_description"] = " ".join(row["seo_description"].split())[:170]
     if row.get("brand"):
         out["brand"] = " ".join(row["brand"].split())[:80]
+    if row.get("gtin"):
+        from .views import valid_gtin
+        code = "".join(str(row["gtin"]).split()).replace("-", "")
+        if code.endswith(".0"):  # Excel stores long numbers as decimals
+            code = code[:-2]
+        if code.startswith("'"):
+            code = code[1:]
+        if not valid_gtin(code):
+            raise BulkError("gtin must be the 8, 12, 13 or 14 digits under the barcode")
+        out["gtin"] = code
+    if row.get("mpn"):
+        out["mpn"] = " ".join(str(row["mpn"]).split())[:70]
     return out
 
 
@@ -570,7 +587,7 @@ def _rows_for(products, request=None):
     for p in products.order_by("id"):
         link = request.build_absolute_uri(f"/product/{p.id}/") if request else ""
         yield [p.id, p.name, p.category, p.price, p.old_price if p.old_price is not None else "", p.stock, p.description,
-               p.image_url, p.weight_grams or "", p.seo_title, p.seo_description,
+               p.image_url, p.weight_grams or "", p.seo_title, p.seo_description, p.brand, p.gtin, p.mpn,
                p.get_approval_status_display(), "yes" if p.has_variants else "", link]
 
 
@@ -597,7 +614,7 @@ def export(products, fmt, filename, request=None):
 
 def template(fmt):
     example = ["", "Ceramic mug 350ml", "grocery", "12.50", "15.00", "40", "Hand-glazed stoneware mug.",
-               "https://images.example.com/mug.jpg", "450", "", ""]
+               "https://images.example.com/mug.jpg", "450", "", "", "", "", ""]
     if fmt == "xlsx":
         return _xlsx_response([COLUMNS, example], "products-template", with_help=True,
                               options=[OPTION_COLUMNS, ["Ceramic mug 350ml", "", "White", "", "25", "MUG-W"], ["Ceramic mug 350ml", "", "Black", "13.50", "15", "MUG-B"]])

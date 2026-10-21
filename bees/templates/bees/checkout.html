@@ -107,7 +107,7 @@
                     <span><strong>Use store credit</strong><span class="muted">Your balance: {{ store_credit|money }}. It's taken off the total.</span></span>
                 </label>
                 {% endif %}
-                <p id="duties-note" class="muted small" style="display:none;margin:10px 0 0;"><span aria-hidden="true">🌍 </span><span>{% if checkout_data.taxes.duties == "included" %}International order: import duties are included - nothing more to pay on delivery.{% else %}International order: the destination country may charge import duties or taxes on delivery. These are paid to the courier and aren't part of this total.{% endif %}</span></p>
+                <p id="duties-note" class="muted small" style="display:none;margin:10px 0 0;"><span aria-hidden="true">🌍 </span><span>{% if checkout_data.taxes.duties == "included" %}International order: import duties are included - nothing more to pay on delivery.{% else %}International order: the destination country may charge import duties or taxes on delivery. These are paid to the courier and aren't part of this total.{% endif %}</span><span id="duty-estimate" hidden><br><strong id="duty-text"></strong></span></p>
                 <details class="vat-box" style="margin-top:12px;"><summary class="small">Buying for a business? Add your VAT / tax number</summary><div class="field" style="margin-top:8px;"><label for="id_customer_tax_id">VAT / tax number</label><input type="text" id="id_customer_tax_id" name="customer_tax_id" maxlength="40" autocomplete="off" value="{{ form.customer_tax_id|default:'' }}"><span class="hint">Printed on your invoice.</span></div></details>
                 {% if has_digital %}<p class="muted small" style="margin:12px 0 0;">⬇ Your order includes a digital download. By paying you ask for it to be available right away and agree that downloads can't be returned once delivered.</p>{% endif %}
                 <p id="ship-note" class="badge badge-sale" style="margin-top:12px;{% if pricing.ships %}display:none;{% endif %}">Sorry, we don't deliver to this country yet.</p>
@@ -227,7 +227,20 @@ function fillAddress(sel) {
             document.getElementById('sum-tax').textContent = fmt.format(tax);
         }
         const duties = document.getElementById('duties-note');
-        if (duties) duties.style.display = code && tx.home && code !== tx.home ? '' : 'none';
+        if (duties) {
+            const abroad = code && tx.home && code !== tx.home;
+            duties.style.display = abroad ? '' : 'none';
+            const est = document.getElementById('duty-estimate');
+            const own = (tx.countries || {})[code];
+            if (est) {
+                if (abroad && tx.duties !== 'included' && own && own.duty) {
+                    document.getElementById('duty-text').textContent = own.duty_free && goods <= own.duty_free
+                        ? 'No import duty expected: orders up to ' + fmt.format(own.duty_free) + ' are duty-free there.'
+                        : 'Estimated import duty: about ' + fmt.format(Math.round(goods * own.duty) / 100) + ' (' + own.duty + '%), paid to the courier on delivery.';
+                    est.hidden = false;
+                } else { est.hidden = true; }
+            }
+        }
         const before = goods + ship.fee + (tx.included ? 0 : tax);
         const credit = box && box.checked ? Math.min(num(d.credit), before) : 0;
         const total = before - credit;

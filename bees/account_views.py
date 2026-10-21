@@ -110,6 +110,7 @@ def security(request):
         "totp_enabled": profile.totp_enabled, "backup_left": len(profile.backup_codes or []),
         "twofa_required": _staff_must_use_2fa(request.user),
         "api_tokens": request.user.api_tokens.all()[:20],
+        "passkeys": list(request.user.passkeys.all()),
     })
 
 
@@ -243,6 +244,7 @@ def privacy(request):
         lang = request.POST.get("language", "")
         Profile.objects.filter(pk=_profile(request.user).pk).update(
             cart_reminders=bool(request.POST.get("cart_reminders")),
+            review_emails=bool(request.POST.get("review_emails")),
             price_drop_alerts=bool(request.POST.get("price_drop_alerts")),
             sms_updates=bool(request.POST.get("sms_updates")),
             language=lang if lang in TRANSLATIONS else "")
@@ -258,6 +260,7 @@ def privacy(request):
         "tab": "privacy",
         "subscribed": bool(email) and NewsletterSubscriber.objects.filter(email__iexact=email).exists(),
         "cart_reminders": _profile(request.user).cart_reminders,
+        "review_emails": _profile(request.user).review_emails,
         "price_drop_alerts": _profile(request.user).price_drop_alerts,
         "sms_updates": _profile(request.user).sms_updates,
         "sms_on": _sms_on(),
@@ -341,7 +344,7 @@ def delete_account(request):
             NewsletterSubscriber.objects.filter(email__iexact=email).delete()
         Profile.objects.filter(pk=profile.pk).update(
             phone="", stripe_customer_id="", store_credit=0, loyalty_points=0, email_verified=False,
-            saved_cart={}, cart_updated_at=None, cart_reminders=False,
+            saved_cart={}, cart_updated_at=None, cart_reminders=False, review_emails=False,
         )
         user.username = f"deleted-{user.pk}-{secrets.token_hex(3)}"
         user.email = ""

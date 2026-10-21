@@ -1,0 +1,86 @@
+{% extends "bees/manage/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Sales channels{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Sales channels</h1><p>Show your products on Google, Facebook, Instagram, TikTok and in AI shopping assistants. The links below update by themselves, so prices and stock stay in sync.</p></div></div>
+
+<section class="panel">
+    <h2>Product data</h2>
+    <div class="ch-stats">
+        <div><b>{{ ready.count }}</b><span>products in the feeds</span></div>
+        <div class="{% if ready.no_identifier %}warn{% endif %}"><b>{{ ready.no_identifier }}</b><span>without a barcode or part number</span></div>
+        <div class="{% if ready.short_description %}warn{% endif %}"><b>{{ ready.short_description }}</b><span>with a very short description</span></div>
+    </div>
+    {% if ready.no_identifier %}<p class="muted small">Google needs a barcode (GTIN) for branded products. Add it under <em>Brand, barcode, specifications &amp; video</em> on the product, or in the <code>gtin</code> column of a bulk import. Handmade and own-brand items without one are sent as "no identifier", which is fine.{% if ready.examples %} For example: {% for p in ready.examples %}<a class="link" href="{% url 'manage_product_edit' p.id %}">{{ p.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}.{% endif %}</p>{% endif %}
+    <p class="muted small">Left out on purpose: auctions, quote-only and digital products, and items without a photo.</p>
+</section>
+
+<div class="ch-grid">
+    <section class="panel ch-card">
+        <h2>Google Shopping</h2>
+        <p class="muted small">Free listings, Shopping ads, and Google's AI shopping in Search and Gemini.</p>
+        <label class="small" for="ch-g">Feed address</label>
+        <div class="ch-copy"><input id="ch-g" class="input" readonly value="{{ google_url }}"><button class="btn btn-secondary btn-sm" type="button" data-copy="#ch-g">Copy</button></div>
+        <ol class="ch-steps">
+            <li>Open <a class="link" href="https://merchants.google.com/" target="_blank" rel="noopener">Google Merchant Center</a> and verify your website.</li>
+            <li><em>Products → Add products → Add from a file → Enter a link to your file</em>.</li>
+            <li>Paste the address, choose a daily fetch and save.</li>
+        </ol>
+    </section>
+    <section class="panel ch-card">
+        <h2>Facebook &amp; Instagram</h2>
+        <p class="muted small">Shops on Facebook and Instagram, and catalog ads.</p>
+        <label class="small" for="ch-m">Feed address</label>
+        <div class="ch-copy"><input id="ch-m" class="input" readonly value="{{ csv_url }}"><button class="btn btn-secondary btn-sm" type="button" data-copy="#ch-m">Copy</button></div>
+        <ol class="ch-steps">
+            <li>Open <a class="link" href="https://business.facebook.com/commerce/" target="_blank" rel="noopener">Meta Commerce Manager</a> and create a catalog.</li>
+            <li><em>Data sources → Data feed → Scheduled feed</em>.</li>
+            <li>Paste the address and pick a daily update.</li>
+        </ol>
+    </section>
+    <section class="panel ch-card">
+        <h2>TikTok Shop</h2>
+        <p class="muted small">TikTok catalog for shoppable videos and ads.</p>
+        <label class="small" for="ch-t">Feed address</label>
+        <div class="ch-copy"><input id="ch-t" class="input" readonly value="{{ csv_url }}"><button class="btn btn-secondary btn-sm" type="button" data-copy="#ch-t">Copy</button></div>
+        <ol class="ch-steps">
+            <li>In <a class="link" href="https://ads.tiktok.com/" target="_blank" rel="noopener">TikTok Ads Manager</a> open <em>Assets → Catalogs</em>.</li>
+            <li><em>Add products → Data feed → Scheduled</em>.</li>
+            <li>Paste the same address as Facebook.</li>
+        </ol>
+    </section>
+    <section class="panel ch-card">
+        <h2>AI shopping assistants {% if site.ai_agents %}<span class="badge badge-ok">On</span>{% else %}<span class="badge">Off</span>{% endif %}</h2>
+        <p class="muted small">AI agents (Google Gemini, AI Mode and others using the Universal Commerce Protocol) can find products and build a checkout. The shopper always pays on your own checkout.</p>
+        <label class="small" for="ch-u">Store profile for agents</label>
+        <div class="ch-copy"><input id="ch-u" class="input" readonly value="{{ ucp_url }}"><button class="btn btn-secondary btn-sm" type="button" data-copy="#ch-u">Copy</button></div>
+        <p class="small" style="margin:8px 0 0;">Last 30 days: <b>{{ agent_count }}</b> checkout{{ agent_count|pluralize }} started by agents, <b>{{ agent_opened }}</b> opened by shoppers.</p>
+        <p class="muted small" style="margin:8px 0 0;">Also published: <a class="link" href="{{ llms_url }}" target="_blank" rel="noopener">llms.txt</a>, a short guide to your store for AI assistants. Switch agents on or off in <a class="link" href="{% url 'manage_settings' %}">Store settings → Sales channels</a>.</p>
+    </section>
+</div>
+
+<style>
+    .ch-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+    .ch-stats > div { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+    .ch-stats b { display: block; font-size: 1.5rem; }
+    .ch-stats span { color: var(--muted); font-size: .88rem; }
+    .ch-stats .warn b { color: var(--sale); }
+    .ch-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .ch-card h2 { display: flex; align-items: center; gap: 8px; }
+    .ch-copy { display: flex; gap: 8px; margin: 4px 0 10px; }
+    .ch-copy input { flex: 1; min-width: 0; font-size: .85rem; }
+    .ch-steps { margin: 0; padding-left: 20px; font-size: .9rem; display: grid; gap: 4px; }
+    @media (max-width: 860px) { .ch-grid, .ch-stats { grid-template-columns: minmax(0, 1fr); } }
+</style>
+<script>
+document.querySelectorAll('[data-copy]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var input = document.querySelector(btn.dataset.copy);
+        input.select();
+        (navigator.clipboard ? navigator.clipboard.writeText(input.value) : Promise.reject()).catch(function () { document.execCommand('copy'); });
+        btn.textContent = 'Copied';
+        setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+    });
+});
+</script>
+{% endblock %}

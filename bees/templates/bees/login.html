@@ -11,6 +11,8 @@
     .demo-role:hover, .demo-role:focus-visible { border-color: var(--brand); background: var(--surface-2); }
     .demo-role strong { font-size: 1.02rem; }
     .demo-role span { color: var(--muted); font-size: .92rem; }
+    .pk-login { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+    .pk-login .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 {% endblock %}
 {% block content %}
 <div class="wrap">
@@ -49,6 +51,29 @@
                 <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:.95rem;"><input type="checkbox" name="remember" value="1" checked style="width:18px;height:18px;accent-color:var(--brand);"> Keep me signed in</label>
                 <div class="field"><button class="btn btn-primary btn-block" type="submit">{{ t.login }}</button></div>
             </form>
+            <div class="pk-login" data-pk-login hidden>
+                <button class="btn btn-secondary btn-block" type="button" data-pk-btn><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M3 20c0-3.3 2.7-6 6-6 1.2 0 2.3.3 3.2.9"/><circle cx="17.5" cy="15.5" r="2.5"/><path d="M19.3 17.3 22 20m-2-1 1-1"/></svg>Sign in with a passkey</button>
+                <p class="small muted" data-pk-msg aria-live="polite" style="margin:6px 0 0;text-align:center;">Use your fingerprint, face or phone - no password needed.</p>
+            </div>
+            {% include "bees/partials/passkey_js.html" %}
+            <script>
+            (function () {
+                var box = document.querySelector('[data-pk-login]');
+                if (!box || !window.lmPasskey.supported()) return;
+                box.hidden = false;
+                var btn = box.querySelector('[data-pk-btn]'), msg = box.querySelector('[data-pk-msg]');
+                btn.addEventListener('click', function () {
+                    btn.disabled = true; msg.textContent = 'Waiting for your passkey…';
+                    lmPasskey.login('{% url "passkey_login_options" %}', '{% url "passkey_login" %}', '{{ next|escapejs }}').then(function (j) {
+                        if (j.ok) { location.href = j.next || '/'; return; }
+                        throw new Error(j.error || 'That passkey didn\'t work.');
+                    }).catch(function (e) {
+                        msg.textContent = (e && e.name === 'NotAllowedError') ? 'Cancelled. Try again, or sign in with your password.' : (e.message || 'That passkey didn\'t work.');
+                        btn.disabled = false;
+                    });
+                });
+            })();
+            </script>
         </div>
         <p class="auth-foot">{{ t.no_account }} <a class="link" href="{% url 'signup' %}{% if next and next != '/' %}?next={{ next|urlencode }}{% endif %}">Create one</a></p>
     </div>
