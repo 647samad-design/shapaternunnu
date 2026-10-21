@@ -78,7 +78,7 @@ Then in Store settings: *Text messages (SMS)* (order updates, seller alerts) and
 ## 11. After updating
 ```
 git pull
-pip install -r requirements.txt     # PyJWT[crypto] and openpyxl (added in the pro pack)
+pip install -r requirements.txt     # also installs webauthn (passkeys), added in the AI-ready round
 python manage.py migrate
 python manage.py collectstatic --noinput
 ```

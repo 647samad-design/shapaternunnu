@@ -204,3 +204,41 @@
     });
 })();
 </script>
+{% if photo_search %}
+<span hidden data-tr-csrf>{% csrf_token %}</span>
+<script>
+/* "Translate" on messages from the other side, into the shopper's language. */
+(function () {
+    var log = document.querySelector('[data-chat] [data-log]');
+    if (!log) return;
+    var url = '{% url "translate_message" 0 %}', token = document.querySelector('[data-tr-csrf] input').value;
+    function add(b) {
+        if (!b.matches || !b.matches('.bubble[data-id]') || b.classList.contains('mine') || b.querySelector('.tr-btn')) return;
+        var p = b.querySelector('p');
+        if (!p || !p.textContent.trim()) return;
+        var btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'tr-btn'; btn.textContent = 'Translate';
+        btn.addEventListener('click', function () {
+            var out = b.querySelector('.tr-out');
+            if (out) { out.hidden = !out.hidden; btn.textContent = out.hidden ? 'Translate' : 'Hide translation'; return; }
+            btn.disabled = true; btn.textContent = 'Translating…';
+            fetch(url.replace('/0/', '/' + b.dataset.id + '/'), { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRFToken': token } })
+                .then(function (r) { return r.json(); }).then(function (j) {
+                    btn.disabled = false;
+                    if (!j.ok) { btn.textContent = j.error || 'Try again'; return; }
+                    var t = document.createElement('p'); t.className = 'tr-out'; t.textContent = j.text; t.title = 'Translated to ' + j.lang;
+                    btn.before(t); btn.textContent = 'Hide translation';
+                }).catch(function () { btn.disabled = false; btn.textContent = 'Try again'; });
+        });
+        b.appendChild(btn);
+    }
+    log.querySelectorAll('.bubble').forEach(add);
+    new MutationObserver(function (list) { list.forEach(function (m) { m.addedNodes.forEach(function (n) { if (n.nodeType === 1) add(n); }); }); })
+        .observe(log, { childList: true });
+})();
+</script>
+<style>
+    .tr-btn { display: block; margin-top: 4px; padding: 0; border: 0; background: none; color: var(--brand); font: inherit; font-size: .78rem; font-weight: 700; cursor: pointer; text-decoration: underline; }
+    .tr-out { margin-top: 6px !important; padding-top: 6px; border-top: 1px dashed var(--line); font-style: italic; }
+</style>
+{% endif %}

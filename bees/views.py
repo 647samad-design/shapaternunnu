@@ -535,6 +535,16 @@ def _submit_review(request, product):
         review.photos.all().delete()
         for f in photos:
             ReviewPhoto.objects.create(review=review, image_url=save_public(f, "reviews"))
+    bonus = 0
+    if photos and not review.photo_bonus:
+        bonus = SiteSettings.load().review_photo_points
+        if bonus:
+            # Once per review, and only to a buyer of the product.
+            if Review.objects.filter(pk=review.pk, photo_bonus=False).update(photo_bonus=True):
+                profile, _ = Profile.objects.get_or_create(user=request.user)
+                Profile.objects.filter(pk=profile.pk).update(loyalty_points=F("loyalty_points") + bonus)
+            else:
+                bonus = 0
     if product.seller_account_id:
         from .seller_center import _seller_users
         verb = "New" if created else "Updated"
@@ -542,7 +552,7 @@ def _submit_review(request, product):
             Notification(user=u, link="/seller/reviews/?tab=reviews",
                          message=f"{verb} {rating}★ review on '{product.name}': {comment[:60]}"[:255])
             for u in _seller_users(product.seller_account)])
-    messages.success(request, "Thanks - your review has been posted.")
+    messages.success(request, "Thanks - your review has been posted." + (f" You earned {bonus} reward points for the photo." if bonus else ""))
     return redirect("product_detail", pk=product.pk)
 
 
@@ -1651,6 +1661,8 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
     signed_in = request.user.is_authenticated
     if form is None:
         form = {"email": request.user.email, "full_name": request.user.get_full_name()} if signed_in else {}
+        if not signed_in and request.session.get("agent_email"):
+            form["email"] = request.session["agent_email"]  # from the shopper's AI assistant
         default = Address.objects.filter(user=request.user, is_default=True).first() if signed_in else None
         if default:
             form.update({f: getattr(default, f) for f in ("full_name", "phone", "address", "city", "state", "postal_code", "country")})
@@ -2769,6 +2781,16 @@ DIGITAL_TYPES = (".pdf", ".zip", ".epub", ".mp3", ".mp4", ".m4a", ".wav", ".png"
 DIGITAL_MAX_MB = 200
 
 
+def valid_gtin(code):
+    """EAN-8, UPC-A (12), EAN-13/ISBN-13 or GTIN-14 with a correct check digit."""
+    if not code.isdigit() or len(code) not in (8, 12, 13, 14):
+        return False
+    digits = [int(c) for c in code]
+    body, check = digits[:-1], digits[-1]
+    total = sum(d * (3 if i % 2 == 0 else 1) for i, d in enumerate(reversed(body)))
+    return (10 - total % 10) % 10 == check
+
+
 def _extra_product_fields(request):
     """Brand, specifications, video, order limits, quotes, digital download
     and EU product-safety details (seller and store product forms)."""
@@ -2783,7 +2805,12 @@ def _extra_product_fields(request):
     specs = "\n".join(line.strip()[:360] for line in request.POST.get("specs", "").splitlines() if line.strip())[:4000]
     if specs and not all(":" in line for line in specs.splitlines()):
         raise ValidationError("Specifications: write one per line as 'Name: value', e.g. 'Material: Cotton'.")
+    gtin = "".join(request.POST.get("gtin", "").split()).replace("-", "")
+    if gtin and not valid_gtin(gtin):
+        raise ValidationError("Barcode: enter the 8, 12, 13 or 14 digits printed under the barcode (EAN, UPC, ISBN).")
     fields = {
+        "gtin": gtin,
+        "mpn": " ".join(request.POST.get("mpn", "").split())[:70],
         "brand": " ".join(request.POST.get("brand", "").split())[:80],
         "specs": specs, "video_url": video, "min_order_qty": low, "max_order_qty": high,
         "quote_only": bool(request.POST.get("quote_only")),
@@ -2952,7 +2979,7 @@ def seller_add_product(request):
     start = {"stock": 10, "discount_percent": 0}
     if master is not None:
         # Selling the same product as another seller: start from its listing.
-        start.update({f: getattr(master, f) for f in ("name", "category", "image_url", "description", "brand", "specs",
+        start.update({f: getattr(master, f) for f in ("name", "category", "image_url", "description", "brand", "gtin", "mpn", "specs",
                                                       "weight_grams", "manufacturer", "eu_responsible_person", "safety_info")})
         start["price"] = master.price
     return _seller_form(request, seller, role, {

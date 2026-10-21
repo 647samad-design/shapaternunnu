@@ -23,6 +23,7 @@ from bees import promo_views as pv
 from bees import ads as ads_views
 from bees import campaigns as camp
 from bees import webpush
+from bees import agents, feeds, round5_views as r5
 from bees import reports_listing
 from bees.sitemaps import ProductSitemap, CategorySitemap, SellerSitemap, StaticViewSitemap
 from bees.ratelimit import ratelimit
@@ -45,6 +46,21 @@ urlpatterns = [
     path('api/v1/', include('bees.api.urls')),
     path('product/<int:pk>/report/', reports_listing.report, name='report_listing'),
     path('manage/listing-reports/', mv.staff_required(reports_listing.admin_page), name='manage_listing_reports'),
+    path('.well-known/ucp', agents.profile, name='ucp_profile'),
+    path('ucp/v1/checkout-sessions', agents.checkout_sessions, name='ucp_sessions'),
+    path('ucp/v1/checkout-sessions/<uuid:pk>', agents.checkout_session, name='ucp_session'),
+    path('ucp/v1/checkout-sessions/<uuid:pk>/<str:action>', agents.checkout_action, name='ucp_session_action'),
+    path('agent-checkout/<uuid:pk>/', agents.continue_checkout, name='agent_checkout'),
+    path('llms.txt', agents.llms_txt, name='llms_txt'),
+    path('feeds/google.xml', feeds.google_xml, name='feed_google'),
+    path('feeds/products.csv', feeds.products_csv, name='feed_csv'),
+    path('manage/channels/', r5.sales_channels, name='manage_channels'),
+    path('account/passkeys/options/', r5.passkey_register_options, name='passkey_register_options'),
+    path('account/passkeys/add/', r5.passkey_register, name='passkey_register'),
+    path('account/passkeys/<int:pk>/delete/', r5.passkey_delete, name='passkey_delete'),
+    path('login/passkey/options/', r5.passkey_login_options, name='passkey_login_options'),
+    path('login/passkey/', r5.passkey_login, name='passkey_login'),
+    path('messages/translate/<int:pk>/', r5.translate_message, name='translate_message'),
     path('robots.txt', TemplateView.as_view(template_name="robots.txt", content_type="text/plain"), name='robots'),
     path('', views.home, name='home'),
     path('search/', views.search_products, name='search_products'),

@@ -1,8 +1,9 @@
 {% extends "bees/manage/base.html" %}
+{% load bees_extras %}
 {% block page_title %}Tax rates{% endblock %}
 {% block admin %}
 <div class="adm-head"><div><a class="link small" href="{% url 'manage_settings' %}">← Store settings</a><h1 style="margin-top:6px;">Tax rates</h1>
-    <p>VAT / GST / sales tax by the customer's country. Prices {% if site.prices_include_tax %}<strong>include</strong> tax (it's shown on receipts, not added){% else %}<strong>don't include</strong> tax (it's added at checkout){% endif %} - change that in Store settings > Taxes &amp; duties. Countries not listed use the default rate ({{ site.tax_percent|floatformat:"-2" }}%).</p></div>
+    <p>VAT / GST / sales tax by the customer's country. Prices {% if site.prices_include_tax %}<strong>include</strong> tax (it's shown on receipts, not added){% else %}<strong>don't include</strong> tax (it's added at checkout){% endif %} - change that in Store settings > Taxes &amp; duties. <strong>Import duty</strong> is shown to international shoppers at checkout as an estimate of what customs may charge on delivery (it isn't added to the total). Countries not listed use the default rate ({{ site.tax_percent|floatformat:"-2" }}%).</p></div>
     <div class="actions"><form method="post" style="margin:0;">{% csrf_token %}<button class="btn btn-secondary btn-sm" name="action" value="presets">Add common rates</button></form></div></div>
 <div class="callout warn" style="margin:0;">Tax rules depend on where you're registered and how much you sell in each country. Use these as a start and confirm with an accountant.</div>
 <section class="panel">
@@ -11,19 +12,21 @@
         <div class="field"><label for="tx-c">Country</label><select id="tx-c" name="country" required><option value="">Choose…</option>{% for code, name in countries %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select></div>
         <div class="field"><label for="tx-n">Name</label><input id="tx-n" name="name" value="VAT" maxlength="20"></div>
         <div class="field"><label for="tx-r">Rate %</label><input id="tx-r" name="rate" type="number" min="0" max="50" step="0.01" required></div>
+        <div class="field"><label for="tx-d">Import duty % <span class="muted">(estimate)</span></label><input id="tx-d" name="duty_rate" type="number" min="0" max="100" step="0.01" value="0"></div>
+        <div class="field"><label for="tx-f">Duty-free up to</label><input id="tx-f" name="duty_free_up_to" type="number" min="0" step="0.01" value="0"></div>
         <label class="small" style="display:flex;gap:6px;align-items:center;"><input type="checkbox" name="includes_shipping" value="1" checked> Also on shipping</label>
         <button class="btn btn-primary btn-sm" type="submit">Save</button>
     </form>
 </section>
 <section class="panel" style="padding:8px 20px;">
     <div class="table-scroll"><table class="table">
-        <thead><tr><th>Country</th><th>Tax</th><th class="num">Rate</th><th>Shipping</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Country</th><th>Tax</th><th class="num">Rate</th><th>Shipping</th><th>Import duty</th><th>Status</th><th></th></tr></thead>
         <tbody>
         {% for t, cname in rates %}
-        <tr><td>{{ cname }} <span class="muted small">{{ t.country }}</span></td><td>{{ t.name }}</td><td class="num">{{ t.rate|floatformat:"-2" }}%</td><td>{% if t.includes_shipping %}Yes{% else %}No{% endif %}</td>
+        <tr><td>{{ cname }} <span class="muted small">{{ t.country }}</span></td><td>{{ t.name }}</td><td class="num">{{ t.rate|floatformat:"-2" }}%</td><td>{% if t.includes_shipping %}Yes{% else %}No{% endif %}</td><td>{% if t.duty_rate %}{{ t.duty_rate|floatformat:"-2" }}%{% if t.duty_free_up_to %} <span class="muted small">over {{ t.duty_free_up_to|money }}</span>{% endif %}{% else %}<span class="muted">-</span>{% endif %}</td>
             <td>{% if t.active %}<span class="pill ok">On</span>{% else %}<span class="pill">Off</span>{% endif %}</td>
             <td><form method="post" style="display:flex;gap:6px;margin:0;">{% csrf_token %}<input type="hidden" name="id" value="{{ t.id }}"><button class="btn btn-ghost btn-sm" name="action" value="toggle">{% if t.active %}Turn off{% else %}Turn on{% endif %}</button><button class="btn btn-ghost btn-sm" name="action" value="delete" style="color:var(--sale);">Delete</button></form></td></tr>
-        {% empty %}<tr><td colspan="6" class="muted" style="text-align:center;padding:24px;">No country rates yet - every country uses the default rate.</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="7" class="muted" style="text-align:center;padding:24px;">No country rates yet - every country uses the default rate.</td></tr>{% endfor %}
         </tbody>
     </table></div>
 </section>

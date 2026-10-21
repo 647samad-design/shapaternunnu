@@ -35,7 +35,7 @@ PATHS = [
     ("/manage/ads/", "ads"), ("/manage/listing-reports/", "products"), ("/manage/promotions/", "coupons"), ("/manage/team/", "team"), ("/manage/keys/", "keys"),
     ("/manage/settings/", "settings"), ("/manage/setup/", "settings"), ("/manage/taxes/", "settings"),
     ("/manage/currencies/", "settings"), ("/manage/translations/", "settings"), ("/manage/system/", "system"),
-    ("/manage/categories/", "products"), ("/manage/quotes/", "orders"), ("/manage/pages/", "content"),
+    ("/manage/categories/", "products"), ("/manage/quotes/", "orders"), ("/manage/pages/", "content"), ("/manage/channels/", "campaigns"),
 ]
 ACCESS = {
     "orders": {"orders", "returns", "claims", "shipping", "cod", "customers"},

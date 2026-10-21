@@ -1,0 +1,39 @@
+<script>
+/* Passkeys (WebAuthn): sign in with fingerprint, face or device PIN. */
+window.lmPasskey = (function () {
+    function csrf() { var m = document.cookie.match(/csrftoken=([^;]+)/); var el = document.querySelector('[name=csrfmiddlewaretoken]'); return el ? el.value : (m ? m[1] : ''); }
+    function toBuf(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a.buffer; }
+    function toB64(buf) { var a = new Uint8Array(buf), s = ''; for (var i = 0; i < a.length; i++) s += String.fromCharCode(a[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+    function post(url, data) {
+        return fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() }, body: JSON.stringify(data || {}) })
+            .then(function (r) { return r.json().then(function (j) { if (!r.ok && !j.ok && j.error) throw new Error(j.error); return j; }); });
+    }
+    function supported() { return !!(window.PublicKeyCredential && navigator.credentials); }
+    function register(optionsUrl, saveUrl, name) {
+        return post(optionsUrl).then(function (o) {
+            if (o.error) throw new Error(o.error);
+            o.challenge = toBuf(o.challenge); o.user.id = toBuf(o.user.id);
+            (o.excludeCredentials || []).forEach(function (c) { c.id = toBuf(c.id); });
+            return navigator.credentials.create({ publicKey: o });
+        }).then(function (c) {
+            var r = c.response;
+            return post(saveUrl, { name: name || '', credential: { id: c.id, rawId: toB64(c.rawId), type: c.type,
+                response: { clientDataJSON: toB64(r.clientDataJSON), attestationObject: toB64(r.attestationObject), transports: r.getTransports ? r.getTransports() : [] },
+                clientExtensionResults: c.getClientExtensionResults ? c.getClientExtensionResults() : {}, authenticatorAttachment: c.authenticatorAttachment || null } });
+        });
+    }
+    function login(optionsUrl, loginUrl, next) {
+        return post(optionsUrl).then(function (o) {
+            o.challenge = toBuf(o.challenge);
+            (o.allowCredentials || []).forEach(function (c) { c.id = toBuf(c.id); });
+            return navigator.credentials.get({ publicKey: o });
+        }).then(function (c) {
+            var r = c.response;
+            return post(loginUrl, { next: next || '', credential: { id: c.id, rawId: toB64(c.rawId), type: c.type,
+                response: { clientDataJSON: toB64(r.clientDataJSON), authenticatorData: toB64(r.authenticatorData), signature: toB64(r.signature), userHandle: r.userHandle ? toB64(r.userHandle) : null },
+                clientExtensionResults: c.getClientExtensionResults ? c.getClientExtensionResults() : {}, authenticatorAttachment: c.authenticatorAttachment || null } });
+        });
+    }
+    return { supported: supported, register: register, login: login };
+})();
+</script>

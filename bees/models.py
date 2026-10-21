@@ -234,6 +234,8 @@ class Product(models.Model):
     height_cm = models.DecimalField(max_digits=6, decimal_places=1, null=True, blank=True)
     approval_status = models.CharField(max_length=20, choices=APPROVAL_CHOICES, default="approved", db_index=True)
     brand = models.CharField(max_length=80, blank=True, db_index=True, help_text="Brand or maker shown on the product and used in filters.")
+    gtin = models.CharField("Barcode (GTIN)", max_length=14, blank=True, help_text="EAN, UPC, ISBN or JAN number from the package. Google Shopping asks for it on branded products.")
+    mpn = models.CharField("Manufacturer part number", max_length=70, blank=True, help_text="Used by Google Shopping when there is no barcode.")
     specs = models.TextField("Specifications", blank=True, help_text="One per line as 'Name: value', e.g. 'Material: Cotton'. Shown as a table on the product page.")
     video_url = models.CharField("Video", max_length=300, blank=True, help_text="YouTube or Vimeo link, or a direct .mp4 address. Shown in the product gallery.")
     min_order_qty = models.PositiveSmallIntegerField("Minimum order", default=1, help_text="Fewest a customer can buy in one order.")
@@ -475,6 +477,7 @@ class Review(models.Model):
     comment = models.TextField()
     is_verified_purchase = models.BooleanField(default=False)
     helpful_count = models.PositiveIntegerField(default=0)
+    photo_bonus = models.BooleanField(default=False, help_text="Reward points for adding a photo were given.")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -548,6 +551,7 @@ class Order(models.Model):
     tax_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     tax_included = models.BooleanField(default=False, help_text="Prices already included this tax (shown, not added).")
     customer_tax_id = models.CharField("Customer VAT / tax number", max_length=40, blank=True)
+    review_request_sent = models.BooleanField(default=False, help_text="The 'how was it? leave a review' email went out.")
     affiliate_code = models.CharField(max_length=16, blank=True, db_index=True, help_text="Code of the affiliate whose link brought this order.")
     affiliate_paid = models.BooleanField(default=False, editable=False)
     affiliate_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, editable=False)
@@ -1103,6 +1107,7 @@ class Profile(models.Model):
     cart_updated_at = models.DateTimeField(null=True, blank=True, db_index=True)
     cart_reminder_sent = models.BooleanField(default=False)
     cart_reminders = models.BooleanField(default=True, help_text="Email a reminder about items left in the cart.")
+    review_emails = models.BooleanField(default=True, help_text="Email asking for a review a few days after delivery.")
     # Two-step sign-in (authenticator app).
     totp_secret = models.CharField(max_length=64, blank=True)
     totp_enabled = models.BooleanField(default=False)
@@ -1742,6 +1747,9 @@ class SiteSettings(models.Model):
                                        help_text="Every morning: the owner gets yesterday's sales and to-dos, sellers get their orders to ship and questions to answer.")
     affiliate_percent = models.PositiveSmallIntegerField("Affiliate commission (%)", default=0,
                                                          help_text="Anyone who shares a link with their code earns this % of delivered orders as store credit. 0 = off.")
+    review_requests = models.BooleanField("Ask for reviews after delivery", default=True, help_text="A few days after delivery, email the customer a link to review what they bought.")
+    review_photo_points = models.PositiveSmallIntegerField("Points for a photo review", default=50, help_text="Reward points for a verified review with a photo. 0 = off.")
+    ai_agents = models.BooleanField("Let AI shopping assistants use the store", default=True, help_text="Publishes the store for AI agents (Google Gemini, AI Mode and others using the Universal Commerce Protocol). Agents build the cart; the shopper pays on your checkout.")
     checkin_points = models.PositiveSmallIntegerField("Daily check-in coins", default=5, help_text="Reward points for visiting each day (7-day streak gets double). 0 = off.")
     gift_cards_enabled = models.BooleanField(default=True, help_text="Sell digital gift cards (needs card or PayPal payments). Redeemed as store credit.")
     require_seller_2fa = models.BooleanField(default=False, help_text="Sellers must turn on two-step sign-in before using Seller Center.")
@@ -2166,6 +2174,8 @@ class TaxRate(models.Model):
     name = models.CharField(max_length=20, default="VAT", help_text="Shown at checkout: VAT, GST, Sales tax...")
     rate = models.DecimalField(max_digits=5, decimal_places=2)
     includes_shipping = models.BooleanField(default=True, help_text="Charge it on shipping too (true for VAT in most countries).")
+    duty_rate = models.DecimalField("Import duty %", max_digits=5, decimal_places=2, default=0, help_text="Typical customs duty for international orders, shown as an estimate at checkout. 0 = no estimate.")
+    duty_free_up_to = models.DecimalField("Duty-free up to", max_digits=10, decimal_places=2, default=0, help_text="Orders up to this value (store currency) pay no duty. 0 = no limit.")
     active = models.BooleanField(default=True)
 
     class Meta:
@@ -2562,3 +2572,42 @@ def _price_alerts(sender, instance, created, **kwargs):
                                            "url": absolute(f"/product/{instance.id}/")}],
             "wishlist_url": absolute(f"/product/{instance.id}/"), "prefs_url": absolute("/account/privacy/")}, alert.user.email)
     due.update(notified_at=timezone.now())
+
+
+class Passkey(models.Model):
+    """A passkey (fingerprint, face or device PIN) the customer can sign in
+    with instead of a password. Only the public key is stored."""
+    user = models.ForeignKey("auth.User", related_name="passkeys", on_delete=models.CASCADE)
+    credential_id = models.CharField(max_length=512, unique=True)
+    public_key = models.TextField()
+    sign_count = models.PositiveBigIntegerField(default=0)
+    transports = models.JSONField(default=list, blank=True)
+    name = models.CharField(max_length=60, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name or 'Passkey'} ({self.user})"
+
+
+class AgentCheckout(models.Model):
+    """A checkout an AI shopping agent started through the Universal
+    Commerce Protocol. The agent builds the cart; the shopper finishes on
+    the store's own checkout (continue_url)."""
+    STATUS = [("requires_escalation", "Waiting for the shopper"), ("canceled", "Canceled"), ("completed", "Completed")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    lines = models.JSONField(default=list)
+    buyer = models.JSONField(default=dict, blank=True)
+    currency = models.CharField(max_length=3)
+    status = models.CharField(max_length=24, choices=STATUS, default="requires_escalation")
+    agent = models.CharField(max_length=300, blank=True)
+    idempotency_key = models.CharField(max_length=100, blank=True, db_index=True)
+    opened_at = models.DateTimeField(null=True, blank=True, help_text="The shopper opened the checkout link.")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]

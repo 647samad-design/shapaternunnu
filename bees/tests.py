@@ -7142,3 +7142,244 @@ class EasyModeTests(TestCase):
         self.assertEqual(r.json()["draft"]["name"], "White Sneakers")
         self.client.logout()
         self.assertEqual(self.client.post(reverse("listing_from_photo")).status_code, 403)
+
+
+from .models import Conversation, Message, Profile, SiteSettings  # noqa: E402
+
+
+class Round5Tests(TestCase):
+    """Shopping channels, AI agents (UCP), review requests, passkeys,
+    chat translation and import-duty estimates."""
+
+    UCP = {"HTTP_UCP_AGENT": 'profile="https://agent.example/.well-known/ucp"'}
+
+    # ---------------------------------------------------------- barcode & feeds
+    def test_gtin_check_digit(self):
+        from .views import valid_gtin
+        for good in ("5012345678900", "036000291452", "96385074", "9780306406157"):
+            self.assertTrue(valid_gtin(good), good)
+        for bad in ("5012345678901", "12345", "abcdefghijklm", ""):
+            self.assertFalse(valid_gtin(bad), bad)
+        from django.core.exceptions import ValidationError
+        from django.test import RequestFactory
+        from .views import _extra_product_fields
+        rf = RequestFactory()
+        self.assertEqual(_extra_product_fields(rf.post("/", {"gtin": "5012 3456 78900", "mpn": " AB-1 "}))["gtin"], "5012345678900")
+        with self.assertRaises(ValidationError):
+            _extra_product_fields(rf.post("/", {"gtin": "5012345678901"}))
+
+    def test_bulk_reads_barcodes_and_export_lines_up(self):
+        from .bulk import COLUMNS, EXPORT_ONLY, _clean, _rows_for, _to_dicts
+        rows = _to_dicts([["Title", "Variant Price", "Variant Barcode", "Vendor"], ["Mug", "9", "5012345678900.0", "Acme"]])
+        self.assertEqual(_clean(rows[0])["gtin"], "5012345678900")
+        p = make_product(name="Exported", brand="Acme", gtin="5012345678900", mpn="M-1")
+        row = list(_rows_for(Product.objects.filter(pk=p.pk)))[0]
+        header = COLUMNS + EXPORT_ONLY
+        self.assertEqual(len(row), len(header))
+        named = dict(zip(header, row))
+        self.assertEqual((named["brand"], named["gtin"], named["mpn"], named["status"]), ("Acme", "5012345678900", "M-1", "Approved"))
+
+    def test_feeds(self):
+        make_product(name="Feed Lamp", brand="Lumo", gtin="5012345678900", price=Decimal("30"), old_price=Decimal("40"))
+        make_product(name="Feed Auction", is_auction=True)
+        make_product(name="Feed Quote", quote_only=True)
+        xml = self.client.get(reverse("feed_google")).content.decode()
+        self.assertIn("<g:gtin>5012345678900</g:gtin>", xml)
+        self.assertIn("<g:price>40.00 USD</g:price>", xml)
+        self.assertIn("<g:sale_price>30.00 USD</g:sale_price>", xml)
+        self.assertNotIn("Feed Auction", xml)
+        self.assertNotIn("Feed Quote", xml)
+        csv_body = self.client.get(reverse("feed_csv")).content.decode()
+        self.assertTrue(csv_body.startswith("id,title,description,availability"))
+        self.assertIn("in stock", csv_body)
+        from .feeds import readiness
+        self.assertEqual(readiness()["count"], 1)
+
+    def test_sales_channels_page(self):
+        staff = User.objects.create_user("ch", "ch@example.com", "pass12345", is_staff=True, is_superuser=True)
+        self.client.force_login(staff)
+        page = self.client.get(reverse("manage_channels"))
+        self.assertContains(page, "/feeds/google.xml")
+        self.assertContains(page, "/.well-known/ucp")
+        self.assertContains(self.client.get(reverse("manage_settings")), 'name="ai_agents"')
+
+    # ---------------------------------------------------------- AI agents (UCP)
+    def test_ucp_profile_and_llms_txt(self):
+        data = self.client.get("/.well-known/ucp").json()
+        self.assertEqual(data["ucp"]["version"], "2026-04-08")
+        self.assertIn("dev.ucp.shopping.checkout", data["ucp"]["capabilities"])
+        self.assertTrue(data["ucp"]["services"]["dev.ucp.shopping"][0]["endpoint"].endswith("/ucp/v1"))
+        self.assertContains(self.client.get("/llms.txt"), "/feeds/google.xml")
+        st = SiteSettings.load(); st.ai_agents = False; st.save()
+        self.assertEqual(self.client.get("/.well-known/ucp").status_code, 404)
+        self.assertNotContains(self.client.get("/llms.txt"), "/.well-known/ucp")
+
+    def _create(self, items, **headers):
+        import json
+        return self.client.post("/ucp/v1/checkout-sessions", json.dumps({"line_items": items, "buyer": {"email": "ai@example.com"}}),
+                                content_type="application/json", **{**self.UCP, **headers})
+
+    def test_ucp_checkout_flow(self):
+        import json
+        p = make_product(name="Agent Mug", price=Decimal("12.99"), stock=5)
+        self.assertEqual(self.client.post("/ucp/v1/checkout-sessions", "{}", content_type="application/json").status_code, 400)
+        r = self._create([{"item": {"id": str(p.id)}, "quantity": 2}], HTTP_IDEMPOTENCY_KEY="k1")
+        self.assertEqual(r.status_code, 201)
+        body = r.json()
+        self.assertEqual(body["status"], "requires_escalation")
+        self.assertEqual(body["line_items"][0]["item"]["price"], 1299)
+        self.assertEqual(body["totals"][-1], {"type": "total", "amount": 2598})
+        self.assertTrue(any(m.get("severity") == "requires_buyer_input" for m in body["messages"]))
+        self.assertIn("/agent-checkout/", body["continue_url"])
+        again = self._create([{"item": {"id": str(p.id)}, "quantity": 2}], HTTP_IDEMPOTENCY_KEY="k1").json()
+        self.assertEqual(again["id"], body["id"])
+        url = f"/ucp/v1/checkout-sessions/{body['id']}"
+        self.assertEqual(self.client.get(url, **self.UCP).json()["line_items"][0]["quantity"], 2)
+        updated = self.client.put(url, json.dumps({"line_items": [{"item": {"id": str(p.id)}, "quantity": 9}]}),
+                                  content_type="application/json", **self.UCP).json()
+        self.assertEqual(updated["line_items"][0]["quantity"], 5)  # only 5 in stock
+        self.assertTrue(any(m["code"] == "quantity_adjusted" for m in updated["messages"]))
+        done = self.client.post(url + "/complete", **self.UCP).json()
+        self.assertEqual(done["status"], "requires_escalation")
+        # The shopper opens the link: items land in the cart, checkout opens.
+        page = self.client.get(done["continue_url"].replace("http://testserver", ""))
+        self.assertRedirects(page, reverse("checkout"), fetch_redirect_response=False)
+        self.assertEqual(self.client.session["cart"], {str(p.id): 5})
+        self.assertEqual(self.client.session["agent_email"], "ai@example.com")
+        self.assertEqual(self.client.post(url + "/cancel", **self.UCP).json()["status"], "canceled")
+        self.assertEqual(self.client.put(url, "{}", content_type="application/json", **self.UCP).status_code, 409)
+
+    def test_ucp_rejects_bad_items(self):
+        sold_out = make_product(name="Gone", stock=0)
+        self.assertEqual(self._create([{"item": {"id": "nonsense"}, "quantity": 1}]).status_code, 400)
+        self.assertEqual(self._create([{"item": {"id": "1"}, "quantity": 500}]).status_code, 400)
+        r = self._create([{"item": {"id": str(sold_out.id)}, "quantity": 1}])
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("id", r.json())
+        from .models import AgentCheckout
+        self.assertFalse(AgentCheckout.objects.exists())
+
+    # ---------------------------------------------------------- review requests
+    def _delivered_order(self, user, product, days_ago):
+        from django.utils import timezone
+        from datetime import timedelta
+        when = timezone.now() - timedelta(days=days_ago)
+        order = Order.objects.create(user=user, email=user.email, full_name="R", address="1", city="X", country="US",
+                                     phone="+15550100", status="delivered", delivered_at=when)
+        OrderItem.objects.create(order=order, product=product, product_name=product.name, price=product.price, quantity=1)
+        return order
+
+    def test_review_request_emails(self):
+        from django.core import mail
+        from .review_requests import send
+        buyer = User.objects.create_user("rv", "rv@example.com", "x")
+        p1, p2 = make_product(name="Review Me"), make_product(name="Already Reviewed")
+        order = self._delivered_order(buyer, p1, 5)
+        OrderItem.objects.create(order=order, product=p2, product_name=p2.name, price=p2.price, quantity=1)
+        Review.objects.create(product=p2, user=buyer, username="rv", rating=5, comment="ok")
+        too_new = self._delivered_order(buyer, p1, 1)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(send(), 1)
+        self.assertEqual(len(mail.outbox), 1)
+        html = mail.outbox[0].alternatives[0][0]
+        self.assertIn("Review Me", html)
+        self.assertNotIn("Already Reviewed", html)
+        self.assertIn("#write-review", html)
+        self.assertEqual(send(), 0)  # never twice
+        too_new.refresh_from_db()
+        self.assertFalse(too_new.review_request_sent)
+        other = User.objects.create_user("rv2", "rv2@example.com", "x")
+        Profile.objects.update_or_create(user=other, defaults={"review_emails": False})
+        self._delivered_order(other, p1, 5)
+        self.assertEqual(send(), 0)
+
+    def test_photo_review_points_once(self):
+        from io import BytesIO
+        from unittest import mock
+        from PIL import Image
+        buyer = User.objects.create_user("ph", "ph@example.com", "pass12345")
+        p = make_product(name="Photo Product")
+        self._delivered_order(buyer, p, 5)
+        self.client.force_login(buyer)
+
+        def photo():
+            buf = BytesIO(); Image.new("RGB", (30, 30), "red").save(buf, "JPEG")
+            return SimpleUploadedFile("r.jpg", buf.getvalue(), content_type="image/jpeg")
+        with mock.patch("bees.images.save_public", return_value="/media/reviews/r.jpg"):
+            self.client.post(reverse("product_detail", args=[p.id]), {"rating": "5", "comment": "Great", "photos": photo()})
+            self.client.post(reverse("product_detail", args=[p.id]), {"rating": "4", "comment": "Still great", "photos": photo()})
+        self.assertEqual(Profile.objects.get(user=buyer).loyalty_points, 50)
+        self.assertTrue(Review.objects.get(user=buyer).photo_bonus)
+
+    # ---------------------------------------------------------- passkeys
+    def test_passkey_register_login_and_remove(self):
+        import json
+        from types import SimpleNamespace
+        from unittest import mock
+        from .models import Passkey
+        user = User.objects.create_user("pk", "pk@example.com", "pass12345")
+        self.assertNotEqual(self.client.post(reverse("passkey_register_options")).status_code, 200)  # signed out
+        self.client.force_login(user)
+        opts = self.client.post(reverse("passkey_register_options")).json()
+        self.assertEqual(opts["rp"]["id"], "testserver")
+        self.assertIn("challenge", opts)
+        reg = SimpleNamespace(credential_id=b"\x01\x02cred", credential_public_key=b"pubkey", sign_count=0)
+        cred = {"id": "AQJjcmVk", "rawId": "AQJjcmVk", "type": "public-key", "response": {"transports": ["internal"]}}
+        with mock.patch("webauthn.verify_registration_response", return_value=reg):
+            r = self.client.post(reverse("passkey_register"), json.dumps({"credential": cred}), content_type="application/json")
+        self.assertTrue(r.json()["ok"])
+        key = Passkey.objects.get(user=user)
+        self.assertEqual(key.credential_id, "AQJjcmVk")
+        self.assertContains(self.client.get(reverse("account_security")), "Remove")
+        self.client.logout()
+        self.client.post(reverse("passkey_login_options"))
+        with mock.patch("webauthn.verify_authentication_response", return_value=SimpleNamespace(new_sign_count=3)):
+            ok = self.client.post(reverse("passkey_login"), json.dumps({"credential": cred, "next": "/my-orders/"}),
+                                  content_type="application/json").json()
+        self.assertEqual(ok, {"ok": True, "next": "/my-orders/"})
+        self.assertEqual(int(self.client.session["_auth_user_id"]), user.pk)
+        key.refresh_from_db()
+        self.assertEqual(key.sign_count, 3)
+        # Without a fresh challenge, or with an unknown key, nothing happens.
+        self.client.logout()
+        bad = self.client.post(reverse("passkey_login"), json.dumps({"credential": cred}), content_type="application/json")
+        self.assertEqual(bad.status_code, 400)
+        self.client.force_login(user)
+        self.client.post(reverse("passkey_delete", args=[key.id]))
+        self.assertFalse(Passkey.objects.exists())
+
+    # ---------------------------------------------------------- chat translation
+    def test_translate_chat_message(self):
+        from unittest import mock
+        buyer = User.objects.create_user("tb", "tb@example.com", "x")
+        seller_user = User.objects.create_user("ts2", "ts2@example.com", "x")
+        seller = SellerAccount.objects.create(user=seller_user, status="approved", business_name="Tr Shop")
+        conv = Conversation.objects.create(buyer=buyer, seller=seller)
+        msg = Message.objects.create(conversation=conv, sender=seller_user, from_seller=True, body="Hola, ¿qué talla?")
+        stranger = User.objects.create_user("st", "st@example.com", "x")
+        self.client.force_login(stranger)
+        self.assertEqual(self.client.post(reverse("translate_message", args=[msg.id])).status_code, 404)
+        self.client.force_login(buyer)
+        with mock.patch("bees.round5_views.translate_text", return_value="Hi, what size?") as tr:
+            r = self.client.post(reverse("translate_message", args=[msg.id]), {"lang": "en"}).json()
+            self.client.post(reverse("translate_message", args=[msg.id]), {"lang": "en"})
+        self.assertEqual(r["text"], "Hi, what size?")
+        self.assertEqual(tr.call_count, 1)  # cached
+
+    # ---------------------------------------------------------- import duty
+    def test_duty_estimate(self):
+        from .models import TaxRate
+        from .taxes import duty_estimate, table
+        st = SiteSettings.load(); st.ship_from_country = "PK"; st.save()
+        TaxRate.objects.create(country="GB", name="VAT", rate=Decimal("20"), duty_rate=Decimal("12"), duty_free_up_to=Decimal("150"))
+        self.assertIsNone(duty_estimate(Decimal("500"), "PK"))
+        self.assertEqual(duty_estimate(Decimal("100"), "GB"), Decimal("0"))
+        self.assertEqual(duty_estimate(Decimal("500"), "GB"), Decimal("60.00"))
+        self.assertEqual(table()["countries"]["GB"]["duty"], 12.0)
+        st.duties_policy = "included"; st.save()
+        self.assertIsNone(duty_estimate(Decimal("500"), "GB"))
+        staff = User.objects.create_user("tx", "tx@example.com", "pass12345", is_staff=True, is_superuser=True)
+        self.client.force_login(staff)
+        self.client.post(reverse("manage_taxes"), {"action": "save", "country": "DE", "name": "VAT", "rate": "19",
+                                                    "duty_rate": "8", "duty_free_up_to": "150"})
+        self.assertEqual(TaxRate.objects.get(country="DE").duty_rate, Decimal("8"))
