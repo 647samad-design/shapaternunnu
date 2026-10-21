@@ -24,8 +24,9 @@ from bees import ads as ads_views
 from bees import campaigns as camp
 from bees import webpush
 from bees import agents, feeds, round5_views as r5
+from bees import shopper_views as shv
 from bees import reports_listing
-from bees.sitemaps import ProductSitemap, CategorySitemap, SellerSitemap, StaticViewSitemap
+from bees.sitemaps import ProductSitemap, CategorySitemap, SellerSitemap, StaticViewSitemap, BlogSitemap
 from bees.ratelimit import ratelimit
 
 sitemaps = {
@@ -33,6 +34,7 @@ sitemaps = {
     "categories": CategorySitemap,
     "static": StaticViewSitemap,
     "stores": SellerSitemap,
+    "blog": BlogSitemap,
 }
 
 urlpatterns = [
@@ -61,6 +63,27 @@ urlpatterns = [
     path('login/passkey/options/', r5.passkey_login_options, name='passkey_login_options'),
     path('login/passkey/', r5.passkey_login, name='passkey_login'),
     path('messages/translate/<int:pk>/', r5.translate_message, name='translate_message'),
+    path('group/<str:code>/', shv.group_page, name='group_page'),
+    path('group/<str:code>/join/', shv.group_join, name='group_join'),
+    path('product/<int:pk>/group/start/', shv.group_start, name='group_start'),
+    path('spin/', shv.spin_page, name='spin'),
+    path('videos/', shv.videos, name='videos'),
+    path('live-shopping/', shv.live_list, name='live_list'),
+    path('live-shopping/<int:pk>/', shv.live_detail, name='live_detail'),
+    path('live-shopping/<int:pk>/comments/', shv.live_comments, name='live_comments'),
+    path('live-shopping/<int:pk>/remind/', shv.live_remind, name='live_remind'),
+    path('seller/live/', sv.seller_required()(shv.seller_live), name='seller_live'),
+    path('blog/', shv.blog_list, name='blog_list'),
+    path('blog/feed.xml', shv.blog_rss, name='blog_rss'),
+    path('blog/<slug:slug>/', shv.blog_detail, name='blog_detail'),
+    path('manage/blog/', mv.staff_required(shv.manage_blog), name='manage_blog'),
+    path('account/registries/', shv.registries, name='registries'),
+    path('account/registries/<int:pk>/', shv.registry_manage, name='registry_manage'),
+    path('product/<int:pk>/registry/', shv.registry_add, name='registry_add'),
+    path('registry/<str:token>/', shv.registry_public, name='registry_public'),
+    path('registry/item/<int:item_id>/buy/', shv.registry_buy, name='registry_buy'),
+    path('api/address/suggest/', shv.address_suggest, name='address_suggest'),
+    path('api/address/details/', shv.address_details, name='address_details'),
     path('robots.txt', TemplateView.as_view(template_name="robots.txt", content_type="text/plain"), name='robots'),
     path('', views.home, name='home'),
     path('search/', views.search_products, name='search_products'),

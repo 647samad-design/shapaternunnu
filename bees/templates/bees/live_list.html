@@ -1,0 +1,26 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Live shopping — {{ brand.site_name }}{% endblock %}
+{% block meta_description %}Watch sellers show their products live and buy while you watch at {{ brand.site_name }}.{% endblock %}
+{% block content %}
+<div class="wrap page">
+    <div class="page-head"><div><h1>Live shopping</h1><p>Sellers show their products live. Ask questions in the chat and buy without leaving the show.</p></div>
+        <a class="btn btn-secondary" href="{% url 'videos' %}">▶ Shop by video</a></div>
+    {% if live %}<section class="section"><div class="section-head"><h2>🔴 Live now</h2></div><div class="live-grid">{% for s in live %}{% include "bees/partials/live_card.html" %}{% endfor %}</div></section>{% endif %}
+    <section class="section"><div class="section-head"><h2>Coming up</h2></div>
+        {% if upcoming %}<div class="live-grid">{% for s in upcoming %}{% include "bees/partials/live_card.html" %}{% endfor %}</div>
+        {% else %}<div class="panel empty"><h2>No shows planned yet</h2><p>Follow your favourite stores to hear when they go live.</p></div>{% endif %}
+    </section>
+    {% if past %}<section class="section"><div class="section-head"><h2>Replays</h2></div><div class="live-grid">{% for s in past %}{% include "bees/partials/live_card.html" %}{% endfor %}</div></section>{% endif %}
+</div>
+<style>
+    .live-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 16px; }
+    .live-card { display: grid; gap: 6px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); text-decoration: none; color: var(--ink); min-width: 0; }
+    .live-card:hover { border-color: var(--brand); }
+    .live-card h3 { margin: 0; font-size: 1.05rem; overflow-wrap: anywhere; }
+    .live-tag { justify-self: start; padding: 2px 10px; border-radius: 999px; font-size: .78rem; font-weight: 800; background: var(--surface-2); }
+    .live-tag.on { background: var(--sale); color: #fff; }
+    .live-thumbs { display: flex; gap: 6px; }
+    .live-thumbs img { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; border: 1px solid var(--line); }
+</style>
+{% endblock %}

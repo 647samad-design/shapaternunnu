@@ -1,0 +1,32 @@
+{% extends "bees/base.html" %}
+{% block title %}Gift registries — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:920px;">
+    <div class="page-head"><div><h1>Your account</h1><p>Signed in as <span data-no-translate>{{ request.user.username }}</span></p></div></div>
+    {% include "bees/partials/account_tabs.html" %}
+    <div style="display:grid;gap:20px;grid-template-columns:minmax(0,1fr);">
+        <section class="panel">
+            <h2>Gift registries</h2>
+            <p class="muted">Make a list for a wedding, baby shower or birthday. Share the link; friends buy the gifts and the list shows what's already bought.</p>
+            {% if registries %}<ul class="reg-list">{% for r in registries %}<li><a class="link" href="{% url 'registry_manage' r.id %}"><strong>{{ r.title }}</strong></a> <span class="muted small">{{ r.get_event_display }}{% if r.event_date %} · {{ r.event_date|date:"j M Y" }}{% endif %} · {{ r.items.count }} gift{{ r.items.count|pluralize }}</span></li>{% endfor %}</ul>{% endif %}
+        </section>
+        <section class="panel">
+            <h2>New registry</h2>
+            <form method="post" class="reg-form">{% csrf_token %}
+                <div class="field"><label for="rg-t">Name</label><input id="rg-t" name="title" maxlength="100" required placeholder="e.g. Sara &amp; Ali's wedding"></div>
+                <div class="field"><label for="rg-e">Occasion</label><select id="rg-e" name="event">{% for v, l in events %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
+                <div class="field"><label for="rg-d">Date</label><input id="rg-d" name="event_date" type="date"></div>
+                <div class="field rg-wide"><label for="rg-m">Message for guests <span class="muted">(optional)</span></label><textarea id="rg-m" name="message" rows="2" maxlength="600"></textarea></div>
+                <div class="rg-wide"><button class="btn btn-primary" type="submit">Create registry</button></div>
+            </form>
+        </section>
+    </div>
+</div>
+<style>
+    .reg-list { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
+    .reg-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .rg-wide { grid-column: 1 / -1; }
+    @media (max-width: 720px) { .reg-form { grid-template-columns: minmax(0, 1fr); } }
+</style>
+{% endblock %}

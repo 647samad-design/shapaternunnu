@@ -36,7 +36,7 @@ class StaticViewSitemap(Sitemap):
     priority = 0.5
 
     def items(self):
-        return ["home", "all_products", "help_support", "about_us", "terms_page", "privacy_page"]
+        return ["home", "all_products", "help_support", "about_us", "terms_page", "privacy_page", "blog_list", "live_list", "videos"]
 
     def location(self, item):
         return reverse(item)
@@ -52,3 +52,19 @@ class SellerSitemap(Sitemap):
 
     def location(self, obj):
         return reverse("store_page", args=[obj.display_name])
+
+
+class BlogSitemap(Sitemap):
+    changefreq = "weekly"
+    priority = 0.6
+
+    def items(self):
+        from django.utils import timezone
+        from .models import BlogPost
+        return BlogPost.objects.filter(is_published=True, published_at__lte=timezone.now())
+
+    def location(self, obj):
+        return obj.get_absolute_url()
+
+    def lastmod(self, obj):
+        return obj.updated_at

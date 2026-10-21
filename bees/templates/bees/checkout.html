@@ -265,4 +265,52 @@ document.getElementById('checkout-form')?.addEventListener('submit', function ()
     if (b) { b.disabled = true; b.textContent = 'Processing…'; }
 });
 </script>
+{% if address_autocomplete %}
+<script>
+/* Address suggestions (Google Places, through the store's server). */
+(function () {
+    var input = document.getElementById('id_address');
+    if (!input) return;
+    var box = document.createElement('div'); box.className = 'addr-sugg'; box.setAttribute('role', 'listbox'); box.hidden = true;
+    input.parentNode.style.position = 'relative'; input.parentNode.appendChild(box);
+    input.setAttribute('aria-autocomplete', 'list');
+    var session = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())), timer, last = '';
+    function country() { var c = document.querySelector('select[name=country]'); return c ? c.value : ''; }
+    function close() { box.hidden = true; box.innerHTML = ''; }
+    function set(id, v) { var el = document.getElementById(id); if (el && v) { el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); } }
+    input.addEventListener('input', function () {
+        clearTimeout(timer);
+        var q = input.value.trim();
+        if (q.length < 4 || q === last) { if (q.length < 4) close(); return; }
+        timer = setTimeout(function () {
+            last = q;
+            fetch('{% url "address_suggest" %}?' + new URLSearchParams({ q: q, country: country(), session: session })).then(function (r) { return r.json(); }).then(function (j) {
+                box.innerHTML = '';
+                (j.suggestions || []).forEach(function (s) {
+                    var b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'option'); b.textContent = s.text;
+                    b.addEventListener('click', function () {
+                        close();
+                        fetch('{% url "address_details" %}?' + new URLSearchParams({ id: s.id, session: session })).then(function (r) { return r.json(); }).then(function (a) {
+                            set('id_address', a.address); set('id_city', a.city); set('id_state', a.state); set('id_postal_code', a.postal_code);
+                            var c = document.querySelector('select[name=country]');
+                            if (c && a.country && c.querySelector('option[value="' + a.country + '"]')) { c.value = a.country; c.dispatchEvent(new Event('change', { bubbles: true })); }
+                            session = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+                        });
+                    });
+                    box.appendChild(b);
+                });
+                box.hidden = !box.children.length;
+            }).catch(close);
+        }, 250);
+    });
+    document.addEventListener('click', function (e) { if (!box.contains(e.target) && e.target !== input) close(); });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+})();
+</script>
+<style>
+    .addr-sugg { position: absolute; left: 0; right: 0; top: 100%; z-index: 30; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: 0 10px 30px rgba(0,0,0,.12); overflow: hidden; }
+    .addr-sugg button { display: block; width: 100%; text-align: left; padding: 10px 12px; border: 0; background: none; font: inherit; cursor: pointer; color: var(--ink); }
+    .addr-sugg button:hover, .addr-sugg button:focus { background: var(--surface-2); }
+</style>
+{% endif %}
 {% endblock %}

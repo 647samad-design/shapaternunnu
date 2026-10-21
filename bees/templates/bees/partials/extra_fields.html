@@ -42,8 +42,8 @@
     .xf .check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; }
     .xf .check input { margin-top: 3px; flex: none; }
 </style>
-<details class="xf" {% if p.condition and p.condition != "new" or p.ships_from or p.personalization_prompt or p.accepts_offers or p.subscribe_percent and p.subscribe_percent|stringformat:"s" != "0" or p.is_auction %}open{% endif %}>
-    <summary><strong>Condition, personalization, offers &amp; auction</strong> <span class="muted small">(optional)</span></summary>
+<details class="xf" {% if p.condition and p.condition != "new" or p.ships_from or p.personalization_prompt or p.accepts_offers or p.subscribe_percent and p.subscribe_percent|stringformat:"s" != "0" or p.is_auction or p.preorder_ships_on or p.group_size %}open{% endif %}>
+    <summary><strong>Condition, personalization, offers, pre-order, group buy &amp; auction</strong> <span class="muted small">(optional)</span></summary>
     <div class="xf-grid">
         <div class="field"><label for="pf_cond">Condition</label><select id="pf_cond" name="condition">{% for v, l in conditions %}<option value="{{ v }}"{% if p.condition == v or not p.condition and v == "new" %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
         <div class="field"><label for="pf_from">Ships from</label><select id="pf_from" name="ships_from"><option value="">Your store's country</option>{% for code, name in country_list %}<option value="{{ code }}"{% if p.ships_from == code %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
@@ -53,6 +53,9 @@
         <label class="xf-wide check small"><input type="checkbox" name="accepts_offers" value="1"{% if p.accepts_offers %} checked{% endif %}> <span><strong>Make an offer</strong>: buyers can propose their own price (you accept or counter under Quotes)</span></label>
         <div class="field"><label for="pf_floor">Auto-decline offers below</label><input id="pf_floor" name="offer_floor" inputmode="decimal" value="{{ p.offer_floor|default:'' }}" placeholder="optional"></div>
         <div class="field"><label for="pf_sub">Subscribe &amp; Save discount (%)</label><input id="pf_sub" name="subscribe_percent" type="number" min="0" max="50" value="{{ p.subscribe_percent|default:0 }}"><small class="muted">For things people buy again (coffee, soap…). 0 = off.</small></div>
+        <div class="field"><label for="pf_pre">Pre-order: ships on</label><input id="pf_pre" name="preorder_ships_on" type="date" value="{% if p.preorder_ships_on %}{{ p.preorder_ships_on|date:'Y-m-d' }}{% endif %}"><small class="muted">Sell before it arrives. Stock = how many you'll have. Empty = normal.</small></div>
+        <div class="field"><label for="pf_gsize">Group buy: people</label><input id="pf_gsize" name="group_size" type="number" min="0" max="10" value="{{ p.group_size|default:0 }}"><small class="muted">e.g. 2: when 2 people buy within 24 h, each gets money back. 0 = off.</small></div>
+        <div class="field"><label for="pf_gpct">Group buy: % back</label><input id="pf_gpct" name="group_percent" type="number" min="0" max="50" value="{{ p.group_percent|default:0 }}"><small class="muted">Paid as store credit after delivery; you pay it like a discount.</small></div>
         <label class="xf-wide check small"><input type="checkbox" name="is_auction" value="1"{% if p.is_auction %} checked{% endif %} data-auction-toggle> <span><strong>Sell by auction</strong>: buyers bid, the highest bid when time runs out wins (one item)</span></label>
         <div class="field" data-auction-field><label for="pf_astart">Starting bid</label><input id="pf_astart" name="auction_start_price" inputmode="decimal" value="{{ p.auction_start_price|default:'' }}"></div>
         <div class="field" data-auction-field><label for="pf_ares">Reserve price (hidden, optional)</label><input id="pf_ares" name="auction_reserve" inputmode="decimal" value="{{ p.auction_reserve|default:'' }}"></div>

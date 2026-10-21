@@ -160,6 +160,28 @@ Either side can report a conversation; staff review them at /manage/messages/.
 - **Chat translation:** buyers and sellers tap "Translate" on a message to read it in their own
   language (needs `ANTHROPIC_API_KEY`).
 
+## Live shopping, group buys, registries and more
+
+- **Live shopping** (`/live-shopping/`): sellers plan shows in Seller Center > Live shows, stream on
+  YouTube Live, Vimeo or Twitch, and pin products under the video. Shoppers get reminders, chat live and
+  buy without leaving. Followers are told when the show starts. **Shop by video** (`/videos/`) lists every
+  product that has a video.
+- **Group buy:** on a product set "Group buy: people" and "% back". When that many people buy through
+  the same group link within 24 hours, each gets the % back as store credit after delivery
+  (paid by the scheduled job `run_promotions`).
+- **Pre-order:** set "Pre-order: ships on" - the product shows a Pre-order badge and delivery dates
+  count from that day.
+- **Spin & win** (`/spin/`, Store settings > Spin & win): one spin a day for a single-use coupon,
+  free shipping or points; prizes and chances are editable.
+- **Blog** (`/blog/`, Admin > Blog): posts with linked products, RSS feed and sitemap entries.
+- **Gift registries** (Account > Gift registries): a shareable list for weddings, baby showers and
+  birthdays; guests see what's still wanted and the owner is told when something is bought.
+- **'Still looking?' emails:** signed-in shoppers who viewed products without buying get one email
+  (at most weekly; daily task `send_browse_reminders`).
+- **Address suggestions at checkout:** add a Google Maps Platform key (Places API (New)) under
+  Keys & passwords. Requests go through the store's server, so the key stays private.
+- **Filters:** material (from product specifications) and condition, next to brand, size and colour.
+
 ## Demo copy for clients
 
 On a separate copy of the store (never your live store):

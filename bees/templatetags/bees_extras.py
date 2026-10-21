@@ -258,3 +258,13 @@ def wa_link(number, text=""):
     if len(digits) < 8:
         return ""
     return f"https://wa.me/{digits}" + (f"?text={quote(str(text))}" if text else "")
+
+
+@register.filter
+def is_future(value):
+    """True for a date after today."""
+    from django.utils import timezone
+    try:
+        return value > timezone.localdate()
+    except TypeError:
+        return False

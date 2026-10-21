@@ -253,6 +253,9 @@ class Product(models.Model):
                                               help_text="Ask buyers for custom text, e.g. 'Name to engrave (max 12 letters)'. Empty = off.")
     personalization_required = models.BooleanField(default=False)
     personalization_max = models.PositiveSmallIntegerField(default=60)
+    preorder_ships_on = models.DateField("Pre-order: ships on", null=True, blank=True, help_text="Sell before it's in stock. Shoppers see 'Pre-order - ships on' this date. Empty = normal product.")
+    group_size = models.PositiveSmallIntegerField("Group buy: people", default=0, help_text="2-10 people buying within 24 hours each get money back. 0 = off.")
+    group_percent = models.PositiveSmallIntegerField("Group buy: % back", default=0, help_text="Store credit each group member gets back once the group is full and the item is delivered.")
     accepts_offers = models.BooleanField("Accept offers", default=False, help_text="Buyers can offer their own price (Make an offer).")
     offer_floor = models.DecimalField("Auto-decline offers below", max_digits=10, decimal_places=2, null=True, blank=True)
     offer_of = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="other_offers",
@@ -298,19 +301,8 @@ class Product(models.Model):
 
     def video(self):
         """{"kind": "youtube"|"vimeo"|"file", "src": ...} or None."""
-        import re
-        url = (self.video_url or "").strip()
-        if not url.startswith("https://"):
-            return None
-        m = re.match(r"https://(?:www\.|m\.)?(?:youtube\.com/(?:watch\?(?:.*&)?v=|embed/|shorts/)|youtu\.be/)([A-Za-z0-9_-]{6,20})", url)
-        if m:
-            return {"kind": "youtube", "src": f"https://www.youtube-nocookie.com/embed/{m.group(1)}", "id": m.group(1)}
-        m = re.match(r"https://(?:www\.|player\.)?vimeo\.com/(?:video/)?(\d{5,12})", url)
-        if m:
-            return {"kind": "vimeo", "src": f"https://player.vimeo.com/video/{m.group(1)}"}
-        if re.search(r"\.(mp4|webm)(\?.*)?$", url, re.I):
-            return {"kind": "file", "src": url}
-        return None
+        from .media import embed
+        return embed(self.video_url)
 
     def size_chart(self):
         from . import categories
@@ -909,6 +901,7 @@ class OrderItem(models.Model):
     shipped_at = models.DateTimeField(null=True, blank=True)
     downloads = models.PositiveSmallIntegerField(default=0, editable=False)
     personalization = models.CharField(max_length=300, blank=True)
+    registry_item = models.ForeignKey("RegistryItem", null=True, blank=True, on_delete=models.SET_NULL, related_name="order_items")
     quote = models.ForeignKey("QuoteRequest", null=True, blank=True, on_delete=models.SET_NULL, related_name="order_items")
 
     @property
@@ -989,7 +982,7 @@ class Wishlist(models.Model):
 
 
 class Coupon(models.Model):
-    PURPOSE_CHOICES = [("", "Store coupon"), ("referral_welcome", "Referral welcome"), ("referral_reward", "Referral reward")]
+    PURPOSE_CHOICES = [("", "Store coupon"), ("referral_welcome", "Referral welcome"), ("referral_reward", "Referral reward"), ("spin", "Wheel prize")]
     code = models.CharField(max_length=30, unique=True)
     # Referral coupons belong to one customer (shown on their referrals page).
     owner = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="owned_coupons")
@@ -1059,6 +1052,8 @@ class Coupon(models.Model):
 
         if not self.active:
             return False, "This coupon is no longer active."
+        if self.purpose == "spin" and (not user or not getattr(user, "is_authenticated", False) or user.pk != self.owner_id):
+            return False, "This prize code belongs to another account."
         if self.expiry_date and timezone.localdate() > self.expiry_date:
             return False, "This coupon has expired."
         if order_total < self.min_order_value:
@@ -1108,6 +1103,8 @@ class Profile(models.Model):
     cart_reminder_sent = models.BooleanField(default=False)
     cart_reminders = models.BooleanField(default=True, help_text="Email a reminder about items left in the cart.")
     review_emails = models.BooleanField(default=True, help_text="Email asking for a review a few days after delivery.")
+    browse_reminder_at = models.DateTimeField(null=True, blank=True, help_text="Last 'still looking?' email.")
+    last_spin_on = models.DateField(null=True, blank=True)
     # Two-step sign-in (authenticator app).
     totp_secret = models.CharField(max_length=64, blank=True)
     totp_enabled = models.BooleanField(default=False)
@@ -1747,6 +1744,10 @@ class SiteSettings(models.Model):
                                        help_text="Every morning: the owner gets yesterday's sales and to-dos, sellers get their orders to ship and questions to answer.")
     affiliate_percent = models.PositiveSmallIntegerField("Affiliate commission (%)", default=0,
                                                          help_text="Anyone who shares a link with their code earns this % of delivered orders as store credit. 0 = off.")
+    spin_enabled = models.BooleanField("Spin the wheel", default=False, help_text="Signed-in shoppers spin once a day for a coupon or points.")
+    spin_prizes = models.TextField("Wheel prizes", default="5% off:35\n10% off:25\n50 points:20\nFree shipping:12\n20% off:5\nTry again:3",
+                                   help_text="One per line as 'Prize:chance'. Prizes: '10% off', 'Free shipping', '50 points' or 'Try again'.")
+    browse_reminders = models.BooleanField("'Still looking?' emails", default=True, help_text="One email a day after a signed-in shopper looked at products without buying (at most once a week).")
     review_requests = models.BooleanField("Ask for reviews after delivery", default=True, help_text="A few days after delivery, email the customer a link to review what they bought.")
     review_photo_points = models.PositiveSmallIntegerField("Points for a photo review", default=50, help_text="Reward points for a verified review with a photo. 0 = off.")
     ai_agents = models.BooleanField("Let AI shopping assistants use the store", default=True, help_text="Publishes the store for AI agents (Google Gemini, AI Mode and others using the Universal Commerce Protocol). Agents build the cart; the shopper pays on your checkout.")
@@ -2611,3 +2612,166 @@ class AgentCheckout(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class LiveShow(models.Model):
+    """A live shopping show: a seller streams on YouTube/Vimeo/Twitch and
+    pins products shoppers can buy while watching."""
+    seller_account = models.ForeignKey("SellerAccount", null=True, blank=True, on_delete=models.CASCADE, related_name="live_shows")
+    title = models.CharField(max_length=120)
+    description = models.TextField(blank=True, max_length=1000)
+    starts_at = models.DateTimeField(db_index=True)
+    stream_url = models.CharField(max_length=300, blank=True, help_text="YouTube Live, YouTube, Vimeo or Twitch link.")
+    products = models.ManyToManyField(Product, blank=True, related_name="live_shows")
+    started_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-starts_at"]
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def status(self):
+        if self.ended_at:
+            return "ended"
+        if self.started_at:
+            return "live"
+        return "scheduled"
+
+    @property
+    def host_name(self):
+        return self.seller_account.display_name if self.seller_account_id else SiteSettings.load().site_name
+
+    def embed(self):
+        from .media import embed
+        return embed(self.stream_url, live=True)
+
+
+class LiveComment(models.Model):
+    show = models.ForeignKey(LiveShow, related_name="comments", on_delete=models.CASCADE)
+    user = models.ForeignKey("auth.User", null=True, on_delete=models.SET_NULL, related_name="+")
+    name = models.CharField(max_length=60)
+    body = models.CharField(max_length=300)
+    from_host = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["id"]
+
+
+class LiveReminder(models.Model):
+    show = models.ForeignKey(LiveShow, related_name="reminders", on_delete=models.CASCADE)
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="+")
+    sent = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["show", "user"], name="one_live_reminder")]
+
+
+class GroupBuy(models.Model):
+    """'Team up and save': when enough people buy the product through the
+    same group link within the time limit, each gets money back as store
+    credit once their item is delivered."""
+    product = models.ForeignKey(Product, related_name="groups", on_delete=models.CASCADE)
+    code = models.CharField(max_length=12, unique=True)
+    leader = models.ForeignKey("auth.User", null=True, on_delete=models.SET_NULL, related_name="+")
+    size = models.PositiveSmallIntegerField()
+    percent = models.PositiveSmallIntegerField()
+    expires_at = models.DateTimeField()
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @property
+    def joined(self):
+        return self.members.count()
+
+    @property
+    def is_open(self):
+        return not self.completed_at and self.expires_at > timezone.now()
+
+
+class GroupMember(models.Model):
+    group = models.ForeignKey(GroupBuy, related_name="members", on_delete=models.CASCADE)
+    order_item = models.OneToOneField("OrderItem", related_name="group_member", on_delete=models.CASCADE)
+    user = models.ForeignKey("auth.User", null=True, on_delete=models.SET_NULL, related_name="+")
+    credited = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+
+class SpinResult(models.Model):
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="spins")
+    prize = models.CharField(max_length=40)
+    coupon = models.ForeignKey(Coupon, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    points = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class BlogPost(models.Model):
+    title = models.CharField(max_length=160)
+    slug = models.SlugField(max_length=170, unique=True)
+    excerpt = models.CharField(max_length=300, blank=True, help_text="Short summary for the blog list and Google.")
+    body = models.TextField(help_text="Paragraphs separated by a blank line. '## ' starts a heading, '- ' a list item.")
+    cover_url = models.CharField(max_length=500, blank=True)
+    products = models.ManyToManyField(Product, blank=True, related_name="blog_posts")
+    author = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    is_published = models.BooleanField(default=False)
+    published_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-published_at", "-created_at"]
+
+    def __str__(self):
+        return self.title
+
+    def get_absolute_url(self):
+        return f"/blog/{self.slug}/"
+
+
+class GiftRegistry(models.Model):
+    EVENTS = [("wedding", "Wedding"), ("baby", "Baby shower"), ("birthday", "Birthday"), ("housewarming", "Housewarming"), ("other", "Other")]
+    owner = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="registries")
+    title = models.CharField(max_length=100)
+    event = models.CharField(max_length=20, choices=EVENTS, default="other")
+    event_date = models.DateField(null=True, blank=True)
+    message = models.TextField(blank=True, max_length=600)
+    token = models.CharField(max_length=24, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.title
+
+
+class RegistryItem(models.Model):
+    registry = models.ForeignKey(GiftRegistry, related_name="items", on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="+")
+    variant = models.ForeignKey("ProductVariant", null=True, blank=True, on_delete=models.CASCADE, related_name="+")
+    wanted = models.PositiveSmallIntegerField(default=1)
+    bought = models.PositiveSmallIntegerField(default=0)
+    note = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["registry", "product", "variant"], name="one_registry_line")]
+
+    @property
+    def remaining(self):
+        return max(self.wanted - self.bought, 0)
+
+
+class ProductView(models.Model):
+    """Products a signed-in shopper looked at (for 'still looking?' emails)."""
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="product_views")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="+")
+    viewed_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "product"], name="one_view_row")]

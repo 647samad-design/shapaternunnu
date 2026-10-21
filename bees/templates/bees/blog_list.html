@@ -1,0 +1,25 @@
+{% extends "bees/base.html" %}
+{% block title %}Blog — {{ brand.site_name }}{% endblock %}
+{% block meta_description %}Guides, ideas and news from {{ brand.site_name }}.{% endblock %}
+{% block head_extra %}<link rel="alternate" type="application/rss+xml" title="{{ brand.site_name }} blog" href="{% url 'blog_rss' %}">{% endblock %}
+{% block content %}
+<div class="wrap page">
+    <div class="page-head"><div><h1>Blog</h1><p>Buying guides, ideas and news.</p></div></div>
+    {% if posts %}
+    <div class="blog-grid">{% for p in posts %}
+        <a class="blog-card" href="{{ p.get_absolute_url }}">{% if p.cover_url %}<img src="{{ p.cover_url }}" alt="" loading="lazy">{% endif %}
+            <span class="muted small">{{ p.published_at|date:"j F Y" }}</span><h2>{{ p.title }}</h2>{% if p.excerpt %}<p class="muted">{{ p.excerpt }}</p>{% endif %}</a>
+    {% endfor %}</div>
+    {% include "bees/partials/pagination.html" %}
+    {% else %}<div class="panel empty"><h2>No posts yet</h2><p>Check back soon.</p></div>{% endif %}
+</div>
+<style>
+    .blog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 18px; }
+    .blog-card { display: grid; gap: 6px; align-content: start; padding: 0 0 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; color: var(--ink); text-decoration: none; }
+    .blog-card > *:not(img) { padding: 0 16px; }
+    .blog-card img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; margin-bottom: 8px; }
+    .blog-card > span:first-child { padding-top: 16px; }
+    .blog-card h2 { font-size: 1.15rem; margin: 0; overflow-wrap: anywhere; }
+    .blog-card p { margin: 0; }
+</style>
+{% endblock %}

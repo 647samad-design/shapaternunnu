@@ -64,6 +64,8 @@ def delivery_window(product, country=""):
     from .models import SiteSettings
     days = SiteSettings.load().delivery_days or 5
     start = timezone.localdate()
+    if product.preorder_ships_on and product.preorder_ships_on > start:
+        start = product.preorder_ships_on  # pre-order: counts from the ship date
     def add_working(d, n):
         while n > 0:
             d += timedelta(days=1)

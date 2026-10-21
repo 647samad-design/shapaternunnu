@@ -12,4 +12,6 @@ class Command(BaseCommand):
         continue_sending()
         from bees.market import close_auctions
         ended = close_auctions()
+        from bees.shopper import settle_groups
+        settle_groups()
         self.stdout.write(f"  sales checked, email campaigns continued, {ended} auction(s) ended")

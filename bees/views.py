@@ -167,6 +167,19 @@ def _apply_filters(qs, request):
                 q |= Q(**{f"{kind}__iexact": value})
             # A subquery, not a join: keeps the rating counts right.
             qs = qs.filter(id__in=ProductVariant.objects.filter(q, stock__gt=0).values("product_id"))
+    materials = [m for m in request.GET.getlist("material") if m][:10]
+    if materials:
+        import re as _re
+        q = Q()
+        for m in materials:
+            q |= Q(specs__iregex=r"(^|\n)\s*material\s*:[^\n]*" + _re.escape(m))
+        qs = qs.filter(q)
+    conditions = [c for c in request.GET.getlist("condition") if c in ("new", "used", "refurbished")]
+    if conditions:
+        q = Q()
+        for c in conditions:
+            q |= Q(condition__startswith="used") if c == "used" else Q(condition=c)
+        qs = qs.filter(q)
     if request.GET.get("digital"):
         qs = qs.filter(is_digital=True)
     if in_stock:
@@ -203,7 +216,22 @@ def _filter_context(request, base_qs):
                      .exclude(color="").values_list("color", flat=True).distinct()[:200]})[:30]
     sizes = _sort_sizes({s.strip() for s in ProductVariant.objects.filter(product_id__in=ids, stock__gt=0)
                          .exclude(size="").values_list("size", flat=True).distinct()[:200]})[:30]
+    materials = set()
+    for specs in base_qs.exclude(specs="").values_list("specs", flat=True)[:600]:
+        for line in specs.splitlines():
+            name, _, value = line.partition(":")
+            if name.strip().lower() == "material" and value.strip():
+                for part in value.replace("/", ",").split(","):
+                    word = " ".join(part.split()).strip(" .")
+                    word = "".join(ch for ch in word if not ch.isdigit() and ch != "%").strip()
+                    if 2 < len(word) < 25:
+                        materials.add(word.capitalize())
+    conditions = set(base_qs.values_list("condition", flat=True).distinct()[:10])
     return {
+        "f_materials": sorted(materials)[:20], "f_material": request.GET.getlist("material"),
+        "f_conditions": [c for c, ok in (("new", "new" in conditions), ("used", any(c.startswith("used") for c in conditions)),
+                                         ("refurbished", "refurbished" in conditions)) if ok] if len(conditions) > 1 else [],
+        "f_condition": request.GET.getlist("condition"),
         "f_brands": brands, "f_colors": colors, "f_sizes": sizes,
         "f_brand": request.GET.getlist("brand"), "f_color": request.GET.getlist("color"), "f_size": request.GET.getlist("size"),
         "f_digital": request.GET.get("digital", ""),
@@ -472,9 +500,16 @@ def _market_context(request, product, also):
     ctx = {"other_offers": market.other_offers(product), "is_member": market.is_member(request.user),
            "bought_label": insights.bought_label(product.pk), "best_seller": insights.best_seller_badge(product),
            "delivery_window": insights.delivery_window(product)}
+    from . import shopper
+    shopper.log_view(request, product)
+    if product.group_size and product.group_percent and not product.is_auction:
+        ctx["open_groups"] = shopper.open_groups(product)
+    if product.preorder_ships_on and product.preorder_ships_on > timezone.localdate():
+        ctx["preorder"] = product.preorder_ships_on
     if request.user.is_authenticated:
         from .models import PriceAlert
         ctx["price_alert"] = PriceAlert.objects.filter(user=request.user, product=product, notified_at__isnull=True).first()
+        ctx["my_registries"] = list(request.user.registries.all()[:10])
     if product.old_price or product.discount_percent:
         ctx["lowest_30d"] = market.lowest_price_30d(product)
     if product.is_auction:
@@ -1595,6 +1630,8 @@ def checkout_view(request):
         request.session["cart"] = {}
         _persist_cart(request)
         request.session["coupon_code"] = ""
+        from .shopper import clear_markers
+        clear_markers(request)
         if not order.user_id:
             _remember_guest_order(request, order)
         from . import ads
@@ -1715,7 +1752,13 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
         "guest": not signed_in,
         "payment_methods": methods,
         "form": form,
+        "address_autocomplete": _address_autocomplete(),
     }
+
+
+def _address_autocomplete():
+    from .shopper_views import address_enabled
+    return address_enabled()
 
 
 def _cod_phone_check():
@@ -1845,7 +1888,7 @@ def _place_order(request, items, data, payment_method, use_credit=False):
             gift_wrap=data.get("gift_wrap", False), gift_message=data.get("gift_message", ""),
             affiliate_code=_affiliate_code(request),
             pickup_point=data.get("pickup_point"),
-            estimated_delivery=order_emails.default_delivery_date(country=data["country"]),
+            estimated_delivery=_preorder_delivery(lines) or order_emails.default_delivery_date(country=data["country"]),
             courier_name=tracking.suggest_courier(data["country"]),
             # Cash orders from accounts with an unconfirmed email need one
             # click on an emailed link before sellers pack them (stops fake orders).
@@ -1867,6 +1910,10 @@ def _place_order(request, items, data, payment_method, use_credit=False):
                 seller = seller_cache[product.seller_account_id]
             item.apply_commission(seller)
             item.save()
+            if quote is None:
+                from .cart import make_key
+                from .shopper import after_item
+                after_item(request, order, item, make_key(product.pk, variant.pk if variant else None))
             if variant:
                 variant.stock -= qty
                 variant.save(update_fields=["stock"])
@@ -1881,6 +1928,15 @@ def _place_order(request, items, data, payment_method, use_credit=False):
                 order.credit_used = credit
                 order.save(update_fields=["credit_used"])
     return order
+
+
+def _preorder_delivery(lines):
+    """Delivery date for orders with pre-order items: after the latest ship date."""
+    dates = [p.preorder_ships_on for p, _v, _price, _q in lines if p.preorder_ships_on and p.preorder_ships_on > timezone.localdate()]
+    if not dates:
+        return None
+    from datetime import timedelta
+    return max(dates) + timedelta(days=SiteSettings.load().delivery_days or 5)
 
 
 def _restore_cart_from_order(request, order):
@@ -2752,7 +2808,21 @@ def _selling_fields(request):
         "accepts_offers": bool(request.POST.get("accepts_offers")), "offer_floor": floor,
         "subscribe_percent": _parse_int(request.POST.get("subscribe_percent") or "0", "Subscribe & Save discount", minimum=0, maximum=50),
         "is_auction": bool(request.POST.get("is_auction")),
+        "group_size": _parse_int(request.POST.get("group_size") or "0", "Group buy people", minimum=0, maximum=10),
+        "group_percent": _parse_int(request.POST.get("group_percent") or "0", "Group buy % back", minimum=0, maximum=50),
+        "preorder_ships_on": None,
     }
+    if fields["group_size"] == 1 or bool(fields["group_size"]) != bool(fields["group_percent"]):
+        raise ValidationError("Group buy: set both the number of people (2-10) and the % back, or leave both at 0.")
+    pre = request.POST.get("preorder_ships_on", "").strip()
+    if pre:
+        try:
+            pre_date = datetime.strptime(pre, "%Y-%m-%d").date()
+        except ValueError:
+            raise ValidationError("Pre-order: choose the date it ships.")
+        if pre_date <= timezone.localdate() or pre_date > timezone.localdate() + timedelta(days=365):
+            raise ValidationError("Pre-order: the ship date must be in the next 12 months.")
+        fields["preorder_ships_on"] = pre_date
     if fields["is_auction"]:
         start = _parse_decimal(request.POST.get("auction_start_price"), "Starting bid", minimum=Decimal("0.01"))
         reserve = _parse_decimal(request.POST.get("auction_reserve"), "Reserve price", required=False)

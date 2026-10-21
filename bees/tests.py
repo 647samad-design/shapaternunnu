@@ -7383,3 +7383,228 @@ class Round5Tests(TestCase):
         self.client.post(reverse("manage_taxes"), {"action": "save", "country": "DE", "name": "VAT", "rate": "19",
                                                     "duty_rate": "8", "duty_free_up_to": "150"})
         self.assertEqual(TaxRate.objects.get(country="DE").duty_rate, Decimal("8"))
+
+
+from .models import GiftRegistry, GroupBuy, LiveShow, RegistryItem  # noqa: E402
+
+
+class ShopperPackTests(TestCase):
+    """Live shows, videos, group buys, prize wheel, pre-orders, filters,
+    blog, gift registries, 'still looking?' emails and address lookup."""
+
+    def _buy(self, user, product, **post):
+        self.client.force_login(user)
+        self.client.post(reverse("add_to_cart", args=[product.id]), {"quantity": 1, **post})
+        return self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "email": user.email, "payment_method": "cod"})
+
+    def test_group_buy_fills_and_pays_back_after_delivery(self):
+        from django.utils import timezone
+        from .shopper import settle_groups
+        p = make_product(name="Team Kettle", price=Decimal("50"), stock=10, group_size=2, group_percent=10)
+        a = User.objects.create_user("ga", "ga@example.com", "x")
+        b = User.objects.create_user("gb", "gb@example.com", "x")
+        self.client.force_login(a)
+        self.assertRedirects(self.client.post(reverse("group_start", args=[p.id])), reverse("cart"), fetch_redirect_response=False)
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "email": a.email, "payment_method": "cod"})
+        group = GroupBuy.objects.get(product=p)
+        self.assertEqual((group.leader, group.joined, group.completed_at), (a, 1, None))
+        self.assertNotIn("group_for", self.client.session)
+        page = self.client.get(reverse("group_page", args=[group.code]))
+        self.assertContains(page, "1 more person needed")
+        self.client.force_login(b)
+        self.client.post(reverse("group_join", args=[group.code]))
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "email": b.email, "payment_method": "cod"})
+        group.refresh_from_db()
+        self.assertIsNotNone(group.completed_at)
+        # A third person can't join a full group.
+        c = User.objects.create_user("gc", "gc@example.com", "x")
+        self.client.force_login(c)
+        self.client.post(reverse("group_join", args=[group.code]))
+        self.assertEqual(group.members.count(), 2)
+        self.assertEqual(settle_groups(), 0)  # nothing delivered yet
+        Order.objects.filter(user__in=[a, b]).update(status="delivered", delivered_at=timezone.now())
+        self.assertEqual(settle_groups(), 2)
+        self.assertEqual(Profile.objects.get(user=a).store_credit, Decimal("5.00"))
+        self.assertEqual(settle_groups(), 0)  # only once
+
+    def test_spin_wheel(self):
+        import random
+        from .shopper import prizes, spin
+        self.assertEqual(prizes("10% off:5\nnonsense\nFree shipping:2\n500% off:1\nTry again:0"), [("10% off", 5), ("Free shipping", 2)])
+        st = SiteSettings.load(); st.spin_enabled = True; st.spin_prizes = "10% off:1"; st.save()
+        user = User.objects.create_user("sp", "sp@example.com", "x")
+        result, index = spin(user, rng=random.Random(1))
+        self.assertEqual((result.prize, index, result.coupon.percent_off), ("10% off", 0, 10))
+        other = User.objects.create_user("sp2", "sp2@example.com", "x")
+        self.assertFalse(result.coupon.is_valid_for(other, Decimal("100"))[0])
+        self.assertTrue(result.coupon.is_valid_for(user, Decimal("100"))[0])
+        with self.assertRaises(ValueError):
+            spin(user)  # once a day
+        st.spin_prizes = "75 points:1"; st.save()
+        self.client.force_login(other)
+        j = self.client.post(reverse("spin")).json()
+        self.assertEqual(j["points"], 75)
+        self.assertEqual(Profile.objects.get(user=other).loyalty_points, 75)
+        st.spin_enabled = False; st.save()
+        self.assertEqual(self.client.get(reverse("spin")).status_code, 404)
+
+    def test_preorder(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from .insights import delivery_window
+        ships = timezone.localdate() + timedelta(days=30)
+        p = make_product(name="Future Phone", preorder_ships_on=ships, stock=5)
+        self.assertGreaterEqual(delivery_window(p)[0], ships)
+        self.assertContains(self.client.get(reverse("product_detail", args=[p.id])), "Pre-order")
+        user = User.objects.create_user("po", "po@example.com", "x")
+        self._buy(user, p)
+        self.assertGreater(Order.objects.get(user=user).estimated_delivery, ships)
+
+    def test_preorder_and_group_fields_validated(self):
+        from django.core.exceptions import ValidationError
+        from django.test import RequestFactory
+        from .views import _selling_fields
+        rf = RequestFactory()
+        with self.assertRaises(ValidationError):
+            _selling_fields(rf.post("/", {"group_size": "2"}))  # no % back
+        with self.assertRaises(ValidationError):
+            _selling_fields(rf.post("/", {"preorder_ships_on": "2001-01-01"}))
+        ok = _selling_fields(rf.post("/", {"group_size": "3", "group_percent": "5"}))
+        self.assertEqual((ok["group_size"], ok["group_percent"], ok["preorder_ships_on"]), (3, 5, None))
+
+    def test_material_and_condition_filters(self):
+        make_product(name="Cotton Tee", specs="Material: 100% Cotton\nFit: Regular")
+        make_product(name="Wool Hat", specs="Material: Wool")
+        make_product(name="Used Lamp", condition="used_good")
+        page = self.client.get(reverse("all_products"))
+        self.assertContains(page, 'value="Cotton"')
+        names = [p.name for p in self.client.get(reverse("all_products"), {"material": "Cotton"}).context["products"]]
+        self.assertEqual(names, ["Cotton Tee"])
+        names = [p.name for p in self.client.get(reverse("all_products"), {"condition": "used"}).context["products"]]
+        self.assertEqual(names, ["Used Lamp"])
+
+    def test_live_show_flow(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from .models import LiveReminder, Notification, StoreFollow
+        seller_user = User.objects.create_user("lv", "lv@example.com", "x")
+        seller = SellerAccount.objects.create(user=seller_user, status="approved", business_name="Live Shop")
+        mine = make_product(name="Live Product", seller_account=seller, seller_name="Live Shop")
+        fan = User.objects.create_user("fan", "fan@example.com", "x")
+        StoreFollow.objects.create(user=fan, seller_account=seller)
+        self.client.force_login(seller_user)
+        start = (timezone.now() + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
+        self.client.post(reverse("seller_live"), {"title": "Spring try-on", "starts_at": start,
+                                                  "stream_url": "https://www.youtube.com/live/abcdefghijk", "products": [mine.id]})
+        show = LiveShow.objects.get()
+        self.assertEqual(list(show.products.all()), [mine])
+        self.assertEqual(show.embed()["kind"], "youtube")
+        watcher = User.objects.create_user("wt", "wt@example.com", "x")
+        self.client.force_login(watcher)
+        self.client.post(reverse("live_remind", args=[show.id]))
+        self.assertTrue(LiveReminder.objects.filter(show=show, user=watcher).exists())
+        self.assertEqual(self.client.post(reverse("live_comments", args=[show.id]), {"body": "hi"}).status_code, 400)  # not live yet
+        self.client.force_login(seller_user)
+        self.client.post(reverse("seller_live"), {"action": "start", "id": show.id})
+        show.refresh_from_db()
+        self.assertEqual(show.status, "live")
+        self.assertTrue(Notification.objects.filter(user=fan, message__contains="Live now").exists())
+        self.assertTrue(Notification.objects.filter(user=watcher, message__contains="Live now").exists())
+        self.assertContains(self.client.get(reverse("live_list")), "Spring try-on")
+        self.client.force_login(watcher)
+        data = self.client.post(reverse("live_comments", args=[show.id]), {"body": "Is it waterproof?"}).json()
+        self.assertEqual(data["comments"][-1]["body"], "Is it waterproof?")
+        self.assertContains(self.client.get(reverse("live_detail", args=[show.id])), "youtube-nocookie.com/embed/abcdefghijk")
+        other_seller = User.objects.create_user("os", "os@example.com", "x")
+        SellerAccount.objects.create(user=other_seller, status="approved", business_name="Other")
+        self.client.force_login(other_seller)
+        self.client.post(reverse("seller_live"), {"action": "end", "id": show.id})
+        show.refresh_from_db()
+        self.assertEqual(show.status, "live")  # not theirs
+
+    def test_videos_page(self):
+        make_product(name="Video Lamp", video_url="https://youtu.be/abcdefghijk")
+        make_product(name="No Video")
+        page = self.client.get(reverse("videos"))
+        self.assertContains(page, "Video Lamp")
+        self.assertNotContains(page, "No Video")
+
+    def test_blog(self):
+        staff = User.objects.create_user("bl", "bl@example.com", "pass12345", is_staff=True, is_superuser=True)
+        p = make_product(name="Blog Shoe")
+        self.client.force_login(staff)
+        self.client.post(reverse("manage_blog"), {"title": "How to choose running shoes", "excerpt": "A guide",
+                                                  "body": "## Fit\n\nTry them on <b>late</b>.\n\n- Light\n- Soft", "products": [p.id]})
+        from .models import BlogPost
+        post = BlogPost.objects.get()
+        self.assertFalse(post.is_published)
+        self.client.logout()
+        self.assertEqual(self.client.get(post.get_absolute_url()).status_code, 404)
+        post.is_published = True; post.published_at = post.created_at; post.save()
+        page = self.client.get(post.get_absolute_url())
+        self.assertContains(page, "<h2>Fit</h2>")
+        self.assertContains(page, "&lt;b&gt;late&lt;/b&gt;")  # escaped
+        self.assertContains(page, "<li>Light</li>")
+        self.assertContains(page, "Blog Shoe")
+        self.assertContains(self.client.get(reverse("blog_rss")), "How to choose running shoes")
+        self.assertContains(self.client.get("/sitemap.xml"), post.get_absolute_url())
+
+    def test_gift_registry(self):
+        from .models import Notification
+        owner = User.objects.create_user("ro", "ro@example.com", "x")
+        guest = User.objects.create_user("rg", "rg@example.com", "x")
+        p = make_product(name="Toaster", stock=5)
+        self.client.force_login(owner)
+        r = self.client.post(reverse("registries"), {"title": "Sara & Ali", "event": "wedding", "event_date": "2027-05-01"})
+        reg = GiftRegistry.objects.get(owner=owner)
+        self.assertRedirects(r, reverse("registry_manage", args=[reg.id]), fetch_redirect_response=False)
+        self.client.post(reverse("registry_add", args=[p.id]), {"registry": reg.id})
+        self.client.post(reverse("registry_add", args=[p.id]), {"registry": reg.id})
+        line = RegistryItem.objects.get(registry=reg)
+        self.assertEqual(line.wanted, 2)
+        self.client.force_login(guest)
+        self.assertEqual(self.client.post(reverse("registry_add", args=[p.id]), {"registry": reg.id}).status_code, 404)  # not theirs
+        self.assertContains(self.client.get(reverse("registry_public", args=[reg.token])), "2 of 2 still wanted")
+        self.client.post(reverse("registry_buy", args=[line.id]))
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "email": guest.email, "payment_method": "cod"})
+        line.refresh_from_db()
+        self.assertEqual(line.bought, 1)
+        self.assertEqual(OrderItem.objects.get(order__user=guest).registry_item, line)
+        self.assertTrue(Notification.objects.filter(user=owner, message__contains="from your registry").exists())
+
+    def test_browse_reminders(self):
+        from datetime import timedelta
+        from django.core import mail
+        from django.utils import timezone
+        from .models import ProductView
+        from .shopper import send_browse_reminders
+        user = User.objects.create_user("bw", "bw@example.com", "x")
+        p = make_product(name="Looked At Lamp")
+        self.client.force_login(user)
+        self.client.get(reverse("product_detail", args=[p.id]))
+        view = ProductView.objects.get(user=user)
+        ProductView.objects.filter(pk=view.pk).update(viewed_at=timezone.now() - timedelta(days=1))
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(send_browse_reminders(), 1)
+        self.assertIn("Looked At Lamp", mail.outbox[0].alternatives[0][0])
+        self.assertEqual(send_browse_reminders(), 0)  # at most weekly
+
+    def test_address_lookup(self):
+        import json
+        import os
+        from unittest import mock
+        from .shopper_views import parse_components
+        parts = [{"longText": "10", "types": ["street_number"]}, {"longText": "Downing Street", "types": ["route"]},
+                 {"longText": "London", "types": ["postal_town"]}, {"longText": "SW1A 2AA", "types": ["postal_code"]},
+                 {"longText": "United Kingdom", "shortText": "GB", "types": ["country"]}]
+        self.assertEqual(parse_components(parts), {"address": "10 Downing Street", "city": "London", "state": "",
+                                                   "postal_code": "SW1A 2AA", "country": "GB"})
+        self.assertEqual(self.client.get(reverse("address_suggest"), {"q": "10 Down"}).json(), {"suggestions": []})  # no key
+        reply = mock.MagicMock()
+        reply.__enter__.return_value.read.return_value = json.dumps(
+            {"suggestions": [{"placePrediction": {"placeId": "ChIJabc123xyz", "text": {"text": "10 Downing St, London"}}}]}).encode()
+        with mock.patch.dict(os.environ, {"GOOGLE_MAPS_API_KEY": "AIza" + "x" * 35}), mock.patch("urllib.request.urlopen", return_value=reply) as op:
+            data = self.client.get(reverse("address_suggest"), {"q": "10 Down", "country": "GB"}).json()
+            sent = json.loads(op.call_args[0][0].data)
+        self.assertEqual(data["suggestions"][0]["id"], "ChIJabc123xyz")
+        self.assertEqual(sent["includedRegionCodes"], ["gb"])

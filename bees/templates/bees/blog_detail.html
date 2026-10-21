@@ -1,0 +1,29 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}{{ post.title }} — {{ brand.site_name }}{% endblock %}
+{% block meta_description %}{{ post.excerpt|default:post.body|truncatechars:155 }}{% endblock %}
+{% block og_type %}article{% endblock %}
+{% block og_title %}{{ post.title }}{% endblock %}
+{% block og_description %}{{ post.excerpt|default:post.body|truncatechars:155 }}{% endblock %}
+{% block og_image_tag %}{% if post.cover_url %}<meta property="og:image" content="{{ post.cover_url|abs_url }}">{% endif %}{% endblock %}
+{% block head_extra %}<link rel="alternate" type="application/rss+xml" title="{{ brand.site_name }} blog" href="{% url 'blog_rss' %}">{% endblock %}
+{% block content %}
+<article class="wrap page post">
+    <p class="small"><a class="link" href="{% url 'blog_list' %}">← Blog</a></p>
+    {% if not post.is_published %}<p class="badge">Draft - only staff can see this</p>{% endif %}
+    <h1>{{ post.title }}</h1>
+    <p class="muted">{% if post.published_at %}{{ post.published_at|date:"j F Y" }}{% endif %}</p>
+    {% if post.cover_url %}<img class="post-cover" src="{{ post.cover_url }}" alt="">{% endif %}
+    <div class="post-body">{{ body }}</div>
+    {% if products %}<section class="section"><div class="section-head"><h2>Products in this post</h2></div><div class="grid-products">{% for product in products %}{% include "bees/partials/product_card.html" %}{% endfor %}</div></section>{% endif %}
+    {% if more %}<section class="section"><div class="section-head"><h2>More from the blog</h2></div><ul class="post-more">{% for p in more %}<li><a class="link" href="{{ p.get_absolute_url }}">{{ p.title }}</a></li>{% endfor %}</ul></section>{% endif %}
+</article>
+<style>
+    .post h1 { font-size: clamp(1.7rem, 4vw, 2.5rem); margin: 8px 0 4px; overflow-wrap: anywhere; }
+    .post-cover { width: 100%; max-height: 460px; object-fit: cover; border-radius: var(--radius); margin: 12px 0 20px; }
+    .post-body { max-width: 72ch; font-size: 1.06rem; line-height: 1.7; overflow-wrap: anywhere; }
+    .post-body h2 { margin: 28px 0 8px; }
+    .post-more { padding-left: 18px; display: grid; gap: 6px; }
+</style>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"{{ post.title|escapejs }}","datePublished":"{{ post.published_at|date:'c' }}","dateModified":"{{ post.updated_at|date:'c' }}"{% if post.cover_url %},"image":"{{ post.cover_url|escapejs }}"{% endif %},"publisher":{"@type":"Organization","name":"{{ brand.site_name|escapejs }}"}}</script>
+{% endblock %}

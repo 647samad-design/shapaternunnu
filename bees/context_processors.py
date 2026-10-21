@@ -159,6 +159,18 @@ def brand(request):
         "nav_categories": category_top_level(),
         "footer_pages": footer_pages(),
         "photo_search": bool(getattr(dj_settings, "AI_API_KEY", "")),
+        "live_on": _live_on(),
         "demo_mode": getattr(dj_settings, "DEMO_MODE", False),
         "staging": getattr(dj_settings, "STAGING", False),
     }
+
+
+def _live_on():
+    """Is any live show running? Cached for a minute (shown in the menu)."""
+    from django.core.cache import cache
+    value = cache.get("live_on")
+    if value is None:
+        from .models import LiveShow
+        value = LiveShow.objects.filter(started_at__isnull=False, ended_at=None).exists()
+        cache.set("live_on", value, 60)
+    return value
