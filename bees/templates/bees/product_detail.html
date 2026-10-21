@@ -1,5 +1,5 @@
 {% extends "bees/base.html" %}
-{% load bees_extras %}
+{% load bees_extras static %}
 {% block title %}{% if product.seo_title %}{{ product.seo_title }}{% else %}{{ product.name }} — {{ brand.site_name }}{% endif %}{% endblock %}
 {% block meta_description %}{% if product.seo_description %}{{ product.seo_description }}{% else %}{{ product.name }} for {{ product.price|money }} at {{ brand.site_name }}.{% if product.discount_percent %} Save {{ product.discount_percent }}%.{% endif %} {{ product.description|truncatewords:20 }}{% endif %}{% endblock %}
 {% block og_type %}product{% endblock %}
@@ -97,6 +97,10 @@
     .rv-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
     .rv-filter a { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); text-decoration: none; font-weight: 700; font-size: .86rem; }
     .rv-filter a[aria-current] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+    .view-3d { margin-top: 10px; }
+    .viewer-3d { margin-top: 10px; aspect-ratio: 1; border-radius: var(--radius); overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); }
+    .viewer-3d model-viewer { width: 100%; height: 100%; --poster-color: transparent; }
+    .ar-btn { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); }
     .preorder-note { margin: 10px 0; font-size: .95rem; }
     .group-box { margin-top: 12px; padding: 12px 14px; border: 1.5px dashed var(--accent); border-radius: var(--radius-sm); display: grid; gap: 8px; }
     .group-box p { margin: 2px 0 0; }
@@ -213,6 +217,24 @@
                 {% endfor %}
                 {% if video %}<button type="button" class="thumb-video" aria-label="Play the product video" data-show-video>{% if video.kind == "youtube" %}<img src="https://i.ytimg.com/vi/{{ video.id }}/mqdefault.jpg" alt="" loading="lazy">{% endif %}<span aria-hidden="true">▶</span></button>{% endif %}
             </div>
+            {% endif %}
+            {% if product.model_3d_url %}
+            <button type="button" class="btn btn-secondary btn-sm view-3d" data-view-3d aria-expanded="false">🧊 View in 3D &amp; in your room</button>
+            <div class="viewer-3d" hidden data-viewer-3d>
+                <model-viewer src="{{ product.model_3d_url }}"{% if product.model_ios_url %} ios-src="{{ product.model_ios_url }}"{% endif %} ar ar-modes="webxr scene-viewer quick-look" camera-controls touch-action="pan-y" auto-rotate shadow-intensity="1" alt="3D model of {{ product.name }}" poster="{{ product.image_url }}">
+                    <button slot="ar-button" class="btn btn-primary btn-sm ar-btn">See it in your room</button>
+                </model-viewer>
+            </div>
+            <script>
+            (function () {
+                var btn = document.querySelector('[data-view-3d]'), box = document.querySelector('[data-viewer-3d]');
+                btn.addEventListener('click', function () {
+                    if (!customElements.get('model-viewer')) { var s = document.createElement('script'); s.type = 'module'; s.src = '{% static "bees/vendor/model-viewer-4.1.0.min.js" %}'; document.head.appendChild(s); }
+                    box.hidden = !box.hidden; btn.setAttribute('aria-expanded', String(!box.hidden));
+                    if (!box.hidden) box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                });
+            })();
+            </script>
             {% endif %}
         </div>
 

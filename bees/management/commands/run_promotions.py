@@ -14,4 +14,6 @@ class Command(BaseCommand):
         ended = close_auctions()
         from bees.shopper import settle_groups
         settle_groups()
+        from bees.ops import retry_due
+        retry_due()
         self.stdout.write(f"  sales checked, email campaigns continued, {ended} auction(s) ended")

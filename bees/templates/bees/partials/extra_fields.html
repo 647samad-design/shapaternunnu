@@ -1,10 +1,12 @@
-<details class="xf" {% if p.brand or p.specs or p.video_url or p.gtin %}open{% endif %}>
-    <summary><strong>Brand, barcode, specifications &amp; video</strong> <span class="muted small">(optional - helps shoppers filter and compare)</span></summary>
+<details class="xf" {% if p.brand or p.specs or p.video_url or p.gtin or p.model_3d_url %}open{% endif %}>
+    <summary><strong>Brand, barcode, specifications, video &amp; 3D</strong> <span class="muted small">(optional - helps shoppers filter and compare)</span></summary>
     <div class="xf-grid">
         <div class="field"><label for="pf_brand">Brand</label><input id="pf_brand" name="brand" maxlength="80" value="{{ p.brand|default:'' }}" placeholder="e.g. Nike, or your own brand"></div>
         <div class="field"><label for="pf_gtin">Barcode (EAN / UPC / ISBN)</label><input id="pf_gtin" name="gtin" maxlength="18" inputmode="numeric" value="{{ p.gtin|default:'' }}" placeholder="e.g. 5012345678900"><small class="muted">The number under the barcode. Google Shopping asks for it on branded products.</small></div>
         <div class="field"><label for="pf_mpn">Manufacturer part number</label><input id="pf_mpn" name="mpn" maxlength="70" value="{{ p.mpn|default:'' }}" placeholder="Optional, if there's no barcode"></div>
         <div class="field"><label for="pf_video">Video link</label><input id="pf_video" name="video_url" maxlength="300" value="{{ p.video_url|default:'' }}" placeholder="YouTube, Vimeo or https://….mp4"></div>
+        <div class="field"><label for="pf_3d">3D model (.glb)</label><input id="pf_3d" name="model_3d_url" maxlength="500" value="{{ p.model_3d_url|default:'' }}" placeholder="https://…/product.glb"><small class="muted">Shoppers can turn it around and place it in their room (AR). The file's host must allow other websites to load it (CORS).</small></div>
+        <div class="field"><label for="pf_usdz">3D model for iPhone (.usdz)</label><input id="pf_usdz" name="model_ios_url" maxlength="500" value="{{ p.model_ios_url|default:'' }}" placeholder="optional"></div>
         <div class="field xf-wide"><label for="pf_specs">Specifications</label><textarea id="pf_specs" name="specs" rows="4" placeholder="Material: 100% cotton&#10;Weight: 220 g&#10;Made in: Portugal">{{ p.specs|default:'' }}</textarea><small class="muted">One per line as <em>Name: value</em>. Shown as a table on the product page.</small></div>
     </div>
 </details>

@@ -675,6 +675,8 @@ def restock_item(item, quantity):
     if item.variant_id:
         ProductVariant.objects.filter(pk=item.variant_id).update(stock=F("stock") + quantity)
     Product.objects.filter(pk=item.product_id).update(stock=F("stock") + quantity)
+    from .ops import put_back
+    put_back(item, quantity)
     from .stock_alerts import notify_restocked
     notify_restocked(item.product_id, item.variant_id)
 

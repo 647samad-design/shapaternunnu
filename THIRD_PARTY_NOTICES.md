@@ -30,6 +30,7 @@ compatible releases under the same licences.
 | qrcode | 8.2 | BSD-3-Clause | https://github.com/lincolnloop/python-qrcode |
 | PyJWT (with cryptography) | 2.14 | MIT | https://github.com/jpadilla/pyjwt |
 | webauthn (py_webauthn, passkeys; uses cbor2 MIT, pyOpenSSL Apache-2.0, pyasn1 BSD-2-Clause) | 2.8 | BSD-3-Clause | https://github.com/duo-labs/py_webauthn |
+| @google/model-viewer (3D/AR product viewer, bundles three.js MIT; served from `bees/static/bees/vendor/`) | 4.1.0 | Apache-2.0 | https://github.com/google/model-viewer |
 | redis | 8.1 | MIT | https://github.com/redis/redis-py |
 | openpyxl | 3.1 | MIT | https://openpyxl.readthedocs.io/ |
 

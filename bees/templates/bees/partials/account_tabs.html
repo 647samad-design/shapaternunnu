@@ -5,6 +5,7 @@
     <a href="{% url 'my_quotes' %}" {% if tab == 'quotes' %}aria-current="page"{% endif %}>Quotes &amp; offers</a>
     <a href="{% url 'subscriptions' %}" {% if tab == 'subscriptions' %}aria-current="page"{% endif %}>Subscriptions</a>
     <a href="{% url 'vouchers' %}">Vouchers</a>
+    {% if brand.b2b_enabled %}<a href="{% url 'company_account' %}" {% if tab == 'company' %}aria-current="page"{% endif %}>Business account</a>{% endif %}
     <a href="{% url 'registries' %}" {% if tab == 'registries' %}aria-current="page"{% endif %}>Gift registries</a>
     {% if brand.referral_enabled %}<a href="{% url 'referrals' %}" {% if tab == 'referrals' %}aria-current="page"{% endif %}>{{ t.invite_friends }}</a>{% endif %}
     <a href="{% url 'account_security' %}" {% if tab == 'security' %}aria-current="page"{% endif %}>Password &amp; security</a>

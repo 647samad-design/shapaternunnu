@@ -57,6 +57,7 @@ class Command(BaseCommand):
             self._showcase(users, seller, products, reset=options["reset"])
             self._marketplace(users, seller, products, reset=options["reset"])
             self._shopper_pack(users, seller, products, reset=options["reset"])
+            self._ops_pack(users, seller, products)
         site = SiteSettings.load()
         site.setup_completed = True
         site.show_language_menu = True  # show off languages and currencies in the demo
@@ -230,6 +231,12 @@ class Command(BaseCommand):
         site.spin_enabled = True
         site.save(update_fields=["spin_enabled"])
         mug, tote, candle, kit, beanie = products
+        from django.templatetags.static import static
+        try:
+            model_url = static("bees/demo/mug.glb")
+        except ValueError:  # collectstatic hasn't run yet
+            model_url = "/static/bees/demo/mug.glb"
+        Product.objects.filter(pk=mug.pk).update(model_3d_url=model_url)
         Product.objects.filter(pk=kit.pk).update(group_size=2, group_percent=15)
         Product.objects.filter(pk=beanie.pk).update(preorder_ships_on=timezone.localdate() + timedelta(days=21))
         if reset or not LiveShow.objects.filter(seller_account=seller).exists():
@@ -254,6 +261,28 @@ class Command(BaseCommand):
                                               message="Thank you for celebrating our first home with us!")
             for product, wanted in ((mug, 4), (candle, 2), (tote, 1)):
                 RegistryItem.objects.create(registry=reg, product=product, wanted=wanted)
+
+    def _ops_pack(self, users, seller, products):
+        """A business account for the demo shopper and two stock locations
+        for the demo seller."""
+        from decimal import Decimal as D
+        from bees.models import Company, CompanyMember, StockLevel, Warehouse
+        from bees.ops import sync_total
+        shopper = users["shopper"]
+        if not CompanyMember.objects.filter(user=shopper).exists():
+            company = Company.objects.create(name="Sam's Design Studio Ltd", billing_email=shopper.email, tax_id="GB123456789",
+                                             country="GB", status="approved", payment_terms=30, credit_limit=D("2000"))
+            CompanyMember.objects.create(company=company, user=shopper, role="admin")
+        if not Warehouse.objects.filter(seller_account=seller).exists():
+            lisbon = Warehouse.objects.create(seller_account=seller, name="Lisbon studio", country="PT", city="Lisbon", priority=1)
+            berlin = Warehouse.objects.create(seller_account=seller, name="Berlin warehouse", country="DE", city="Berlin", priority=2)
+            mug, tote, candle, kit, beanie = products
+            for product, a, b in ((mug, 25, 15), (candle, 10, 20)):
+                if product.has_variants:
+                    continue
+                StockLevel.objects.create(warehouse=lisbon, product=product, quantity=a)
+                StockLevel.objects.create(warehouse=berlin, product=product, quantity=b)
+                sync_total(product.pk)
 
     def _orders(self, shopper, products):
         Order.objects.filter(user=shopper).delete()

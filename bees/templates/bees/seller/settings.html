@@ -61,6 +61,16 @@
                 <dt>Commission</dt><dd>{{ seller.effective_commission_rate|floatformat:"-1" }}%</dd>
             </dl>
         </section>
+        {% if identity_on %}
+        <section class="panel">
+            <h2>ID check {% if seller.identity_status == "verified" or seller.verified_at %}<span class="pill ok">Verified</span>{% endif %}</h2>
+            {% if seller.identity_status == "verified" %}<p class="muted small">Your ID was checked by Stripe. Shoppers see the Verified badge on your store.</p>
+            {% else %}
+            <p class="muted small">{% if seller.identity_status == "pending" %}We're waiting for the result - it usually takes a few minutes.{% elif seller.identity_status == "failed" %}The last check didn't go through. You can try again.{% else %}Verify with your ID document and a selfie (about 2 minutes). Verified sellers get a badge that builds trust.{% endif %}</p>
+            <form method="post" action="{% url 'seller_identity_start' %}">{% csrf_token %}<button class="btn btn-secondary btn-sm" type="submit">{% if seller.identity_status == "failed" %}Try again{% else %}Verify my ID{% endif %}</button></form>
+            {% endif %}
+        </section>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

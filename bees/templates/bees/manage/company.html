@@ -1,0 +1,33 @@
+{% extends "bees/manage/base.html" %}
+{% load bees_extras %}
+{% block page_title %}{{ company.name }}{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><a class="link small" href="{% url 'manage_companies' %}">← Business accounts</a><h1 style="margin-top:6px;">{{ company.name }}</h1><p>{{ company.billing_email }}{% if company.tax_id %} · {{ company.tax_id }}{% endif %}{% if company.country %} · {{ company.country }}{% endif %}</p></div></div>
+<div class="co-grid">
+<section class="panel">
+    <h2>Account</h2>
+    <form method="post" class="co-edit">{% csrf_token %}<input type="hidden" name="action" value="save">
+        <div class="field"><label for="ce-s">Status</label><select id="ce-s" name="status">{% for v, l in statuses %}<option value="{{ v }}"{% if company.status == v %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="ce-t">Payment terms</label><select id="ce-t" name="payment_terms">{% for v, l in terms %}<option value="{{ v }}"{% if company.payment_terms == v %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="ce-l">Credit limit</label><input id="ce-l" name="credit_limit" inputmode="decimal" value="{{ company.credit_limit }}"><small class="muted">Most they can owe at once. Unpaid now: {{ unpaid|money }}.</small></div>
+        <label class="check"><input type="checkbox" name="tax_exempt" value="1"{% if company.tax_exempt %} checked{% endif %}> <span>Tax-exempt (checked their certificate){% if company.tax_exempt_requested %} - <em>they asked: {{ company.exemption_note|default:"no details" }}</em>{% endif %}</span></label>
+        <div class="field"><label for="ce-n">Note (only staff see it)</label><input id="ce-n" name="admin_note" maxlength="300" value="{{ company.admin_note }}"></div>
+        <button class="btn btn-primary" type="submit">Save</button>
+    </form>
+</section>
+<section class="panel">
+    <h2>Buyers</h2>
+    <ul class="plain-list">{% for m in members %}<li>{{ m.user.get_full_name|default:m.user.username }} · {{ m.user.email }} <span class="muted small">({{ m.get_role_display }})</span></li>{% endfor %}</ul>
+    {% if company.billing_address %}<h3 style="margin-top:14px;">Billing address</h3><p class="small">{{ company.billing_address|linebreaksbr }}</p>{% endif %}
+</section>
+</div>
+<section class="panel">
+    <h2>Orders</h2>
+    {% if orders %}<div class="table-scroll"><table class="table"><thead><tr><th>Order</th><th>PO</th><th class="num">Total</th><th>Payment</th><th></th></tr></thead><tbody>
+    {% for o in orders %}<tr><td><a class="rowlink" href="{% url 'manage_order' o.id %}">#{{ o.id }}</a> <span class="muted small">{{ o.created_at|date:"j M Y" }}</span></td><td>{{ o.po_number|default:"-" }}</td><td class="num">{{ o.total|money }}</td>
+        <td>{% if o.payment_status == "invoiced" %}Invoice due {{ o.payment_due|date:"j M Y" }}{% else %}{{ o.get_payment_status_display }}{% endif %}</td>
+        <td>{% if o.payment_status == "invoiced" %}<form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="action" value="paid"><input type="hidden" name="order" value="{{ o.id }}"><button class="btn btn-secondary btn-sm" type="submit">Mark paid</button></form>{% endif %}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="muted">No orders yet.</p>{% endif %}
+</section>
+<style>.co-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; } .co-edit { display: grid; gap: 12px; } .plain-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; } @media (max-width: 860px) { .co-grid { grid-template-columns: minmax(0, 1fr); } }</style>
+{% endblock %}

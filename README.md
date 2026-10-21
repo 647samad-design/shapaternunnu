@@ -182,6 +182,28 @@ Either side can report a conversation; staff review them at /manage/messages/.
   Keys & passwords. Requests go through the store's server, so the key stays private.
 - **Filters:** material (from product specifications) and condition, next to brand, size and colour.
 
+## Business accounts, stock locations, integrations
+
+- **Business accounts (B2B):** companies apply under Account > Business account. In Admin > Business
+  accounts you approve them, set invoice terms (15/30/60 days), a credit limit and tax exemption.
+  Buyers add PO numbers and can choose **Pay by invoice**; invoices show the PO and due date, reminders go
+  out 3 days before and weekly when overdue (`invoice_reminders`), and seller earnings wait until the
+  invoice is marked paid.
+- **Stock locations:** Seller Center / Admin > Stock locations. Stock per warehouse or shop; each order line
+  ships from the location in the buyer's country (else by priority) and the seller sees "Ship from".
+- **Integrations:** Admin > Integrations sends signed webhooks (order created/paid/shipped/delivered/
+  cancelled, product changed, new review, new customer) to Zapier, Make, n8n or any app, with retries;
+  and exports sales as invoices for **Xero** or **QuickBooks Online** (CSV).
+- **Customers change their order:** change the delivery address until it ships, or cancel one item of a
+  card/PayPal order before it's packed (refunded automatically, put back in stock, seller told).
+- **AI help chat:** questions the quick answers don't cover are answered from the store's rules and the
+  customer's own orders (needs `ANTHROPIC_API_KEY`); anything unclear goes to the team.
+- **3D & AR:** add a `.glb` link (and optional `.usdz` for iPhone) to a product; shoppers rotate it and
+  place it in their room. The viewer is served from the store itself.
+- **Seller ID checks:** with Stripe Identity turned on in Store settings, sellers verify their ID and a
+  selfie; verified sellers get the Verified badge automatically (Stripe webhook events
+  `identity.verification_session.*`).
+
 ## Demo copy for clients
 
 On a separate copy of the store (never your live store):

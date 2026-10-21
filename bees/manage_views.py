@@ -1462,6 +1462,8 @@ class SiteSettingsForm(forms.ModelForm):
          ["auto_approve_trusted", "daily_digest", "message_channel"]),
         ("Sales channels", "Product feeds for Google, Facebook, Instagram and TikTok are always on - find the links under Sales channels. Here you choose whether AI shopping assistants may build checkouts.",
          ["ai_agents"]),
+        ("Help, business & sellers", "AI answers in the help chat use only your store's rules and the customer's own orders. Business accounts let companies buy with PO numbers, tax exemption and invoices. ID checks verify sellers with Stripe Identity.",
+         ["support_ai", "b2b_enabled", "identity_checks"]),
         ("Spin & win and reminders", "A daily prize wheel brings shoppers back (prizes: '10% off', 'Free shipping', '50 points' or 'Try again', each with a chance). 'Still looking?' emails go to signed-in shoppers who viewed products without buying.",
          ["spin_enabled", "spin_prizes", "browse_reminders"]),
         ("Reviews", "Reviews sell. A few days after delivery customers get an email asking how it went; photo reviews earn reward points.",

@@ -90,6 +90,8 @@
             <h2>Payment</h2>
             <dl class="kv">
                 <dt>Method</dt><dd>{{ order.get_payment_method_display }}</dd>
+                {% if order.company %}<dt>Business</dt><dd><a class="link" href="{% url 'manage_company' order.company_id %}">{{ order.company.name }}</a>{% if order.po_number %} · PO {{ order.po_number }}{% endif %}</dd>{% endif %}
+                {% if order.payment_method == "invoice" %}<dt>Invoice due</dt><dd>{{ order.payment_due|date:"j M Y" }}{% if order.invoice_paid_at %} · paid {{ order.invoice_paid_at|date:"j M Y" }}{% endif %}</dd>{% endif %}
                 <dt>Status</dt><dd>{{ order.get_payment_status_display }}</dd>
                 {% if order.card_label %}<dt>Card</dt><dd>{{ order.card_label }}</dd>{% endif %}
                 {% if order.refunded_at %}<dt>Refunded</dt><dd>{{ order.refunded_at|date:"M j, Y H:i" }}{% if order.refund_id %} <span class="muted small">({{ order.refund_id }})</span>{% endif %}</dd>{% endif %}

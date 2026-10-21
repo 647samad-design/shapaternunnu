@@ -1,0 +1,12 @@
+{% extends "bees/emails/_base_email.html" %}
+{% load bees_extras %}
+{% block email_body %}{% site_brand as b %}
+    <h1 style="margin:0 0 8px;font-size:24px;">{% if days < 0 %}Your invoice is overdue{% else %}Your invoice is due soon{% endif %}</h1>
+    <p style="margin:0 0 16px;color:#56606B;">Invoice for order #{{ order.id }}{% if order.po_number %} (PO {{ order.po_number }}){% endif %}{% if order.company %} - {{ order.company.name }}{% endif %}.</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+        <tr><td style="padding:4px 16px 4px 0;color:#56606B;">Amount</td><td style="padding:4px 0;font-weight:bold;">{{ order.total|money }}</td></tr>
+        <tr><td style="padding:4px 16px 4px 0;color:#56606B;">Due date</td><td style="padding:4px 0;font-weight:bold;">{{ order.payment_due|date:"j F Y" }}{% if days < 0 %} ({{ days|stringformat:"d"|slice:"1:" }} days ago){% endif %}</td></tr>
+    </table>
+    <a href="{{ invoice_url }}" style="display:inline-block;background:{{ b.primary_color }};color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:8px;font-weight:bold;">View invoice</a>
+    <p style="margin:24px 0 0;color:#56606B;font-size:13px;">Already paid? Thank you - please reply with the payment reference so we can match it.</p>
+{% endblock %}

@@ -253,6 +253,8 @@ class Product(models.Model):
                                               help_text="Ask buyers for custom text, e.g. 'Name to engrave (max 12 letters)'. Empty = off.")
     personalization_required = models.BooleanField(default=False)
     personalization_max = models.PositiveSmallIntegerField(default=60)
+    model_3d_url = models.CharField("3D model (.glb)", max_length=500, blank=True, help_text="https:// link to a .glb file. Shoppers can turn the product around and see it in their room (AR).")
+    model_ios_url = models.CharField("3D model for iPhone (.usdz, optional)", max_length=500, blank=True)
     preorder_ships_on = models.DateField("Pre-order: ships on", null=True, blank=True, help_text="Sell before it's in stock. Shoppers see 'Pre-order - ships on' this date. Empty = normal product.")
     group_size = models.PositiveSmallIntegerField("Group buy: people", default=0, help_text="2-10 people buying within 24 hours each get money back. 0 = off.")
     group_percent = models.PositiveSmallIntegerField("Group buy: % back", default=0, help_text="Store credit each group member gets back once the group is full and the item is delivered.")
@@ -508,6 +510,7 @@ class Order(models.Model):
         ("card", "Card (Stripe)"),
         ("paypal", "PayPal"),
         ("cod", "Cash on delivery"),
+        ("invoice", "Invoice (business account)"),
     ]
     payment_method = models.CharField(max_length=30, choices=PAYMENT_METHOD_CHOICES, default="card")
     PAYMENT_STATUS_CHOICES = [
@@ -516,6 +519,7 @@ class Order(models.Model):
         ("paid", "Paid"),
         ("failed", "Failed"),
         ("refunded", "Refunded"),
+        ("invoiced", "Invoice - payment due"),
     ]
     payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default="not_applicable", db_index=True)
     stripe_session_id = models.CharField(max_length=255, blank=True, db_index=True)
@@ -543,6 +547,11 @@ class Order(models.Model):
     tax_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     tax_included = models.BooleanField(default=False, help_text="Prices already included this tax (shown, not added).")
     customer_tax_id = models.CharField("Customer VAT / tax number", max_length=40, blank=True)
+    company = models.ForeignKey("Company", null=True, blank=True, on_delete=models.SET_NULL, related_name="orders")
+    po_number = models.CharField("PO number", max_length=40, blank=True)
+    payment_due = models.DateField(null=True, blank=True, help_text="Invoice orders: pay by this date.")
+    invoice_paid_at = models.DateTimeField(null=True, blank=True)
+    invoice_reminded_at = models.DateTimeField(null=True, blank=True)
     review_request_sent = models.BooleanField(default=False, help_text="The 'how was it? leave a review' email went out.")
     affiliate_code = models.CharField(max_length=16, blank=True, db_index=True, help_text="Code of the affiliate whose link brought this order.")
     affiliate_paid = models.BooleanField(default=False, editable=False)
@@ -597,6 +606,11 @@ class Order(models.Model):
     @property
     def is_cancellable(self):
         return self.status in self.CANCELLABLE_STATUSES
+
+    @property
+    def address_editable(self):
+        from .ops_views import address_locked
+        return not address_locked(self)
 
     @property
     def subtotal(self):
@@ -901,6 +915,8 @@ class OrderItem(models.Model):
     shipped_at = models.DateTimeField(null=True, blank=True)
     downloads = models.PositiveSmallIntegerField(default=0, editable=False)
     personalization = models.CharField(max_length=300, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True, help_text="The customer cancelled this item before it shipped.")
+    warehouse = models.ForeignKey("Warehouse", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     registry_item = models.ForeignKey("RegistryItem", null=True, blank=True, on_delete=models.SET_NULL, related_name="order_items")
     quote = models.ForeignKey("QuoteRequest", null=True, blank=True, on_delete=models.SET_NULL, related_name="order_items")
 
@@ -916,6 +932,11 @@ class OrderItem(models.Model):
     @property
     def subtotal(self):
         return self.price * self.quantity
+
+    @property
+    def customer_can_cancel(self):
+        from .ops_views import cancel_item_reason
+        return not cancel_item_reason(self)
 
     @property
     def received_at(self):
@@ -1282,6 +1303,8 @@ class SellerAccount(models.Model):
     # Badges: "Verified" is given by staff after checking ID / business
     # papers; "Top seller" is worked out every day from sales and ratings.
     verified_at = models.DateTimeField(null=True, blank=True)
+    identity_status = models.CharField(max_length=16, blank=True, help_text="Stripe Identity check: pending, verified or failed.")
+    identity_session = models.CharField(max_length=80, blank=True)
     top_seller = models.BooleanField(default=False, db_index=True)
 
     def save(self, *args, **kwargs):
@@ -1744,6 +1767,9 @@ class SiteSettings(models.Model):
                                        help_text="Every morning: the owner gets yesterday's sales and to-dos, sellers get their orders to ship and questions to answer.")
     affiliate_percent = models.PositiveSmallIntegerField("Affiliate commission (%)", default=0,
                                                          help_text="Anyone who shares a link with their code earns this % of delivered orders as store credit. 0 = off.")
+    support_ai = models.BooleanField("AI answers in the help chat", default=True, help_text="Questions the quick answers don't cover are answered by AI from your store's rules and the customer's own orders. Needs the AI key; anything unclear goes to your team.")
+    b2b_enabled = models.BooleanField("Business accounts", default=True, help_text="Companies can apply for a business account: several buyers, PO numbers, tax-exempt orders and pay-by-invoice.")
+    identity_checks = models.BooleanField("ID check for sellers (Stripe Identity)", default=False, help_text="Sellers verify their ID document and a selfie with Stripe. Verified sellers get the Verified badge automatically. Stripe charges per check.")
     spin_enabled = models.BooleanField("Spin the wheel", default=False, help_text="Signed-in shoppers spin once a day for a coupon or points.")
     spin_prizes = models.TextField("Wheel prizes", default="5% off:35\n10% off:25\n50 points:20\nFree shipping:12\n20% off:5\nTry again:3",
                                    help_text="One per line as 'Prize:chance'. Prizes: '10% off', 'Free shipping', '50 points' or 'Try again'.")
@@ -2775,3 +2801,108 @@ class ProductView(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["user", "product"], name="one_view_row")]
+
+
+class Company(models.Model):
+    """A business account: several buyers, PO numbers, tax-exempt orders
+    and (when approved) paying by invoice."""
+    STATUS = [("pending", "Waiting for review"), ("approved", "Approved"), ("rejected", "Rejected")]
+    TERMS = [(0, "Pay at checkout"), (15, "Invoice - 15 days"), (30, "Invoice - 30 days"), (60, "Invoice - 60 days")]
+    name = models.CharField(max_length=150)
+    tax_id = models.CharField("VAT / tax number", max_length=40, blank=True)
+    country = models.CharField(max_length=2, blank=True)
+    billing_email = models.EmailField()
+    billing_address = models.TextField(blank=True, max_length=500)
+    tax_exempt_requested = models.BooleanField(default=False)
+    exemption_note = models.CharField(max_length=300, blank=True, help_text="Certificate number or reason.")
+    tax_exempt = models.BooleanField(default=False, help_text="Set by the store after checking the certificate.")
+    payment_terms = models.PositiveSmallIntegerField(choices=TERMS, default=0)
+    credit_limit = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Most that can be unpaid at once.")
+    status = models.CharField(max_length=10, choices=STATUS, default="pending", db_index=True)
+    admin_note = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name_plural = "companies"
+
+    def __str__(self):
+        return self.name
+
+    def unpaid_total(self):
+        orders = self.orders.filter(payment_status="invoiced").exclude(status="cancelled")
+        return sum((o.total for o in orders), 0)
+
+    def invoice_room(self):
+        """How much more can be bought on invoice right now."""
+        if self.status != "approved" or not self.payment_terms:
+            return 0
+        return max(self.credit_limit - self.unpaid_total(), 0)
+
+
+class CompanyMember(models.Model):
+    ROLES = [("admin", "Admin - manages buyers"), ("buyer", "Buyer")]
+    company = models.ForeignKey(Company, related_name="members", on_delete=models.CASCADE)
+    user = models.OneToOneField("auth.User", related_name="company_membership", on_delete=models.CASCADE)
+    role = models.CharField(max_length=10, choices=ROLES, default="buyer")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class Warehouse(models.Model):
+    """A stock location (warehouse, shop or supplier) for the store or a seller."""
+    seller_account = models.ForeignKey("SellerAccount", null=True, blank=True, on_delete=models.CASCADE, related_name="warehouses")
+    name = models.CharField(max_length=80)
+    country = models.CharField(max_length=2)
+    city = models.CharField(max_length=80, blank=True)
+    address = models.CharField(max_length=255, blank=True)
+    priority = models.PositiveSmallIntegerField(default=1, help_text="Lower ships first when several can.")
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["priority", "id"]
+
+    def __str__(self):
+        return f"{self.name} ({self.country})"
+
+
+class StockLevel(models.Model):
+    warehouse = models.ForeignKey(Warehouse, related_name="levels", on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, related_name="stock_levels", on_delete=models.CASCADE)
+    variant = models.ForeignKey("ProductVariant", null=True, blank=True, related_name="stock_levels", on_delete=models.CASCADE)
+    quantity = models.IntegerField(default=0)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["warehouse", "product", "variant"], name="one_stock_level")]
+
+
+class WebhookEndpoint(models.Model):
+    """Sends store events to another app (Zapier, Make, n8n, your ERP...)."""
+    EVENTS = [("order.created", "New order"), ("order.paid", "Order paid"), ("order.shipped", "Order shipped"),
+              ("order.delivered", "Order delivered"), ("order.cancelled", "Order cancelled"), ("product.updated", "Product added or changed"),
+              ("review.created", "New review"), ("customer.created", "New customer")]
+    url = models.URLField(max_length=500)
+    events = models.JSONField(default=list)
+    secret = models.CharField(max_length=64)
+    active = models.BooleanField(default=True)
+    failures = models.PositiveIntegerField(default=0)
+    last_status = models.CharField(max_length=120, blank=True)
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.url
+
+
+class WebhookDelivery(models.Model):
+    endpoint = models.ForeignKey(WebhookEndpoint, related_name="deliveries", on_delete=models.CASCADE)
+    event = models.CharField(max_length=40)
+    payload = models.JSONField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    status_code = models.PositiveSmallIntegerField(null=True, blank=True)
+    error = models.CharField(max_length=200, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    next_try_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-id"]

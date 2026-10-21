@@ -25,6 +25,7 @@ from bees import campaigns as camp
 from bees import webpush
 from bees import agents, feeds, round5_views as r5
 from bees import shopper_views as shv
+from bees import ops_views as opv
 from bees import reports_listing
 from bees.sitemaps import ProductSitemap, CategorySitemap, SellerSitemap, StaticViewSitemap, BlogSitemap
 from bees.ratelimit import ratelimit
@@ -84,6 +85,16 @@ urlpatterns = [
     path('registry/item/<int:item_id>/buy/', shv.registry_buy, name='registry_buy'),
     path('api/address/suggest/', shv.address_suggest, name='address_suggest'),
     path('api/address/details/', shv.address_details, name='address_details'),
+    path('order/<int:pk>/address/', opv.change_address, name='change_address'),
+    path('order/item/<int:item_id>/cancel/', opv.cancel_item, name='cancel_item'),
+    path('account/business/', opv.company_account, name='company_account'),
+    path('manage/companies/', mv.staff_required(opv.manage_companies), name='manage_companies'),
+    path('manage/companies/<int:pk>/', mv.staff_required(opv.manage_company), name='manage_company'),
+    path('manage/locations/', mv.staff_required(opv.manage_locations), name='manage_locations'),
+    path('seller/locations/', sv.seller_required()(opv.seller_locations), name='seller_locations'),
+    path('manage/integrations/', mv.staff_required(opv.manage_integrations), name='manage_integrations'),
+    path('manage/integrations/accounting.csv', mv.staff_required(opv.accounting_export), name='accounting_export'),
+    path('seller/identity/', sv.seller_required()(opv.seller_identity_start), name='seller_identity_start'),
     path('robots.txt', TemplateView.as_view(template_name="robots.txt", content_type="text/plain"), name='robots'),
     path('', views.home, name='home'),
     path('search/', views.search_products, name='search_products'),
