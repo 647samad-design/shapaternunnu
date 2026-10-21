@@ -877,7 +877,8 @@ def system_check(request):
         checks.append({"group": group, "name": name, "level": level or ("ok" if ok else "bad"), "detail": detail})
 
     # Database
-    db = dj.DATABASES["default"]
+    from django.db import connections as _conns
+    db = _conns["default"].settings_dict  # the current store's database in multi-store mode
     engine = "SQLite file on this server" if db["ENGINE"].endswith("sqlite3") else "PostgreSQL (Supabase)" if "postgres" in db["ENGINE"] else db["ENGINE"]
     try:
         executor = MigrationExecutor(connection)

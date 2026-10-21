@@ -30,6 +30,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from .ratelimit import ratelimit
+from .multistore import store_settings  # per-store values in multi-store mode
 
 UCP_VERSION = "2026-04-08"
 SPEC = f"https://ucp.dev/{UCP_VERSION}"
@@ -47,7 +48,7 @@ def _enabled():
 
 
 def _currency():
-    return settings.STORE_CURRENCY.upper()
+    return store_settings.STORE_CURRENCY.upper()
 
 
 def minor(amount, currency=None):

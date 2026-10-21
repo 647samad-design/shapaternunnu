@@ -47,7 +47,8 @@ def b64u_decode(text):
 
 
 def _env(name):
-    return os.environ.get(name, "").strip()
+    from .multistore import env as _store_env
+    return _store_env(name)
 
 
 def is_configured():

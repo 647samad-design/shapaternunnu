@@ -6,6 +6,7 @@ import json
 import logging
 
 from django.conf import settings
+from .multistore import store_settings  # per-store values in multi-store mode
 
 logger = logging.getLogger(__name__)
 EXAMPLES = ["A gift for a 10 year old who likes drawing, under 30", "Something cosy for winter",
@@ -16,7 +17,7 @@ def _plan(question):
     """{"query": search words, "max": price or None} - asked to Claude when
     available, otherwise the question itself."""
     from .ai import _call_claude, parse_search
-    if getattr(settings, "AI_API_KEY", ""):
+    if getattr(store_settings, "AI_API_KEY", ""):
         try:
             text = _call_claude(
                 "A shopper asks an online store's assistant: \"" + question.replace('"', "'") + "\"\n"
@@ -41,7 +42,7 @@ def answer(question, request):
             pass
     products = list(with_ratings(qs.filter(stock__gt=0))[:6])
     text = ""
-    if products and getattr(settings, "AI_API_KEY", ""):
+    if products and getattr(store_settings, "AI_API_KEY", ""):
         from .ai import _call_claude
         lines = "\n".join(f"- {p.name} ({p.price}): {(p.description or '')[:160]}" for p in products)
         try:

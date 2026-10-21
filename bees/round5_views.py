@@ -17,6 +17,7 @@ from django.views.decorators.http import require_POST
 
 from .manage_views import _render, staff_required
 from .ratelimit import ratelimit
+from .multistore import store_settings  # per-store values in multi-store mode
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,7 @@ LANG_NAMES = {"en": "English", "ur": "Urdu (Urdu script)", "roman": "Roman Urdu 
 
 def translate_text(text, lang):
     """Translates a chat message with Claude. '' on any problem."""
-    if not getattr(settings, "AI_API_KEY", ""):
+    if not getattr(store_settings, "AI_API_KEY", ""):
         return ""
     target = LANG_NAMES.get(lang, "English")
     prompt = (f"Translate this message from an online shop chat into {target}. Keep the meaning, tone, numbers, "
@@ -194,7 +195,7 @@ def translate_text(text, lang):
     body = json.dumps({"model": settings.AI_MODEL, "max_tokens": 800,
                        "messages": [{"role": "user", "content": prompt}]}).encode()
     req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST", headers={
-        "x-api-key": settings.AI_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+        "x-api-key": store_settings.AI_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             out = json.loads(resp.read().decode())
@@ -244,5 +245,5 @@ def sales_channels(request):
         "ucp_url": request.build_absolute_uri(reverse("ucp_profile")),
         "llms_url": request.build_absolute_uri(reverse("llms_txt")),
         "agent_count": agents.count(), "agent_opened": agents.exclude(opened_at=None).count(),
-        "ai_on": bool(getattr(settings, "AI_API_KEY", "")),
+        "ai_on": bool(getattr(store_settings, "AI_API_KEY", "")),
     })

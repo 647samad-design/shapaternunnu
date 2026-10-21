@@ -26,6 +26,7 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import strip_tags
+from .multistore import store_settings  # per-store values in multi-store mode
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ SUBJECTS = {
 
 def site_url():
     """Public base URL for links in emails sent outside a request."""
-    configured = getattr(settings, "SITE_URL", "")
+    configured = getattr(store_settings, "SITE_URL", "")
     if configured:
         return configured.rstrip("/")
     for host in settings.ALLOWED_HOSTS:

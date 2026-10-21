@@ -15,3 +15,6 @@ db.sqlite3.before-restore
 .env.bak-*
 .env.tmp*
 .cache/
+
+# Multi-store mode: each store's database, keys (.env) and backups
+/stores/

@@ -22,6 +22,7 @@ from django.conf import settings
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
+from .multistore import store_settings  # per-store values in multi-store mode
 
 logger = logging.getLogger(__name__)
 PAYPAL_FAILED = {"FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "DENIED", "CANCELED"}
@@ -151,7 +152,7 @@ def _tell_seller(payout):
 
 def _send_paypal(seller, payout):
     from . import paypal
-    currency = settings.STORE_CURRENCY.upper()
+    currency = store_settings.STORE_CURRENCY.upper()
     body = {
         "sender_batch_header": {
             "sender_batch_id": f"lumen-payout-{payout.id}",
@@ -220,7 +221,7 @@ def refresh_paypal(payout):
 def _send_stripe(seller, payout):
     from . import payments
     stripe = payments._stripe()
-    currency = settings.STORE_CURRENCY.lower()
+    currency = store_settings.STORE_CURRENCY.lower()
     try:
         transfer = stripe.Transfer.create(
             amount=payments.to_cents(payout.amount, currency), currency=currency, destination=seller.stripe_account_id,

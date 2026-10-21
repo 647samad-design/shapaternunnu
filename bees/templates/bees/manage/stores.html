@@ -1,0 +1,24 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Stores{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Stores</h1><p>Your clients' stores on this installation. Each has its own address, database, keys and team. Add one with <code>python manage.py store_create</code>; pause one if a client stops paying.</p></div></div>
+<section class="panel">
+    {% if rows %}<div class="table-scroll"><table class="table"><thead><tr><th>Store</th><th>Address</th><th class="num">Products</th><th class="num">Orders</th><th class="num">Last 30 days</th><th>Status</th><th></th></tr></thead><tbody>
+    {% for r in rows %}<tr><td><strong>{{ r.store.name }}</strong><br><span class="muted small">{{ r.store.slug }}{% if r.store.created %} · since {{ r.store.created|slice:":10" }}{% endif %}</span></td>
+        <td class="small">{% for h in r.store.hosts %}<a class="link" href="https://{{ h }}/" target="_blank" rel="noopener">{{ h }}</a>{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+        {% if r.error %}<td colspan="3" class="muted small">Database problem: {{ r.error }}</td>{% else %}<td class="num">{{ r.products }}</td><td class="num">{{ r.orders }}</td><td class="num">{{ r.recent }}</td>{% endif %}
+        <td>{% if r.store.active %}<span class="pill ok">Live</span>{% else %}<span class="pill bad">Paused</span>{% endif %}</td>
+        <td><form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="slug" value="{{ r.store.slug }}">{% if r.store.active %}<button class="btn btn-ghost btn-sm" name="action" value="pause">Pause</button>{% else %}<button class="btn btn-secondary btn-sm" name="action" value="resume">Resume</button>{% endif %}</form></td></tr>{% endfor %}
+    </tbody></table></div>
+    {% else %}<p class="muted">No client stores yet.</p>{% endif %}
+</section>
+<section class="panel">
+    <h2>Add a store</h2>
+    <ol class="small" style="display:grid;gap:6px;padding-left:18px;margin:0;">
+        <li>Point the client's domain (e.g. <code>shop.client.com</code>) at this server.</li>
+        <li>Run <code>python manage.py store_create client --host shop.client.com --name "Client Shop" --owner-email owner@client.com</code> (add <code>--currency EUR</code>, <code>--database postgres://…</code> or <code>--demo</code> if needed).</li>
+        <li>Reload the web app. The owner signs in with the password shown, runs the setup wizard and adds their own payment and email keys.</li>
+        <li>Scheduled jobs: use <code>python manage.py for_each_store daily_tasks</code> (and <code>for_each_store run_promotions</code>) instead of the single-store commands; after updates run <code>for_each_store migrate</code>.</li>
+    </ol>
+</section>
+{% endblock %}

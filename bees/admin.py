@@ -29,6 +29,7 @@ from django.utils.html import format_html
 
 from . import payments
 from .templatetags.bees_extras import money
+from .multistore import store_settings  # per-store values in multi-store mode
 
 admin.site.index_title = "Database admin"
 _original_each_context = admin.site.each_context
@@ -318,7 +319,7 @@ class NewsletterSubscriberAdmin(admin.ModelAdmin):
             sent = 0
             for email in recipients:
                 try:
-                    send_mail(subject, body, dj_settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
+                    send_mail(subject, body, store_settings.DEFAULT_FROM_EMAIL, [email], fail_silently=False)
                     sent += 1
                 except Exception:
                     pass

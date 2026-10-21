@@ -1703,7 +1703,7 @@ class ShippingZone(models.Model):
         return self.fee + (self.per_item_fee or 0) * extra
 
 
-_SETTINGS_MEMO = {"obj": None, "until": 0.0}
+_SETTINGS_MEMO = {}  # {store slug: (settings, valid until)} - one entry per store in multi-store mode
 
 
 class SiteSettings(models.Model):
@@ -1859,21 +1859,26 @@ class SiteSettings(models.Model):
         minute, and cleared whenever they're saved."""
         import time
         from django.core.cache import cache
-        memo = _SETTINGS_MEMO.get("obj")
-        if memo is not None and _SETTINGS_MEMO["until"] > time.monotonic():
+        from .multistore import current
+        store = current()
+        slug = store.slug if store else ""
+        memo, until = _SETTINGS_MEMO.get(slug, (None, 0.0))
+        if memo is not None and until > time.monotonic():
             return memo
         obj = cache.get(cls.CACHE_KEY)
         if obj is None:
             obj, _ = cls.objects.get_or_create(pk=1)
             cache.set(cls.CACHE_KEY, obj, 60)
-        _SETTINGS_MEMO.update(obj=obj, until=time.monotonic() + 5)
+        _SETTINGS_MEMO[slug] = (obj, time.monotonic() + 5)
         return obj
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         from django.core.cache import cache
         cache.delete(self.CACHE_KEY)
-        _SETTINGS_MEMO.update(obj=None, until=0.0)
+        from .multistore import current
+        store = current()
+        _SETTINGS_MEMO.pop(store.slug if store else "", None)
 
     @property
     def logo(self):

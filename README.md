@@ -204,6 +204,36 @@ Either side can report a conversation; staff review them at /manage/messages/.
   selfie; verified sellers get the Verified badge automatically (Stripe webhook events
   `identity.verification_session.*`).
 
+## Multi-store mode (run many client stores from one installation)
+
+Sell the platform as a service: each client gets their own store at their own address, with its own
+database, team, sellers, customers, orders, settings, uploaded files, backups and keys (Stripe, PayPal,
+email, Twilio...). Nothing is shared between stores. Off by default; a normal install is unchanged.
+
+```bash
+# 1. In the main .env
+MULTISTORE=True
+# 2. Add a client store (its own SQLite file, or --database postgres://... for an empty PostgreSQL database)
+python manage.py store_create acme --host shop.acme.com --name "Acme Market" --owner-email owner@acme.com --currency EUR
+# 3. Reload the web app (new addresses are accepted at start-up). Point shop.acme.com at this server.
+python manage.py stores                     # list stores with order counts
+python manage.py stores --pause acme        # client stopped paying: shoppers see a short-break page
+python manage.py stores --resume acme
+# Scheduled jobs and updates run per store:
+python manage.py for_each_store daily_tasks
+python manage.py for_each_store run_promotions
+python manage.py for_each_store migrate
+```
+
+- Stores live in `stores/<slug>/` (`store.json`, `db.sqlite3`, `.env`, `backups/`), set `MULTISTORE_DIR`
+  to keep them elsewhere. The folder is git-ignored - back it up.
+- Each store's owner adds their own keys under Keys & passwords; they're saved in that store's `.env`.
+  Keys a store doesn't set (e.g. the AI key) come from the main `.env`. Image storage, error alerts and
+  the CDN are shared by the platform.
+- The platform owner sees every store under **Admin > Stores** on the main address.
+- Hosting: on a VPS/Docker one server serves every domain. On PythonAnywhere each custom domain needs
+  its own web app (paid plan), all pointing at the same code.
+
 ## Demo copy for clients
 
 On a separate copy of the store (never your live store):

@@ -22,6 +22,7 @@ from decimal import Decimal
 from django.core.cache import cache
 from django.db import transaction
 from django.urls import reverse
+from .multistore import store_settings  # per-store values in multi-store mode
 
 logger = logging.getLogger(__name__)
 TIMEOUT = 25
@@ -35,7 +36,8 @@ class PayPalError(Exception):
 
 
 def _env(name):
-    return os.environ.get(name, "").strip()
+    from .multistore import env as _store_env
+    return _store_env(name)
 
 
 def base_url():
@@ -44,15 +46,15 @@ def base_url():
 
 def is_configured():
     from django.conf import settings
-    return bool(_env("PAYPAL_CLIENT_ID") and _env("PAYPAL_CLIENT_SECRET")) and settings.STORE_CURRENCY.upper() in SUPPORTED
+    return bool(_env("PAYPAL_CLIENT_ID") and _env("PAYPAL_CLIENT_SECRET")) and store_settings.STORE_CURRENCY.upper() in SUPPORTED
 
 
 def status_line():
     from django.conf import settings
     if not (_env("PAYPAL_CLIENT_ID") and _env("PAYPAL_CLIENT_SECRET")):
         return "off", "PayPal is off - add PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET under Keys & passwords to turn it on."
-    if settings.STORE_CURRENCY.upper() not in SUPPORTED:
-        return "missing", f"PayPal can't charge in {settings.STORE_CURRENCY.upper()}. Use a currency like USD, EUR or GBP for PayPal."
+    if store_settings.STORE_CURRENCY.upper() not in SUPPORTED:
+        return "missing", f"PayPal can't charge in {store_settings.STORE_CURRENCY.upper()}. Use a currency like USD, EUR or GBP for PayPal."
     mode = "live" if _env("PAYPAL_MODE").lower() == "live" else "sandbox (test)"
     return "ok", f"PayPal is on ({mode})."
 

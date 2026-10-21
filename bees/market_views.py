@@ -20,6 +20,7 @@ from .models import (Coupon, CouponClaim, MembershipPayment, Notification, Produ
                      ReviewVote, SiteSettings, Subscription, Wishlist)
 from .ratelimit import ratelimit
 from .security import safe_next_url
+from .multistore import store_settings  # per-store values in multi-store mode
 
 
 def _decimal(value):
@@ -220,7 +221,7 @@ def membership(request):
             return redirect("membership")
         pay = MembershipPayment.objects.create(user=request.user, amount=site.membership_price, days=site.membership_days)
         stripe = payments._stripe()
-        currency = payments.settings.STORE_CURRENCY.lower()
+        currency = payments.store_settings.STORE_CURRENCY.lower()
         try:
             session = stripe.checkout.Session.create(
                 idempotency_key=f"member-{pay.id}-{uuid.uuid4().hex}", mode="payment",
@@ -251,7 +252,7 @@ def membership_done(request, pay_id):
         except Exception:
             session = None
         if session and session.get("payment_status") == "paid" and \
-                int(session.get("amount_total") or 0) >= payments.to_cents(pay.amount, payments.settings.STORE_CURRENCY.lower()):
+                int(session.get("amount_total") or 0) >= payments.to_cents(pay.amount, payments.store_settings.STORE_CURRENCY.lower()):
             with transaction.atomic():
                 if MembershipPayment.objects.filter(pk=pay.pk, status="pending").update(status="paid", paid_at=timezone.now()):
                     until = market.extend_membership(request.user, pay.days)

@@ -12,6 +12,7 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import F, Sum
 from django.utils import timezone
+from .multistore import store_settings  # per-store values in multi-store mode
 
 logger = logging.getLogger(__name__)
 
@@ -290,9 +291,9 @@ def ai_support_answer(text, request, thread):
     from . import assistant
     from .models import Order, SiteSettings
     site = SiteSettings.load()
-    if not site.support_ai or not getattr(settings, "AI_API_KEY", ""):
+    if not site.support_ai or not getattr(store_settings, "AI_API_KEY", ""):
         return None
-    facts = [f"Store: {site.site_name}. Currency: {settings.STORE_CURRENCY.upper()}.",
+    facts = [f"Store: {site.site_name}. Currency: {store_settings.STORE_CURRENCY.upper()}.",
              f"Returns: within {site.return_days} days of delivery, from My orders.",
              f"Payment methods: {', '.join(assistant._payment_methods())}.",
              f"Shipping: {assistant._shipping_text()}",
@@ -314,7 +315,7 @@ def ai_support_answer(text, request, thread):
               + "\n\nCUSTOMER: " + text[:1500])
     body = json.dumps({"model": settings.AI_MODEL, "max_tokens": 400, "messages": [{"role": "user", "content": prompt}]}).encode()
     req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST", headers={
-        "x-api-key": settings.AI_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+        "x-api-key": store_settings.AI_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             out = json.loads(resp.read().decode())

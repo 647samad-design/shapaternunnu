@@ -1,6 +1,7 @@
 from .translations import TRANSLATIONS, LANGUAGE_NAMES, RTL_LANGUAGES
 from .categories import top_level as category_top_level
 from .content import footer_pages
+from .multistore import store_settings  # per-store values in multi-store mode
 
 
 def cart_count(request):
@@ -155,11 +156,12 @@ def brand(request):
     return {
         "brand": brand_obj,
         "stripe_enabled": payments.is_configured(),
-        "store_currency": dj_settings.STORE_CURRENCY.upper(),
+        "store_currency": store_settings.STORE_CURRENCY.upper(),
         "nav_categories": category_top_level(),
         "footer_pages": footer_pages(),
-        "photo_search": bool(getattr(dj_settings, "AI_API_KEY", "")),
+        "photo_search": bool(getattr(store_settings, "AI_API_KEY", "")),
         "live_on": _live_on(),
+        "multistore_platform": _multistore_platform(),
         "demo_mode": getattr(dj_settings, "DEMO_MODE", False),
         "staging": getattr(dj_settings, "STAGING", False),
     }
@@ -174,3 +176,9 @@ def _live_on():
         value = LiveShow.objects.filter(started_at__isnull=False, ended_at=None).exists()
         cache.set("live_on", value, 60)
     return value
+
+
+def _multistore_platform():
+    """True on the platform's own store when multi-store mode is on."""
+    from . import multistore
+    return multistore.enabled() and multistore.current() is None

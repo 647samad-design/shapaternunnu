@@ -46,6 +46,7 @@ from .security import (
 )
 from .templatetags.bees_extras import country_name, money, price as display_price
 from .categories import all_rows as category_rows, choices as category_choices
+from .multistore import store_settings  # per-store values in multi-store mode
 
 logger = logging.getLogger(__name__)
 
@@ -469,7 +470,7 @@ def product_detail(request, pk):
         "video": product.video(),
         "order_limits": product.order_limits(),
         **_market_context(request, product, also),
-        "ai_enabled": bool(settings.AI_API_KEY),
+        "ai_enabled": bool(store_settings.AI_API_KEY),
         "review_summary": ai_tools.review_summary(product),
         "related_products": related_products,
         "also_bought": also,
@@ -1729,7 +1730,7 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
     credit_applicable = min(credit, pricing["total"])
     checkout_data = {
         "subtotal": str(pricing["subtotal"]), "discount": str(pricing["discount"]), "tax": str(pricing["tax"]),
-        "credit": str(credit), "currency": settings.STORE_CURRENCY.upper(),
+        "credit": str(credit), "currency": store_settings.STORE_CURRENCY.upper(),
         "shipping": shipping_rules.table(), "card": "card" in methods or "paypal" in methods, "items": sum(i["qty"] for i in items),
         "taxes": taxes_table(),
     }
@@ -1903,7 +1904,7 @@ def _place_order(request, items, data, payment_method, use_credit=False):
             payment_status="pending" if is_card else "invoiced" if payment_method == "invoice" else "not_applicable",
             company=data.get("company"), po_number=data.get("po_number", ""),
             payment_due=(timezone.localdate() + timedelta(days=data["company"].payment_terms)) if payment_method == "invoice" else None,
-            currency=settings.STORE_CURRENCY,
+            currency=store_settings.STORE_CURRENCY,
             coupon_code=coupon.code if coupon else "",
             discount_amount=pricing["discount"],
             shipping_amount=pricing["shipping"],
@@ -3700,7 +3701,7 @@ def ai_product_guide(request, pk):
     product = get_object_or_404(Product.objects.live(), pk=pk)
     if product.guide:
         return JsonResponse({"guide": product.guide, "source": product.guide_source})
-    if not settings.AI_API_KEY:
+    if not store_settings.AI_API_KEY:
         return JsonResponse({"error": "Not available."}, status=404)
     if not _ai_rate_ok(request, "guide", 20, 3600):
         return JsonResponse({"error": "Please try again in a little while."}, status=429)

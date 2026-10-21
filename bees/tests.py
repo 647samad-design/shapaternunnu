@@ -7820,3 +7820,145 @@ class OpsB2BTests(TestCase):
         self.assertIn("connect-src 'self' https://models.example.com", page["Content-Security-Policy"])
         self.assertIn("script-src 'self' 'wasm-unsafe-eval'", page["Content-Security-Policy"])
         self.assertNotIn("models.example.com", self.client.get(reverse("home"))["Content-Security-Policy"])
+
+
+class MultiStoreTests(TestCase):
+    """Multi-store mode: every store has its own database, cache space,
+    files, keys and on/off switch."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self.tmp = Path(tempfile.mkdtemp())
+        folder = self.tmp / "alpha"
+        folder.mkdir()
+        (folder / "store.json").write_text('{"name": "Alpha", "hosts": ["alpha.test"], "active": true}')
+        (folder / ".env").write_text("STORE_CURRENCY=eur\nSTRIPE_SECRET_KEY=sk_test_alpha123456789012345\n")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _store(self):
+        from . import multistore
+        with self.settings(MULTISTORE=True, MULTISTORE_DIR=str(self.tmp)):
+            return multistore.load(force=True)["alpha"]
+
+    def test_values_are_per_store(self):
+        from . import multistore
+        store = self._store()
+        token = multistore._current.set(store)
+        try:
+            self.assertEqual(multistore.store_settings.STORE_CURRENCY, "EUR")
+            self.assertTrue(multistore.cache_key("k", "", 1).startswith("alpha:"))
+            self.assertEqual(multistore.media_prefix("reviews/a.jpg"), "stores/alpha/reviews/a.jpg")
+            self.assertEqual(multistore.media_prefix("stores/alpha/x.jpg"), "stores/alpha/x.jpg")
+            self.assertEqual(multistore.env("STRIPE_SECRET_KEY"), "sk_test_alpha123456789012345")
+        finally:
+            multistore._current.reset(token)
+        self.assertNotEqual(multistore.store_settings.STORE_CURRENCY, "EUR")
+        self.assertTrue(multistore.cache_key("k", "", 1).startswith("_:"))
+        self.assertEqual(multistore.media_prefix("reviews/a.jpg"), "reviews/a.jpg")
+
+    def test_keys_page_edits_the_store_file_only(self):
+        import os
+        from . import envfile, multistore
+        store = self._store()
+        token = multistore._current.set(store)
+        try:
+            envfile.write({"PAYPAL_CLIENT_ID": "A" * 40})
+            with self.assertRaises(envfile.EnvError):
+                envfile.write({"SENTRY_DSN": "https://x@y.ingest.sentry.io/1"})
+        finally:
+            multistore._current.reset(token)
+        self.assertIn("PAYPAL_CLIENT_ID", (self.tmp / "alpha" / ".env").read_text())
+        self.assertNotEqual(os.environ.get("PAYPAL_CLIENT_ID"), "A" * 40)
+
+    def test_stripe_key_sent_per_call(self):
+        from unittest import mock
+        from . import multistore, payments
+        store = self._store()
+        token = multistore._current.set(store)
+        try:
+            with self.settings(MULTISTORE=True), mock.patch("stripe.Refund.create") as create:
+                payments._stripe().Refund.create(payment_intent="pi_1")
+        finally:
+            multistore._current.reset(token)
+        self.assertEqual(create.call_args.kwargs["api_key"], "sk_test_alpha123456789012345")
+
+    def test_paused_store_shows_break_page(self):
+        import json
+        path = self.tmp / "alpha" / "store.json"
+        path.write_text(json.dumps({"name": "Alpha", "hosts": ["alpha.test"], "active": False}))
+        from . import multistore
+        from django.conf import settings as dj
+        with self.settings(MULTISTORE=True, MULTISTORE_DIR=str(self.tmp), ALLOWED_HOSTS=["*"],
+                           MIDDLEWARE=["bees.multistore.StoreMiddleware"] + list(dj.MIDDLEWARE)):
+            multistore.load(force=True)
+            r = self.client.get("/", HTTP_HOST="alpha.test")
+        self.assertEqual(r.status_code, 503)
+        self.assertContains(r, "short break", status_code=503)
+
+    def test_settings_memo_is_per_store(self):
+        from . import multistore
+        from .models import _SETTINGS_MEMO
+        store = self._store()
+        SiteSettings.load()
+        token = multistore._current.set(store)
+        try:
+            SiteSettings.load()
+        finally:
+            multistore._current.reset(token)
+        self.assertIn("", _SETTINGS_MEMO)
+        self.assertIn("alpha", _SETTINGS_MEMO)
+
+    def test_two_real_stores_are_separate(self):
+        """Creates two stores with their own databases in a separate process
+        and checks nothing crosses between them."""
+        import os
+        import subprocess
+        import sys
+        import tempfile
+        from django.conf import settings as dj
+        root = tempfile.mkdtemp()
+        env = {**os.environ, "MULTISTORE": "True", "MULTISTORE_DIR": os.path.join(root, "stores"), "DEBUG": "True",
+               "DATABASE_URL": f"sqlite:///{os.path.join(root, 'main.sqlite3')}", "SETUP_WIZARD_REDIRECT": "False",
+               "ALLOWED_HOSTS": "*", "PYTHONPATH": str(dj.BASE_DIR)}
+        env.pop("REDIS_URL", None)
+        manage = [sys.executable, str(dj.BASE_DIR / "manage.py")]
+
+        def run(*args):
+            out = subprocess.run(manage + list(args), env=env, capture_output=True, text=True, timeout=300)
+            self.assertEqual(out.returncode, 0, out.stdout[-800:] + out.stderr[-1500:])
+            return out.stdout
+        run("migrate", "--verbosity", "0")
+        run("store_create", "alpha", "--host", "alpha.test", "--name", "Alpha Shop", "--owner-email", "a@alpha.test", "--currency", "EUR")
+        run("store_create", "beta", "--host", "beta.test", "--name", "Beta Bazaar", "--owner-email", "b@beta.test")
+        script = """
+import django, re
+django.setup()
+from django.test import Client
+from django.contrib.auth import get_user_model
+from bees import multistore
+from bees.models import Product
+with multistore.use(multistore.get('alpha')):
+    Product.objects.create(name='Alpha Only Teapot', category='skincare', price='12.50', stock=3, image_url='https://example.com/t.jpg')
+    u = get_user_model().objects.get(email='a@alpha.test'); u.set_password('Alpha-pass-123'); u.save()
+c = Client()
+title = lambda h: re.search(r'<title>(.*?)</title>', c.get('/', HTTP_HOST=h).content.decode(), re.S).group(1)
+print('TITLES', 'Alpha Shop' in title('alpha.test'), 'Beta Bazaar' in title('beta.test'), 'Alpha' not in title('localhost'))
+print('SEARCH', 'Alpha Only Teapot' in c.get('/search/?q=teapot', HTTP_HOST='alpha.test').content.decode(),
+      'Alpha Only Teapot' in c.get('/search/?q=teapot', HTTP_HOST='beta.test').content.decode())
+r = Client().post('/login/', {'username': 'a@alpha.test', 'password': 'Alpha-pass-123'}, HTTP_HOST='alpha.test')
+r2 = Client().post('/login/', {'username': 'a@alpha.test', 'password': 'Alpha-pass-123'}, HTTP_HOST='beta.test')
+print('LOGIN', r.status_code, r2.status_code)
+"""
+        out = subprocess.run([sys.executable, "-c", script], env={**env, "DJANGO_SETTINGS_MODULE": "backend.settings"},
+                             capture_output=True, text=True, timeout=300, cwd=str(dj.BASE_DIR))
+        self.assertEqual(out.returncode, 0, out.stderr[-1500:])
+        self.assertIn("TITLES True True True", out.stdout)
+        self.assertIn("SEARCH True False", out.stdout)
+        self.assertIn("LOGIN 302 200", out.stdout)
+        self.assertIn("alpha", run("stores"))
+        import shutil
+        shutil.rmtree(root, ignore_errors=True)

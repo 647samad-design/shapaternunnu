@@ -471,7 +471,8 @@ def registry_buy(request, item_id):
 # ---------------------------------------------------------------- address suggestions
 
 def _maps_key():
-    return os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
+    from .multistore import env
+    return env("GOOGLE_MAPS_API_KEY")
 
 
 def address_enabled():
