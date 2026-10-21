@@ -1,0 +1,26 @@
+{% extends "bees/base.html" %}
+{% block title %}Change address — order #{{ order.id }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:640px;">
+    <p class="small"><a class="link" href="{% url 'my_orders' %}">← My orders</a></p>
+    <div class="panel">
+        <h1 style="font-size:1.5rem;">Change delivery address</h1>
+        <p class="muted">Order #{{ order.id }} · {{ order.country }}</p>
+        {% if locked %}<p class="callout">{{ locked }}</p>
+        {% else %}
+        <p class="muted small">You can change it until the order ships. The country stays the same because shipping and tax depend on it.</p>
+        <form method="post" class="addr-form">{% csrf_token %}
+            <div class="field af-wide"><label for="ca-n">Full name</label><input id="ca-n" name="full_name" required maxlength="150" value="{{ order.full_name }}" autocomplete="name"></div>
+            <div class="field af-wide"><label for="ca-a">Street address</label><input id="ca-a" name="address" required maxlength="255" value="{{ order.address }}" autocomplete="street-address"></div>
+            <div class="field"><label for="ca-c">City</label><input id="ca-c" name="city" required maxlength="100" value="{{ order.city }}" autocomplete="address-level2"></div>
+            <div class="field"><label for="ca-s">State / province</label><input id="ca-s" name="state" maxlength="100" value="{{ order.state }}" autocomplete="address-level1"></div>
+            <div class="field"><label for="ca-p">Postal code</label><input id="ca-p" name="postal_code" required maxlength="20" value="{{ order.postal_code }}" autocomplete="postal-code"></div>
+            <div class="field"><label for="ca-ph">Phone</label><input id="ca-ph" name="phone" required maxlength="30" value="{{ order.phone }}" autocomplete="tel"></div>
+            <div class="af-wide"><button class="btn btn-primary" type="submit">Save address</button></div>
+        </form>
+        {% endif %}
+    </div>
+</div>
+<style>.addr-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .af-wide { grid-column: 1 / -1; } @media (max-width: 560px) { .addr-form { grid-template-columns: minmax(0, 1fr); } }</style>
+{% endblock %}

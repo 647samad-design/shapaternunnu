@@ -17,6 +17,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.http import HttpResponse
 from django.utils.html import strip_tags
+from .multistore import store_settings  # per-store values in multi-store mode
 
 CACHE_SECONDS = 3600
 CONDITION = {"new": "new", "refurbished": "refurbished"}  # every "used_*" is "used"
@@ -39,7 +40,7 @@ def _text(value, limit):
 
 
 def _money(amount):
-    return f"{amount:.2f} {settings.STORE_CURRENCY.upper()}"
+    return f"{amount:.2f} {store_settings.STORE_CURRENCY.upper()}"
 
 
 def item(request, p):

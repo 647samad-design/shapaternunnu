@@ -81,6 +81,9 @@ GROUPS = [
         ("ANTHROPIC_API_KEY", "Anthropic API key", True, r"^sk-ant-\S+$"),
         ("AI_MODEL", "Model (optional)", False, r"^[a-z0-9.-]+$"),
     ]),
+    ("Address autocomplete", "console.cloud.google.com > APIs & Services > enable 'Places API (New)' > Credentials > Create API key, and restrict it to that API. Shoppers then get address suggestions at checkout.", [
+        ("GOOGLE_MAPS_API_KEY", "Google Maps Platform API key", True, r"^AIza[0-9A-Za-z_-]{30,}$"),
+    ]),
     ("Error alerts", "sentry.io > Create project > Django > copy the DSN.", [
         ("SENTRY_DSN", "Sentry DSN", True, r"^https://"),
     ]),
@@ -99,7 +102,20 @@ class EnvError(ValueError):
     pass
 
 
+PLATFORM_ONLY = ("SUPABASE_", "SENTRY_DSN", "CDN_URL")
+
+
+def _store():
+    from .multistore import current
+    return current()
+
+
 def path():
+    """The .env being edited: the current store's own file in multi-store
+    mode, otherwise the main one."""
+    store = _store()
+    if store is not None:
+        return str(store.env_path)
     return getattr(settings, "ENV_FILE", "") or os.path.join(str(settings.BASE_DIR), ".env")
 
 
@@ -157,11 +173,14 @@ def validate(key, value):
 def write(changes):
     """``changes``: {KEY: new value, or None to remove}. Keeps every other
     line (comments, order, other keys) as it was."""
+    store = _store()
     for key, value in changes.items():
         if value is not None:
             validate(key, value)
         elif key not in EDITABLE:
             raise EnvError(f"{key} can't be changed here.")
+        if store is not None and key.startswith(PLATFORM_ONLY):
+            raise EnvError(f"{key} is shared by every store and is set by the platform.")
     target = path()
     lines = []
     if os.path.exists(target):
@@ -193,6 +212,8 @@ def write(changes):
         fh.write("\n".join(out) + "\n")
     os.chmod(tmp, 0o600)
     os.replace(tmp, target)
+    if store is not None:
+        return  # the store's keys are re-read from its file; never touch the shared environment
     for key, value in changes.items():  # this process sees it straight away
         if value is None:
             os.environ.pop(key, None)

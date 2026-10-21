@@ -16,7 +16,7 @@ from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
 
-from .backup_data import FOLDER, list_backups, local_dir, remote_storage
+from .backup_data import database, folder, list_backups, local_dir, media_folders, remote_storage
 
 
 class Command(BaseCommand):
@@ -49,13 +49,13 @@ class Command(BaseCommand):
             archive = os.path.join(tmp, name)
             storage = remote_storage()
             if storage:
-                with storage.open(f"{FOLDER}/{name}", "rb") as src, open(archive, "wb") as dst:
+                with storage.open(f"{folder()}/{name}", "rb") as src, open(archive, "wb") as dst:
                     shutil.copyfileobj(src, dst)
             else:
                 shutil.copy(os.path.join(local_dir(), name), archive)
             with tarfile.open(archive, "r:gz") as tar:
                 tar.extractall(tmp, filter="data")
-            db = settings.DATABASES["default"]
+            db = dict(database())
             if os.path.exists(os.path.join(tmp, "db.sqlite3")):
                 if not db["ENGINE"].endswith("sqlite3"):
                     raise CommandError("This backup is from a SQLite database but the site now uses another database.")
@@ -68,8 +68,8 @@ class Command(BaseCommand):
             else:
                 call_command("flush", "--no-input")
                 call_command("loaddata", os.path.join(tmp, "data.json"))
-            for arc, target in (("media", settings.MEDIA_ROOT), ("private_media", getattr(settings, "PRIVATE_MEDIA_ROOT", ""))):
+            for target, arc in media_folders():
                 src = os.path.join(tmp, arc)
-                if target and os.path.isdir(src):
-                    shutil.copytree(src, str(target), dirs_exist_ok=True)
+                if os.path.isdir(src):
+                    shutil.copytree(src, target, dirs_exist_ok=True)
         self.stdout.write(self.style.SUCCESS(f"Restored {name}. Now reload the website."))

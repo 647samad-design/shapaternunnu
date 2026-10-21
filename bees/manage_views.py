@@ -877,7 +877,8 @@ def system_check(request):
         checks.append({"group": group, "name": name, "level": level or ("ok" if ok else "bad"), "detail": detail})
 
     # Database
-    db = dj.DATABASES["default"]
+    from django.db import connections as _conns
+    db = _conns["default"].settings_dict  # the current store's database in multi-store mode
     engine = "SQLite file on this server" if db["ENGINE"].endswith("sqlite3") else "PostgreSQL (Supabase)" if "postgres" in db["ENGINE"] else db["ENGINE"]
     try:
         executor = MigrationExecutor(connection)
@@ -1462,6 +1463,10 @@ class SiteSettingsForm(forms.ModelForm):
          ["auto_approve_trusted", "daily_digest", "message_channel"]),
         ("Sales channels", "Product feeds for Google, Facebook, Instagram and TikTok are always on - find the links under Sales channels. Here you choose whether AI shopping assistants may build checkouts.",
          ["ai_agents"]),
+        ("Help, business & sellers", "AI answers in the help chat use only your store's rules and the customer's own orders. Business accounts let companies buy with PO numbers, tax exemption and invoices. ID checks verify sellers with Stripe Identity.",
+         ["support_ai", "b2b_enabled", "identity_checks"]),
+        ("Spin & win and reminders", "A daily prize wheel brings shoppers back (prizes: '10% off', 'Free shipping', '50 points' or 'Try again', each with a chance). 'Still looking?' emails go to signed-in shoppers who viewed products without buying.",
+         ["spin_enabled", "spin_prizes", "browse_reminders"]),
         ("Reviews", "Reviews sell. A few days after delivery customers get an email asking how it went; photo reviews earn reward points.",
          ["review_requests", "review_photo_points"]),
         ("Gift cards", "Sell digital gift cards on /gift-cards/. Manage and send free ones under Gift cards.", ["gift_cards_enabled"]),
@@ -1487,7 +1492,14 @@ class SiteSettingsForm(forms.ModelForm):
     OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent",
                 "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams", "duties_policy",
                 "cod_max_order", "cod_refusal_limit", "min_auto_payout", "auto_payouts", "ads_min_bid", "ads_slots",
-                "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points", "bnpl_instalments", "affiliate_percent", "message_channel", "review_photo_points")
+                "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points", "bnpl_instalments", "affiliate_percent", "message_channel", "review_photo_points", "spin_prizes")
+
+    def clean_spin_prizes(self):
+        from .shopper import prizes
+        value = self._keep("spin_prizes")
+        if value and not prizes(value):
+            raise ValidationError("Write at least one prize per line, like '10% off:30'.")
+        return value
 
     def clean_review_photo_points(self):
         value = self._keep("review_photo_points")

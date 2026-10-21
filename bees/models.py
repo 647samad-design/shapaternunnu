@@ -253,6 +253,11 @@ class Product(models.Model):
                                               help_text="Ask buyers for custom text, e.g. 'Name to engrave (max 12 letters)'. Empty = off.")
     personalization_required = models.BooleanField(default=False)
     personalization_max = models.PositiveSmallIntegerField(default=60)
+    model_3d_url = models.CharField("3D model (.glb)", max_length=500, blank=True, help_text="https:// link to a .glb file. Shoppers can turn the product around and see it in their room (AR).")
+    model_ios_url = models.CharField("3D model for iPhone (.usdz, optional)", max_length=500, blank=True)
+    preorder_ships_on = models.DateField("Pre-order: ships on", null=True, blank=True, help_text="Sell before it's in stock. Shoppers see 'Pre-order - ships on' this date. Empty = normal product.")
+    group_size = models.PositiveSmallIntegerField("Group buy: people", default=0, help_text="2-10 people buying within 24 hours each get money back. 0 = off.")
+    group_percent = models.PositiveSmallIntegerField("Group buy: % back", default=0, help_text="Store credit each group member gets back once the group is full and the item is delivered.")
     accepts_offers = models.BooleanField("Accept offers", default=False, help_text="Buyers can offer their own price (Make an offer).")
     offer_floor = models.DecimalField("Auto-decline offers below", max_digits=10, decimal_places=2, null=True, blank=True)
     offer_of = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="other_offers",
@@ -298,19 +303,8 @@ class Product(models.Model):
 
     def video(self):
         """{"kind": "youtube"|"vimeo"|"file", "src": ...} or None."""
-        import re
-        url = (self.video_url or "").strip()
-        if not url.startswith("https://"):
-            return None
-        m = re.match(r"https://(?:www\.|m\.)?(?:youtube\.com/(?:watch\?(?:.*&)?v=|embed/|shorts/)|youtu\.be/)([A-Za-z0-9_-]{6,20})", url)
-        if m:
-            return {"kind": "youtube", "src": f"https://www.youtube-nocookie.com/embed/{m.group(1)}", "id": m.group(1)}
-        m = re.match(r"https://(?:www\.|player\.)?vimeo\.com/(?:video/)?(\d{5,12})", url)
-        if m:
-            return {"kind": "vimeo", "src": f"https://player.vimeo.com/video/{m.group(1)}"}
-        if re.search(r"\.(mp4|webm)(\?.*)?$", url, re.I):
-            return {"kind": "file", "src": url}
-        return None
+        from .media import embed
+        return embed(self.video_url)
 
     def size_chart(self):
         from . import categories
@@ -516,6 +510,7 @@ class Order(models.Model):
         ("card", "Card (Stripe)"),
         ("paypal", "PayPal"),
         ("cod", "Cash on delivery"),
+        ("invoice", "Invoice (business account)"),
     ]
     payment_method = models.CharField(max_length=30, choices=PAYMENT_METHOD_CHOICES, default="card")
     PAYMENT_STATUS_CHOICES = [
@@ -524,6 +519,7 @@ class Order(models.Model):
         ("paid", "Paid"),
         ("failed", "Failed"),
         ("refunded", "Refunded"),
+        ("invoiced", "Invoice - payment due"),
     ]
     payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default="not_applicable", db_index=True)
     stripe_session_id = models.CharField(max_length=255, blank=True, db_index=True)
@@ -551,6 +547,11 @@ class Order(models.Model):
     tax_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     tax_included = models.BooleanField(default=False, help_text="Prices already included this tax (shown, not added).")
     customer_tax_id = models.CharField("Customer VAT / tax number", max_length=40, blank=True)
+    company = models.ForeignKey("Company", null=True, blank=True, on_delete=models.SET_NULL, related_name="orders")
+    po_number = models.CharField("PO number", max_length=40, blank=True)
+    payment_due = models.DateField(null=True, blank=True, help_text="Invoice orders: pay by this date.")
+    invoice_paid_at = models.DateTimeField(null=True, blank=True)
+    invoice_reminded_at = models.DateTimeField(null=True, blank=True)
     review_request_sent = models.BooleanField(default=False, help_text="The 'how was it? leave a review' email went out.")
     affiliate_code = models.CharField(max_length=16, blank=True, db_index=True, help_text="Code of the affiliate whose link brought this order.")
     affiliate_paid = models.BooleanField(default=False, editable=False)
@@ -605,6 +606,11 @@ class Order(models.Model):
     @property
     def is_cancellable(self):
         return self.status in self.CANCELLABLE_STATUSES
+
+    @property
+    def address_editable(self):
+        from .ops_views import address_locked
+        return not address_locked(self)
 
     @property
     def subtotal(self):
@@ -909,6 +915,9 @@ class OrderItem(models.Model):
     shipped_at = models.DateTimeField(null=True, blank=True)
     downloads = models.PositiveSmallIntegerField(default=0, editable=False)
     personalization = models.CharField(max_length=300, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True, help_text="The customer cancelled this item before it shipped.")
+    warehouse = models.ForeignKey("Warehouse", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    registry_item = models.ForeignKey("RegistryItem", null=True, blank=True, on_delete=models.SET_NULL, related_name="order_items")
     quote = models.ForeignKey("QuoteRequest", null=True, blank=True, on_delete=models.SET_NULL, related_name="order_items")
 
     @property
@@ -923,6 +932,11 @@ class OrderItem(models.Model):
     @property
     def subtotal(self):
         return self.price * self.quantity
+
+    @property
+    def customer_can_cancel(self):
+        from .ops_views import cancel_item_reason
+        return not cancel_item_reason(self)
 
     @property
     def received_at(self):
@@ -989,7 +1003,7 @@ class Wishlist(models.Model):
 
 
 class Coupon(models.Model):
-    PURPOSE_CHOICES = [("", "Store coupon"), ("referral_welcome", "Referral welcome"), ("referral_reward", "Referral reward")]
+    PURPOSE_CHOICES = [("", "Store coupon"), ("referral_welcome", "Referral welcome"), ("referral_reward", "Referral reward"), ("spin", "Wheel prize")]
     code = models.CharField(max_length=30, unique=True)
     # Referral coupons belong to one customer (shown on their referrals page).
     owner = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="owned_coupons")
@@ -1059,6 +1073,8 @@ class Coupon(models.Model):
 
         if not self.active:
             return False, "This coupon is no longer active."
+        if self.purpose == "spin" and (not user or not getattr(user, "is_authenticated", False) or user.pk != self.owner_id):
+            return False, "This prize code belongs to another account."
         if self.expiry_date and timezone.localdate() > self.expiry_date:
             return False, "This coupon has expired."
         if order_total < self.min_order_value:
@@ -1108,6 +1124,8 @@ class Profile(models.Model):
     cart_reminder_sent = models.BooleanField(default=False)
     cart_reminders = models.BooleanField(default=True, help_text="Email a reminder about items left in the cart.")
     review_emails = models.BooleanField(default=True, help_text="Email asking for a review a few days after delivery.")
+    browse_reminder_at = models.DateTimeField(null=True, blank=True, help_text="Last 'still looking?' email.")
+    last_spin_on = models.DateField(null=True, blank=True)
     # Two-step sign-in (authenticator app).
     totp_secret = models.CharField(max_length=64, blank=True)
     totp_enabled = models.BooleanField(default=False)
@@ -1285,6 +1303,8 @@ class SellerAccount(models.Model):
     # Badges: "Verified" is given by staff after checking ID / business
     # papers; "Top seller" is worked out every day from sales and ratings.
     verified_at = models.DateTimeField(null=True, blank=True)
+    identity_status = models.CharField(max_length=16, blank=True, help_text="Stripe Identity check: pending, verified or failed.")
+    identity_session = models.CharField(max_length=80, blank=True)
     top_seller = models.BooleanField(default=False, db_index=True)
 
     def save(self, *args, **kwargs):
@@ -1683,7 +1703,7 @@ class ShippingZone(models.Model):
         return self.fee + (self.per_item_fee or 0) * extra
 
 
-_SETTINGS_MEMO = {"obj": None, "until": 0.0}
+_SETTINGS_MEMO = {}  # {store slug: (settings, valid until)} - one entry per store in multi-store mode
 
 
 class SiteSettings(models.Model):
@@ -1747,6 +1767,13 @@ class SiteSettings(models.Model):
                                        help_text="Every morning: the owner gets yesterday's sales and to-dos, sellers get their orders to ship and questions to answer.")
     affiliate_percent = models.PositiveSmallIntegerField("Affiliate commission (%)", default=0,
                                                          help_text="Anyone who shares a link with their code earns this % of delivered orders as store credit. 0 = off.")
+    support_ai = models.BooleanField("AI answers in the help chat", default=True, help_text="Questions the quick answers don't cover are answered by AI from your store's rules and the customer's own orders. Needs the AI key; anything unclear goes to your team.")
+    b2b_enabled = models.BooleanField("Business accounts", default=True, help_text="Companies can apply for a business account: several buyers, PO numbers, tax-exempt orders and pay-by-invoice.")
+    identity_checks = models.BooleanField("ID check for sellers (Stripe Identity)", default=False, help_text="Sellers verify their ID document and a selfie with Stripe. Verified sellers get the Verified badge automatically. Stripe charges per check.")
+    spin_enabled = models.BooleanField("Spin the wheel", default=False, help_text="Signed-in shoppers spin once a day for a coupon or points.")
+    spin_prizes = models.TextField("Wheel prizes", default="5% off:35\n10% off:25\n50 points:20\nFree shipping:12\n20% off:5\nTry again:3",
+                                   help_text="One per line as 'Prize:chance'. Prizes: '10% off', 'Free shipping', '50 points' or 'Try again'.")
+    browse_reminders = models.BooleanField("'Still looking?' emails", default=True, help_text="One email a day after a signed-in shopper looked at products without buying (at most once a week).")
     review_requests = models.BooleanField("Ask for reviews after delivery", default=True, help_text="A few days after delivery, email the customer a link to review what they bought.")
     review_photo_points = models.PositiveSmallIntegerField("Points for a photo review", default=50, help_text="Reward points for a verified review with a photo. 0 = off.")
     ai_agents = models.BooleanField("Let AI shopping assistants use the store", default=True, help_text="Publishes the store for AI agents (Google Gemini, AI Mode and others using the Universal Commerce Protocol). Agents build the cart; the shopper pays on your checkout.")
@@ -1832,21 +1859,26 @@ class SiteSettings(models.Model):
         minute, and cleared whenever they're saved."""
         import time
         from django.core.cache import cache
-        memo = _SETTINGS_MEMO.get("obj")
-        if memo is not None and _SETTINGS_MEMO["until"] > time.monotonic():
+        from .multistore import current
+        store = current()
+        slug = store.slug if store else ""
+        memo, until = _SETTINGS_MEMO.get(slug, (None, 0.0))
+        if memo is not None and until > time.monotonic():
             return memo
         obj = cache.get(cls.CACHE_KEY)
         if obj is None:
             obj, _ = cls.objects.get_or_create(pk=1)
             cache.set(cls.CACHE_KEY, obj, 60)
-        _SETTINGS_MEMO.update(obj=obj, until=time.monotonic() + 5)
+        _SETTINGS_MEMO[slug] = (obj, time.monotonic() + 5)
         return obj
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         from django.core.cache import cache
         cache.delete(self.CACHE_KEY)
-        _SETTINGS_MEMO.update(obj=None, until=0.0)
+        from .multistore import current
+        store = current()
+        _SETTINGS_MEMO.pop(store.slug if store else "", None)
 
     @property
     def logo(self):
@@ -2611,3 +2643,271 @@ class AgentCheckout(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class LiveShow(models.Model):
+    """A live shopping show: a seller streams on YouTube/Vimeo/Twitch and
+    pins products shoppers can buy while watching."""
+    seller_account = models.ForeignKey("SellerAccount", null=True, blank=True, on_delete=models.CASCADE, related_name="live_shows")
+    title = models.CharField(max_length=120)
+    description = models.TextField(blank=True, max_length=1000)
+    starts_at = models.DateTimeField(db_index=True)
+    stream_url = models.CharField(max_length=300, blank=True, help_text="YouTube Live, YouTube, Vimeo or Twitch link.")
+    products = models.ManyToManyField(Product, blank=True, related_name="live_shows")
+    started_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-starts_at"]
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def status(self):
+        if self.ended_at:
+            return "ended"
+        if self.started_at:
+            return "live"
+        return "scheduled"
+
+    @property
+    def host_name(self):
+        return self.seller_account.display_name if self.seller_account_id else SiteSettings.load().site_name
+
+    def embed(self):
+        from .media import embed
+        return embed(self.stream_url, live=True)
+
+
+class LiveComment(models.Model):
+    show = models.ForeignKey(LiveShow, related_name="comments", on_delete=models.CASCADE)
+    user = models.ForeignKey("auth.User", null=True, on_delete=models.SET_NULL, related_name="+")
+    name = models.CharField(max_length=60)
+    body = models.CharField(max_length=300)
+    from_host = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["id"]
+
+
+class LiveReminder(models.Model):
+    show = models.ForeignKey(LiveShow, related_name="reminders", on_delete=models.CASCADE)
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="+")
+    sent = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["show", "user"], name="one_live_reminder")]
+
+
+class GroupBuy(models.Model):
+    """'Team up and save': when enough people buy the product through the
+    same group link within the time limit, each gets money back as store
+    credit once their item is delivered."""
+    product = models.ForeignKey(Product, related_name="groups", on_delete=models.CASCADE)
+    code = models.CharField(max_length=12, unique=True)
+    leader = models.ForeignKey("auth.User", null=True, on_delete=models.SET_NULL, related_name="+")
+    size = models.PositiveSmallIntegerField()
+    percent = models.PositiveSmallIntegerField()
+    expires_at = models.DateTimeField()
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @property
+    def joined(self):
+        return self.members.count()
+
+    @property
+    def is_open(self):
+        return not self.completed_at and self.expires_at > timezone.now()
+
+
+class GroupMember(models.Model):
+    group = models.ForeignKey(GroupBuy, related_name="members", on_delete=models.CASCADE)
+    order_item = models.OneToOneField("OrderItem", related_name="group_member", on_delete=models.CASCADE)
+    user = models.ForeignKey("auth.User", null=True, on_delete=models.SET_NULL, related_name="+")
+    credited = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+
+class SpinResult(models.Model):
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="spins")
+    prize = models.CharField(max_length=40)
+    coupon = models.ForeignKey(Coupon, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    points = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class BlogPost(models.Model):
+    title = models.CharField(max_length=160)
+    slug = models.SlugField(max_length=170, unique=True)
+    excerpt = models.CharField(max_length=300, blank=True, help_text="Short summary for the blog list and Google.")
+    body = models.TextField(help_text="Paragraphs separated by a blank line. '## ' starts a heading, '- ' a list item.")
+    cover_url = models.CharField(max_length=500, blank=True)
+    products = models.ManyToManyField(Product, blank=True, related_name="blog_posts")
+    author = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    is_published = models.BooleanField(default=False)
+    published_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-published_at", "-created_at"]
+
+    def __str__(self):
+        return self.title
+
+    def get_absolute_url(self):
+        return f"/blog/{self.slug}/"
+
+
+class GiftRegistry(models.Model):
+    EVENTS = [("wedding", "Wedding"), ("baby", "Baby shower"), ("birthday", "Birthday"), ("housewarming", "Housewarming"), ("other", "Other")]
+    owner = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="registries")
+    title = models.CharField(max_length=100)
+    event = models.CharField(max_length=20, choices=EVENTS, default="other")
+    event_date = models.DateField(null=True, blank=True)
+    message = models.TextField(blank=True, max_length=600)
+    token = models.CharField(max_length=24, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.title
+
+
+class RegistryItem(models.Model):
+    registry = models.ForeignKey(GiftRegistry, related_name="items", on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="+")
+    variant = models.ForeignKey("ProductVariant", null=True, blank=True, on_delete=models.CASCADE, related_name="+")
+    wanted = models.PositiveSmallIntegerField(default=1)
+    bought = models.PositiveSmallIntegerField(default=0)
+    note = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["registry", "product", "variant"], name="one_registry_line")]
+
+    @property
+    def remaining(self):
+        return max(self.wanted - self.bought, 0)
+
+
+class ProductView(models.Model):
+    """Products a signed-in shopper looked at (for 'still looking?' emails)."""
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="product_views")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="+")
+    viewed_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "product"], name="one_view_row")]
+
+
+class Company(models.Model):
+    """A business account: several buyers, PO numbers, tax-exempt orders
+    and (when approved) paying by invoice."""
+    STATUS = [("pending", "Waiting for review"), ("approved", "Approved"), ("rejected", "Rejected")]
+    TERMS = [(0, "Pay at checkout"), (15, "Invoice - 15 days"), (30, "Invoice - 30 days"), (60, "Invoice - 60 days")]
+    name = models.CharField(max_length=150)
+    tax_id = models.CharField("VAT / tax number", max_length=40, blank=True)
+    country = models.CharField(max_length=2, blank=True)
+    billing_email = models.EmailField()
+    billing_address = models.TextField(blank=True, max_length=500)
+    tax_exempt_requested = models.BooleanField(default=False)
+    exemption_note = models.CharField(max_length=300, blank=True, help_text="Certificate number or reason.")
+    tax_exempt = models.BooleanField(default=False, help_text="Set by the store after checking the certificate.")
+    payment_terms = models.PositiveSmallIntegerField(choices=TERMS, default=0)
+    credit_limit = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Most that can be unpaid at once.")
+    status = models.CharField(max_length=10, choices=STATUS, default="pending", db_index=True)
+    admin_note = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name_plural = "companies"
+
+    def __str__(self):
+        return self.name
+
+    def unpaid_total(self):
+        orders = self.orders.filter(payment_status="invoiced").exclude(status="cancelled")
+        return sum((o.total for o in orders), 0)
+
+    def invoice_room(self):
+        """How much more can be bought on invoice right now."""
+        if self.status != "approved" or not self.payment_terms:
+            return 0
+        return max(self.credit_limit - self.unpaid_total(), 0)
+
+
+class CompanyMember(models.Model):
+    ROLES = [("admin", "Admin - manages buyers"), ("buyer", "Buyer")]
+    company = models.ForeignKey(Company, related_name="members", on_delete=models.CASCADE)
+    user = models.OneToOneField("auth.User", related_name="company_membership", on_delete=models.CASCADE)
+    role = models.CharField(max_length=10, choices=ROLES, default="buyer")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class Warehouse(models.Model):
+    """A stock location (warehouse, shop or supplier) for the store or a seller."""
+    seller_account = models.ForeignKey("SellerAccount", null=True, blank=True, on_delete=models.CASCADE, related_name="warehouses")
+    name = models.CharField(max_length=80)
+    country = models.CharField(max_length=2)
+    city = models.CharField(max_length=80, blank=True)
+    address = models.CharField(max_length=255, blank=True)
+    priority = models.PositiveSmallIntegerField(default=1, help_text="Lower ships first when several can.")
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["priority", "id"]
+
+    def __str__(self):
+        return f"{self.name} ({self.country})"
+
+
+class StockLevel(models.Model):
+    warehouse = models.ForeignKey(Warehouse, related_name="levels", on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, related_name="stock_levels", on_delete=models.CASCADE)
+    variant = models.ForeignKey("ProductVariant", null=True, blank=True, related_name="stock_levels", on_delete=models.CASCADE)
+    quantity = models.IntegerField(default=0)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["warehouse", "product", "variant"], name="one_stock_level")]
+
+
+class WebhookEndpoint(models.Model):
+    """Sends store events to another app (Zapier, Make, n8n, your ERP...)."""
+    EVENTS = [("order.created", "New order"), ("order.paid", "Order paid"), ("order.shipped", "Order shipped"),
+              ("order.delivered", "Order delivered"), ("order.cancelled", "Order cancelled"), ("product.updated", "Product added or changed"),
+              ("review.created", "New review"), ("customer.created", "New customer")]
+    url = models.URLField(max_length=500)
+    events = models.JSONField(default=list)
+    secret = models.CharField(max_length=64)
+    active = models.BooleanField(default=True)
+    failures = models.PositiveIntegerField(default=0)
+    last_status = models.CharField(max_length=120, blank=True)
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.url
+
+
+class WebhookDelivery(models.Model):
+    endpoint = models.ForeignKey(WebhookEndpoint, related_name="deliveries", on_delete=models.CASCADE)
+    event = models.CharField(max_length=40)
+    payload = models.JSONField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    status_code = models.PositiveSmallIntegerField(null=True, blank=True)
+    error = models.CharField(max_length=200, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    next_try_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-id"]

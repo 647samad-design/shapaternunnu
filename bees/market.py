@@ -11,6 +11,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from .multistore import store_settings  # per-store values in multi-store mode
 
 logger = logging.getLogger(__name__)
 CENT = Decimal("0.01")
@@ -223,7 +224,7 @@ def remind_subscriptions():
 # ---------------------------------------------------------------------------
 
 def image_search_enabled():
-    return bool(getattr(settings, "AI_API_KEY", ""))
+    return bool(getattr(store_settings, "AI_API_KEY", ""))
 
 
 def describe_image(data, media_type):
@@ -237,7 +238,7 @@ def describe_image(data, media_type):
                                  "(2 to 5 words, lowercase, no punctuation) for the main product in it, e.g. 'red running shoes'."},
     ]}]}).encode()
     req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST", headers={
-        "x-api-key": settings.AI_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+        "x-api-key": store_settings.AI_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=25) as resp:
             out = json.loads(resp.read().decode())
@@ -263,7 +264,7 @@ def listing_from_photo(data, media_type, categories):
         {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(data).decode()}},
         {"type": "text", "text": prompt}]}]}).encode()
     req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST", headers={
-        "x-api-key": settings.AI_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+        "x-api-key": store_settings.AI_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             out = json.loads(resp.read().decode())

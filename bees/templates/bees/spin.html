@@ -1,0 +1,60 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Spin &amp; win — {{ brand.site_name }}{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:820px;">
+    <div class="page-head"><div><h1>Spin &amp; win</h1><p>One free spin every day. Prizes: discount codes, free shipping and reward points.</p></div></div>
+    <div class="panel spin-wrap">
+        <div class="wheel-box">
+            <div class="wheel-pin" aria-hidden="true">▼</div>
+            <div class="wheel" data-wheel data-count="{{ prizes|length }}" style="--n:{{ prizes|length }};">
+                {% for label, weight in prizes %}<span style="--i:{{ forloop.counter0 }};">{{ label }}</span>{% endfor %}
+            </div>
+        </div>
+        <div class="spin-side">
+            {% if not user.is_authenticated %}<p>Sign in to spin - prizes are saved to your account.</p><a class="btn btn-primary" href="{% url 'login' %}?next={% url 'spin' %}">Sign in</a>
+            {% elif can_spin %}<button class="btn btn-primary btn-block" type="button" data-spin>Spin the wheel</button>{% csrf_token %}
+            {% else %}<p><strong>You've had today's spin.</strong> Come back tomorrow!</p>{% endif %}
+            <div class="spin-result" data-result aria-live="polite" hidden></div>
+            <p class="muted small">Codes work once, on your account, for 7 days. Points turn into store credit on your profile.</p>
+        </div>
+    </div>
+</div>
+<style>
+    .spin-wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: center; }
+    .wheel-box { position: relative; width: min(100%, 340px); margin: 0 auto; }
+    .wheel-pin { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); z-index: 2; color: var(--sale); font-size: 1.6rem; }
+    .wheel { aspect-ratio: 1; border-radius: 50%; position: relative; overflow: hidden; border: 6px solid var(--brand); transition: transform 4.2s cubic-bezier(.17,.67,.12,.99);
+             background: repeating-conic-gradient(from calc(-180deg / var(--n)), var(--accent) 0 calc(360deg / var(--n)), var(--surface-2) calc(360deg / var(--n)) calc(720deg / var(--n))); }
+    .wheel span { position: absolute; left: 50%; top: 50%; width: 44%; transform-origin: 0 50%; transform: rotate(calc(var(--i) * 360deg / var(--n) - 90deg));
+                  font-weight: 800; font-size: clamp(.62rem, 2.4vw, .78rem); line-height: 1; color: var(--ink); white-space: nowrap; margin-top: -.5em;
+                  display: flex; justify-content: flex-end; padding-right: 12px; box-sizing: border-box; }
+    .spin-result { margin: 14px 0; padding: 14px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
+    .spin-result code { font-size: 1.1rem; font-weight: 800; }
+    @media (max-width: 680px) { .spin-wrap { grid-template-columns: minmax(0, 1fr); } }
+</style>
+<script>
+(function () {
+    var btn = document.querySelector('[data-spin]'), wheel = document.querySelector('[data-wheel]'), out = document.querySelector('[data-result]');
+    if (!btn) return;
+    var n = +wheel.dataset.count;
+    btn.addEventListener('click', function () {
+        btn.disabled = true;
+        var token = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        fetch('{% url "spin" %}', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRFToken': token } }).then(function (r) { return r.json(); }).then(function (j) {
+            if (!j.ok) { out.hidden = false; out.textContent = j.error; return; }
+            var turn = 360 * 6 - j.index * (360 / n);
+            wheel.style.transform = 'rotate(' + turn + 'deg)';
+            setTimeout(function () {
+                out.hidden = false;
+                out.innerHTML = '';
+                var h = document.createElement('strong'); h.textContent = j.prize === 'Try again' ? 'So close! Try again tomorrow.' : 'You won: ' + j.prize + '!'; out.appendChild(h);
+                if (j.code) { var p = document.createElement('p'); p.innerHTML = 'Your code: <code></code> - enter it in the cart.'; p.querySelector('code').textContent = j.code; out.appendChild(p); }
+                if (j.points) { var q = document.createElement('p'); q.textContent = j.points + ' points added to your account.'; out.appendChild(q); }
+                btn.remove();
+            }, 4300);
+        }).catch(function () { btn.disabled = false; });
+    });
+})();
+</script>
+{% endblock %}

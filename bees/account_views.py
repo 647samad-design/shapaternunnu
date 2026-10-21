@@ -428,7 +428,8 @@ def store_settings(request):
         return redirect("seller_store_settings")
     from .seller_views import _render as seller_render
     request.seller, request.seller_role = seller, role
-    return seller_render(request, "settings.html", {"section": "settings"})
+    from .ops import identity_available
+    return seller_render(request, "settings.html", {"section": "settings", "identity_on": identity_available()})
 
 
 # ---------------------------------------------------------------------------

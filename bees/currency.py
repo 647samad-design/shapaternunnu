@@ -14,6 +14,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
+from .multistore import store_settings  # per-store values in multi-store mode
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ _display = contextvars.ContextVar("display_currency", default=None)
 
 
 def store_code():
-    return getattr(settings, "STORE_CURRENCY", "usd").upper()
+    return getattr(store_settings, "STORE_CURRENCY", "usd").upper()
 
 
 def active_currencies():

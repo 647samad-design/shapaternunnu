@@ -1,0 +1,29 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Blog{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Blog</h1><p>Buying guides and news bring free visitors from Google. Link products in a post to show them underneath.</p></div>
+    <div class="actions"><a class="btn btn-primary btn-sm" href="?edit=new">+ New post</a> <a class="btn btn-ghost btn-sm" href="{% url 'blog_list' %}" target="_blank" rel="noopener">View blog</a></div></div>
+{% if post %}
+<section class="panel">
+    <h2>{% if post.pk %}Edit post{% else %}New post{% endif %}</h2>
+    <form method="post" class="blog-form">{% csrf_token %}{% if post.pk %}<input type="hidden" name="id" value="{{ post.pk }}">{% endif %}
+        <div class="field"><label for="bp-t">Title</label><input id="bp-t" name="title" maxlength="160" required value="{{ post.title }}"></div>
+        <div class="field"><label for="bp-e">Summary <span class="muted">(for the list and Google)</span></label><input id="bp-e" name="excerpt" maxlength="300" value="{{ post.excerpt }}"></div>
+        <div class="field"><label for="bp-c">Cover image link</label><input id="bp-c" name="cover_url" maxlength="500" value="{{ post.cover_url }}" placeholder="https://…"></div>
+        <div class="field"><label for="bp-b">Text</label><textarea id="bp-b" name="body" rows="16" required>{{ post.body }}</textarea><small class="muted">Leave a blank line between paragraphs. Start a line with <code>## </code> for a heading and <code>- </code> for a list.</small></div>
+        <fieldset class="field"><legend class="label">Products in this post</legend>
+            <select name="products" multiple size="8" aria-label="Products in this post">{% for p in all_products %}<option value="{{ p.id }}"{% if post.pk and p in post.products.all %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+            <small class="muted">Hold Ctrl (Cmd on Mac) to pick several.</small></fieldset>
+        <label class="check"><input type="checkbox" name="is_published" value="1"{% if post.is_published %} checked{% endif %}> <span>Published</span></label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-primary" type="submit">Save</button><a class="btn btn-ghost" href="{% url 'manage_blog' %}">Cancel</a>
+            {% if post.pk %}<button class="btn btn-ghost" name="action" value="delete" style="color:var(--sale);margin-left:auto;" formnovalidate>Delete</button>{% endif %}</div>
+    </form>
+</section>
+{% endif %}
+<section class="panel">
+    {% if posts %}<div class="table-scroll"><table class="table"><thead><tr><th>Post</th><th>Status</th><th>Published</th></tr></thead><tbody>
+    {% for p in posts %}<tr><td><a class="rowlink" href="?edit={{ p.id }}">{{ p.title }}</a></td><td>{% if p.is_published %}<span class="pill ok">Published</span>{% else %}<span class="pill">Draft</span>{% endif %}</td><td class="muted small">{{ p.published_at|date:"j M Y"|default:"-" }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="muted">No posts yet. Start with a buying guide, e.g. "How to choose running shoes".</p>{% endif %}
+</section>
+<style>.blog-form { display: grid; gap: 12px; } .blog-form select { width: 100%; }</style>
+{% endblock %}

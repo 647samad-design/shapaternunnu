@@ -34,6 +34,16 @@
             <div class="fchip-list">{% for b in f_brands %}<label class="fchip"><input type="checkbox" name="brand" value="{{ b }}" {% if b in f_brand %}checked{% endif %}><span>{{ b }}</span></label>{% endfor %}</div>
         </fieldset>
         {% endif %}
+        {% if f_materials %}
+        <fieldset class="field fchips"><legend class="label">Material</legend>
+            <div class="fchip-list">{% for v in f_materials %}<label class="fchip"><input type="checkbox" name="material" value="{{ v }}" {% if v in f_material %}checked{% endif %}><span>{{ v }}</span></label>{% endfor %}</div>
+        </fieldset>
+        {% endif %}
+        {% if f_conditions %}
+        <fieldset class="field fchips"><legend class="label">Condition</legend>
+            <div class="fchip-list">{% for v in f_conditions %}<label class="fchip"><input type="checkbox" name="condition" value="{{ v }}" {% if v in f_condition %}checked{% endif %}><span>{% if v == "new" %}New{% elif v == "used" %}Used{% else %}Refurbished{% endif %}</span></label>{% endfor %}</div>
+        </fieldset>
+        {% endif %}
         {% if f_sizes %}
         <fieldset class="field fchips"><legend class="label">Size</legend>
             <div class="fchip-list">{% for v in f_sizes %}<label class="fchip"><input type="checkbox" name="size" value="{{ v }}" {% if v in f_size %}checked{% endif %}><span>{{ v }}</span></label>{% endfor %}</div>
@@ -50,7 +60,7 @@
         </div>
         <div class="field">
             <button type="submit" class="btn btn-primary btn-block">Show results</button>
-            {% if f_min_price or f_max_price or f_min_rating or f_seller or f_in_stock or f_brand or f_size or f_color or f_digital %}
+            {% if f_min_price or f_max_price or f_min_rating or f_seller or f_in_stock or f_brand or f_size or f_color or f_digital or f_material or f_condition %}
             <a href="?{% if query %}q={{ query|urlencode }}{% endif %}" class="btn btn-ghost btn-block">Clear filters</a>
             {% endif %}
         </div>

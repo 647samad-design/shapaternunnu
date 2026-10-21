@@ -19,6 +19,7 @@ import urllib.error
 import urllib.request
 
 from django.conf import settings
+from .multistore import store_settings  # per-store values in multi-store mode
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,7 @@ def _ai_listing(name, category_label, notes):
     }).encode()
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages", data=body, method="POST",
-        headers={"x-api-key": settings.AI_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+        headers={"x-api-key": store_settings.AI_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
         data = json.loads(resp.read().decode())
@@ -161,7 +162,7 @@ def write_listing(name, category="", notes="", category_label=""):
     """Returns (description, source) where source is "ai" or "builtin"."""
     name = (name or "").strip()[:MAX_NAME]
     notes = (notes or "").strip()[:MAX_NOTES]
-    if getattr(settings, "AI_API_KEY", ""):
+    if getattr(store_settings, "AI_API_KEY", ""):
         try:
             return _ai_listing(name, category_label, notes), "ai"
         except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
@@ -236,7 +237,7 @@ def _call_claude(prompt, max_tokens=600):
                        "messages": [{"role": "user", "content": prompt}]}).encode()
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages", data=body, method="POST",
-        headers={"x-api-key": settings.AI_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+        headers={"x-api-key": store_settings.AI_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=25) as resp:
         data = json.loads(resp.read().decode())
@@ -255,7 +256,7 @@ def _clean_points(items, limit):
 def buying_guide(product):
     """Returns ({"uses", "pros", "cons"}, source). Uses Claude when a key is
     set; otherwise a careful generic guide for the product's category."""
-    if getattr(settings, "AI_API_KEY", ""):
+    if getattr(store_settings, "AI_API_KEY", ""):
         try:
             text = _call_claude(GUIDE_PROMPT.format(
                 name=product.name, category=product.get_category_display(), price=product.price,
@@ -287,7 +288,7 @@ Rules: answer in 1-3 short sentences, in the same language as the question. Use 
 
 def answer_question(product, question):
     """AI answer to a shopper's question, or None when AI isn't set up."""
-    if not getattr(settings, "AI_API_KEY", ""):
+    if not getattr(store_settings, "AI_API_KEY", ""):
         return None
     from .models import Question
     qa = list(Question.objects.filter(product=product).exclude(answer="")[:8])
@@ -407,7 +408,7 @@ def translate_texts(texts, lang):
     """Translates a batch of shop texts with Claude. Returns a list the same
     length as ``texts`` ("" where a translation couldn't be made), or None
     when AI isn't set up / reachable."""
-    if not getattr(settings, "AI_API_KEY", "") or lang not in LANG_NAMES or not texts:
+    if not getattr(store_settings, "AI_API_KEY", "") or lang not in LANG_NAMES or not texts:
         return None
     try:
         reply = _call_claude(TRANSLATE_PROMPT.format(language=LANG_NAMES[lang], items=json.dumps(texts, ensure_ascii=False)),

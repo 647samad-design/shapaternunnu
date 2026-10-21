@@ -2,6 +2,7 @@ import logging
 import random
 import secrets
 import string
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from urllib.parse import urlencode
 
@@ -45,6 +46,7 @@ from .security import (
 )
 from .templatetags.bees_extras import country_name, money, price as display_price
 from .categories import all_rows as category_rows, choices as category_choices
+from .multistore import store_settings  # per-store values in multi-store mode
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +169,19 @@ def _apply_filters(qs, request):
                 q |= Q(**{f"{kind}__iexact": value})
             # A subquery, not a join: keeps the rating counts right.
             qs = qs.filter(id__in=ProductVariant.objects.filter(q, stock__gt=0).values("product_id"))
+    materials = [m for m in request.GET.getlist("material") if m][:10]
+    if materials:
+        import re as _re
+        q = Q()
+        for m in materials:
+            q |= Q(specs__iregex=r"(^|\n)\s*material\s*:[^\n]*" + _re.escape(m))
+        qs = qs.filter(q)
+    conditions = [c for c in request.GET.getlist("condition") if c in ("new", "used", "refurbished")]
+    if conditions:
+        q = Q()
+        for c in conditions:
+            q |= Q(condition__startswith="used") if c == "used" else Q(condition=c)
+        qs = qs.filter(q)
     if request.GET.get("digital"):
         qs = qs.filter(is_digital=True)
     if in_stock:
@@ -203,7 +218,22 @@ def _filter_context(request, base_qs):
                      .exclude(color="").values_list("color", flat=True).distinct()[:200]})[:30]
     sizes = _sort_sizes({s.strip() for s in ProductVariant.objects.filter(product_id__in=ids, stock__gt=0)
                          .exclude(size="").values_list("size", flat=True).distinct()[:200]})[:30]
+    materials = set()
+    for specs in base_qs.exclude(specs="").values_list("specs", flat=True)[:600]:
+        for line in specs.splitlines():
+            name, _, value = line.partition(":")
+            if name.strip().lower() == "material" and value.strip():
+                for part in value.replace("/", ",").split(","):
+                    word = " ".join(part.split()).strip(" .")
+                    word = "".join(ch for ch in word if not ch.isdigit() and ch != "%").strip()
+                    if 2 < len(word) < 25:
+                        materials.add(word.capitalize())
+    conditions = set(base_qs.values_list("condition", flat=True).distinct()[:10])
     return {
+        "f_materials": sorted(materials)[:20], "f_material": request.GET.getlist("material"),
+        "f_conditions": [c for c, ok in (("new", "new" in conditions), ("used", any(c.startswith("used") for c in conditions)),
+                                         ("refurbished", "refurbished" in conditions)) if ok] if len(conditions) > 1 else [],
+        "f_condition": request.GET.getlist("condition"),
         "f_brands": brands, "f_colors": colors, "f_sizes": sizes,
         "f_brand": request.GET.getlist("brand"), "f_color": request.GET.getlist("color"), "f_size": request.GET.getlist("size"),
         "f_digital": request.GET.get("digital", ""),
@@ -440,7 +470,7 @@ def product_detail(request, pk):
         "video": product.video(),
         "order_limits": product.order_limits(),
         **_market_context(request, product, also),
-        "ai_enabled": bool(settings.AI_API_KEY),
+        "ai_enabled": bool(store_settings.AI_API_KEY),
         "review_summary": ai_tools.review_summary(product),
         "related_products": related_products,
         "also_bought": also,
@@ -472,9 +502,23 @@ def _market_context(request, product, also):
     ctx = {"other_offers": market.other_offers(product), "is_member": market.is_member(request.user),
            "bought_label": insights.bought_label(product.pk), "best_seller": insights.best_seller_badge(product),
            "delivery_window": insights.delivery_window(product)}
+    from . import shopper
+    shopper.log_view(request, product)
+    if product.model_3d_url:
+        # The 3D viewer compiles a small WebAssembly decoder; allow that
+        # (not JavaScript eval) on this page only.
+        request.csp_script = ["'wasm-unsafe-eval'"]
+        if product.model_3d_url.startswith("https://"):
+            # It downloads the model: allow that one host.
+            request.csp_connect = ["/".join(product.model_3d_url.split("/")[:3])]
+    if product.group_size and product.group_percent and not product.is_auction:
+        ctx["open_groups"] = shopper.open_groups(product)
+    if product.preorder_ships_on and product.preorder_ships_on > timezone.localdate():
+        ctx["preorder"] = product.preorder_ships_on
     if request.user.is_authenticated:
         from .models import PriceAlert
         ctx["price_alert"] = PriceAlert.objects.filter(user=request.user, product=product, notified_at__isnull=True).first()
+        ctx["my_registries"] = list(request.user.registries.all()[:10])
     if product.old_price or product.discount_percent:
         ctx["lowest_30d"] = market.lowest_price_30d(product)
     if product.is_auction:
@@ -1403,7 +1447,7 @@ def _payment_methods():
 
 
 def _price_cart(subtotal, coupon=None, country=None, items=1, lines=None, digital_only=False,
-                member=False, pickup=None, free_ship=False):
+                member=False, pickup=None, free_ship=False, tax_exempt=False):
     """Returns the full price breakdown for a cart subtotal. Shipping
     depends on the destination country; ``shipping`` is None while the
     country isn't known, and ``ships`` is False if we don't deliver there."""
@@ -1433,6 +1477,8 @@ def _price_cart(subtotal, coupon=None, country=None, items=1, lines=None, digita
     shipping = quote["fee"]
     from . import taxes
     tax = taxes.compute(discounted, shipping or Decimal("0"), country)
+    if tax_exempt:  # approved business account with a tax exemption
+        tax = {"amount": Decimal("0"), "name": "", "rate": None, "included": tax["included"]}
     return {
         "subtotal": subtotal,
         "discount": discount,
@@ -1515,9 +1561,14 @@ def checkout_view(request):
     default_address = Address.objects.filter(user=request.user, is_default=True).first() if request.user.is_authenticated else None
     from . import market
     member = market.is_member(request.user)
+    from .ops import can_pay_by_invoice, company_for
+    company = company_for(request.user)
+    exempt = bool(company and company.tax_exempt)
     pricing = _price_cart(subtotal, coupon, default_address.country if default_address else None, count, lines=_cart_lines(items),
-                          digital_only=_all_digital(i["product"] for i in items), member=member)
+                          digital_only=_all_digital(i["product"] for i in items), member=member, tax_exempt=exempt)
     methods = _payment_methods()
+    if can_pay_by_invoice(company, pricing["total"]):
+        methods.append("invoice")
     cod_note = ""
     if any(i["product"].is_digital for i in items):
         methods = [m for m in methods if m != "cod"]  # downloads are paid online
@@ -1551,11 +1602,17 @@ def checkout_view(request):
         data["pickup_point"] = pickup
         data["delivery"] = request.POST.get("delivery", "")
         data["member"] = member
+        data["company"] = company
+        data["tax_exempt"] = exempt
+        data["po_number"] = " ".join(request.POST.get("po_number", "").split())[:40] if company else ""
         data["gift_wrap"] = bool(request.POST.get("gift_wrap")) and _brand().gift_wrap_enabled
         data["gift_message"] = " ".join(request.POST.get("gift_message", "").split())[:300] if data["gift_wrap"] else ""
         missing = [f.replace("_", " ") for f in CHECKOUT_REQUIRED if not data[f]]
         pricing = _price_cart(subtotal, coupon, data["country"], count, lines=_cart_lines(items),
-                              digital_only=_all_digital(i["product"] for i in items), member=member, pickup=pickup)
+                              digital_only=_all_digital(i["product"] for i in items), member=member, pickup=pickup, tax_exempt=exempt)
+        if payment_method == "invoice" and not can_pay_by_invoice(company, pricing["total"]):
+            messages.error(request, "This order is over your company's invoice limit. Please pay by card, or ask us to raise the limit.")
+            return redirect("checkout")
         try:
             if request.POST.get("delivery") == "pickup" and pickup is None:
                 raise ValidationError("Choose a collection point.")
@@ -1595,6 +1652,8 @@ def checkout_view(request):
         request.session["cart"] = {}
         _persist_cart(request)
         request.session["coupon_code"] = ""
+        from .shopper import clear_markers
+        clear_markers(request)
         if not order.user_id:
             _remember_guest_order(request, order)
         from . import ads
@@ -1671,7 +1730,7 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
     credit_applicable = min(credit, pricing["total"])
     checkout_data = {
         "subtotal": str(pricing["subtotal"]), "discount": str(pricing["discount"]), "tax": str(pricing["tax"]),
-        "credit": str(credit), "currency": settings.STORE_CURRENCY.upper(),
+        "credit": str(credit), "currency": store_settings.STORE_CURRENCY.upper(),
         "shipping": shipping_rules.table(), "card": "card" in methods or "paypal" in methods, "items": sum(i["qty"] for i in items),
         "taxes": taxes_table(),
     }
@@ -1682,6 +1741,9 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
     pickups = list(PickupPoint.objects.filter(active=True)[:200])
     checkout_data["member"] = bool(pricing.get("member"))
     checkout_data["free_ship"] = bool(coupon and coupon.free_shipping)
+    from .ops import company_for
+    company = company_for(request.user)
+    checkout_data["tax_exempt"] = bool(company and company.tax_exempt)
     checkout_data["pickups"] = {str(p.id): {"fee": str(p.fee), "country": p.country} for p in pickups}
     my_vouchers = []
     if request.user.is_authenticated:
@@ -1715,7 +1777,14 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
         "guest": not signed_in,
         "payment_methods": methods,
         "form": form,
+        "address_autocomplete": _address_autocomplete(),
+        "company": company,
     }
+
+
+def _address_autocomplete():
+    from .shopper_views import address_enabled
+    return address_enabled()
 
 
 def _cod_phone_check():
@@ -1807,11 +1876,11 @@ def _place_order(request, items, data, payment_method, use_credit=False):
             subtotal = sum((price * qty for _p, _v, price, qty in lines), Decimal("0"))
             pricing = _price_cart(subtotal, None, data["country"], sum(qty for _p, _v, _price, qty in lines),
                                   digital_only=_all_digital(p for p, _v, _price, _q in lines), member=data.get("member", False),
-                                  pickup=data.get("pickup_point"), free_ship=coupon.free_shipping)
+                                  pickup=data.get("pickup_point"), free_ship=coupon.free_shipping, tax_exempt=data.get("tax_exempt", False))
         else:
             pricing = _price_cart(subtotal, coupon, data["country"], sum(qty for _p, _v, _price, qty in lines),
                                   digital_only=_all_digital(p for p, _v, _price, _q in lines), member=data.get("member", False),
-                                  pickup=data.get("pickup_point"))
+                                  pickup=data.get("pickup_point"), tax_exempt=data.get("tax_exempt", False))
         if not pricing["ships"]:
             raise CheckoutError("Sorry, we don't deliver to that country yet.")
         is_card = payment_method in ("card", "paypal")  # paid online before it ships
@@ -1832,8 +1901,10 @@ def _place_order(request, items, data, payment_method, use_credit=False):
             country=data["country"],
             phone=data["phone"][:30],
             payment_method=payment_method,
-            payment_status="pending" if is_card else "not_applicable",
-            currency=settings.STORE_CURRENCY,
+            payment_status="pending" if is_card else "invoiced" if payment_method == "invoice" else "not_applicable",
+            company=data.get("company"), po_number=data.get("po_number", ""),
+            payment_due=(timezone.localdate() + timedelta(days=data["company"].payment_terms)) if payment_method == "invoice" else None,
+            currency=store_settings.STORE_CURRENCY,
             coupon_code=coupon.code if coupon else "",
             discount_amount=pricing["discount"],
             shipping_amount=pricing["shipping"],
@@ -1845,11 +1916,11 @@ def _place_order(request, items, data, payment_method, use_credit=False):
             gift_wrap=data.get("gift_wrap", False), gift_message=data.get("gift_message", ""),
             affiliate_code=_affiliate_code(request),
             pickup_point=data.get("pickup_point"),
-            estimated_delivery=order_emails.default_delivery_date(country=data["country"]),
+            estimated_delivery=_preorder_delivery(lines) or order_emails.default_delivery_date(country=data["country"]),
             courier_name=tracking.suggest_courier(data["country"]),
             # Cash orders from accounts with an unconfirmed email need one
             # click on an emailed link before sellers pack them (stops fake orders).
-            cod_confirmed=is_card or (not _cod_phone_check() and (not signed_in or _email_verified(request.user))),
+            cod_confirmed=is_card or payment_method == "invoice" or (not _cod_phone_check() and (not signed_in or _email_verified(request.user))),
         )
         seller_cache = {}
         for (product, variant, price, qty), (quote, note) in zip(lines, line_quotes):
@@ -1867,6 +1938,12 @@ def _place_order(request, items, data, payment_method, use_credit=False):
                 seller = seller_cache[product.seller_account_id]
             item.apply_commission(seller)
             item.save()
+            from .ops import take_stock
+            take_stock(item, data["country"])
+            if quote is None:
+                from .cart import make_key
+                from .shopper import after_item
+                after_item(request, order, item, make_key(product.pk, variant.pk if variant else None))
             if variant:
                 variant.stock -= qty
                 variant.save(update_fields=["stock"])
@@ -1881,6 +1958,15 @@ def _place_order(request, items, data, payment_method, use_credit=False):
                 order.credit_used = credit
                 order.save(update_fields=["credit_used"])
     return order
+
+
+def _preorder_delivery(lines):
+    """Delivery date for orders with pre-order items: after the latest ship date."""
+    dates = [p.preorder_ships_on for p, _v, _price, _q in lines if p.preorder_ships_on and p.preorder_ships_on > timezone.localdate()]
+    if not dates:
+        return None
+    from datetime import timedelta
+    return max(dates) + timedelta(days=SiteSettings.load().delivery_days or 5)
 
 
 def _restore_cart_from_order(request, order):
@@ -2178,6 +2264,13 @@ def invoice_pdf(request, order_id):
     ]
     if order.customer_tax_id:
         lines.append(f"Customer VAT / tax no.: {order.customer_tax_id}")
+    if order.company_id:
+        lines.append(f"Company: {order.company.name}" + (f"   Company tax no.: {order.company.tax_id}" if order.company.tax_id else "")
+                     + ("   Tax-exempt" if order.company.tax_exempt else ""))
+    if order.po_number:
+        lines.append(f"PO number: {order.po_number}")
+    if order.payment_method == "invoice" and order.payment_due:
+        lines.append(f"Payment terms: pay by {order.payment_due.strftime('%d %b %Y')}" + ("   PAID" if order.payment_status == "paid" else ""))
     if brand.store_tax_id:
         lines.append(f"Seller VAT / tax no.: {brand.store_tax_id}")
     y = height - 116
@@ -2353,6 +2446,10 @@ def stripe_webhook(request):
     session = (event.get("data") or {}).get("object") or {}
     if event_type.startswith("charge."):
         _stripe_charge_event(event_type, session)
+        return HttpResponse(status=200)
+    if event_type.startswith("identity.verification_session."):
+        from .ops import identity_event
+        identity_event(event_type, session)
         return HttpResponse(status=200)
     gift_card_id = (session.get("metadata") or {}).get("gift_card_id")
     if gift_card_id and event_type.startswith("checkout.session."):
@@ -2752,7 +2849,21 @@ def _selling_fields(request):
         "accepts_offers": bool(request.POST.get("accepts_offers")), "offer_floor": floor,
         "subscribe_percent": _parse_int(request.POST.get("subscribe_percent") or "0", "Subscribe & Save discount", minimum=0, maximum=50),
         "is_auction": bool(request.POST.get("is_auction")),
+        "group_size": _parse_int(request.POST.get("group_size") or "0", "Group buy people", minimum=0, maximum=10),
+        "group_percent": _parse_int(request.POST.get("group_percent") or "0", "Group buy % back", minimum=0, maximum=50),
+        "preorder_ships_on": None,
     }
+    if fields["group_size"] == 1 or bool(fields["group_size"]) != bool(fields["group_percent"]):
+        raise ValidationError("Group buy: set both the number of people (2-10) and the % back, or leave both at 0.")
+    pre = request.POST.get("preorder_ships_on", "").strip()
+    if pre:
+        try:
+            pre_date = datetime.strptime(pre, "%Y-%m-%d").date()
+        except ValueError:
+            raise ValidationError("Pre-order: choose the date it ships.")
+        if pre_date <= timezone.localdate() or pre_date > timezone.localdate() + timedelta(days=365):
+            raise ValidationError("Pre-order: the ship date must be in the next 12 months.")
+        fields["preorder_ships_on"] = pre_date
     if fields["is_auction"]:
         start = _parse_decimal(request.POST.get("auction_start_price"), "Starting bid", minimum=Decimal("0.01"))
         reserve = _parse_decimal(request.POST.get("auction_reserve"), "Reserve price", required=False)
@@ -2808,7 +2919,14 @@ def _extra_product_fields(request):
     gtin = "".join(request.POST.get("gtin", "").split()).replace("-", "")
     if gtin and not valid_gtin(gtin):
         raise ValidationError("Barcode: enter the 8, 12, 13 or 14 digits printed under the barcode (EAN, UPC, ISBN).")
+    model = request.POST.get("model_3d_url", "").strip()[:500]
+    if model and not (model.startswith("https://") or model.startswith(settings.MEDIA_URL)) or model and ".glb" not in model.lower():
+        raise ValidationError("3D model: paste an https:// link to a .glb file.")
+    model_ios = request.POST.get("model_ios_url", "").strip()[:500]
+    if model_ios and not (model_ios.startswith("https://") and ".usdz" in model_ios.lower()):
+        raise ValidationError("3D model for iPhone: paste an https:// link to a .usdz file (or leave it empty).")
     fields = {
+        "model_3d_url": model, "model_ios_url": model_ios,
         "gtin": gtin,
         "mpn": " ".join(request.POST.get("mpn", "").split())[:70],
         "brand": " ".join(request.POST.get("brand", "").split())[:80],
@@ -3324,9 +3442,20 @@ def chat_send(request):
         thread.save(update_fields=["is_resolved"])
 
     key = assistant.match(text)
+    ai = None
+    if not key:
+        from .ops import ai_support_answer
+        ai = ai_support_answer(text, request, thread)
     if key and key not in ("human",):
         reply = assistant.answer(key, request)
         reply["message"] += "\n\nStill need help? Just reply here and someone from our team will get back to you."
+    elif ai:
+        answer, handoff = ai
+        reply = {"message": answer + ("\n\nA member of our team will also follow up here." if handoff else ""),
+                 "links": [], "options": [{"key": "human", "label": "Talk to a person"}, {"key": "menu", "label": "Main menu"}]}
+        if not handoff:
+            thread.is_resolved = True  # answered; any new message reopens it
+            thread.save(update_fields=["is_resolved"])
     else:
         signed_in = request.user.is_authenticated
         reply = {
@@ -3572,7 +3701,7 @@ def ai_product_guide(request, pk):
     product = get_object_or_404(Product.objects.live(), pk=pk)
     if product.guide:
         return JsonResponse({"guide": product.guide, "source": product.guide_source})
-    if not settings.AI_API_KEY:
+    if not store_settings.AI_API_KEY:
         return JsonResponse({"error": "Not available."}, status=404)
     if not _ai_rate_ok(request, "guide", 20, 3600):
         return JsonResponse({"error": "Please try again in a little while."}, status=429)

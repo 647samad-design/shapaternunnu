@@ -39,8 +39,38 @@ def remote_storage():
     return None
 
 
+def _store():
+    from bees.multistore import current
+    return current()
+
+
+def folder():
+    """Where backups live: one folder per store in multi-store mode."""
+    store = _store()
+    return f"stores/{store.slug}/{FOLDER}" if store else FOLDER
+
+
+def database():
+    """The database in use right now (the current store's, in multi-store mode)."""
+    from django.db import connections
+    return connections["default"].settings_dict
+
+
+def media_folders():
+    """(path, name in the archive): only the store's own files for a store."""
+    store = _store()
+    out = []
+    for root, arc in ((settings.MEDIA_ROOT, "media"), (getattr(settings, "PRIVATE_MEDIA_ROOT", ""), "private_media")):
+        if not root:
+            continue
+        path = os.path.join(str(root), "stores", store.slug) if store else str(root)
+        out.append((path, arc))
+    return out
+
+
 def local_dir():
-    path = os.path.join(settings.BASE_DIR, FOLDER)
+    store = _store()
+    path = str(store.folder / FOLDER) if store else os.path.join(settings.BASE_DIR, FOLDER)
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -49,7 +79,10 @@ def list_backups():
     """Newest first: list of names."""
     storage = remote_storage()
     if storage:
-        _, files = storage.listdir(FOLDER)
+        try:
+            _, files = storage.listdir(folder())
+        except (FileNotFoundError, OSError):
+            files = []
     else:
         files = os.listdir(local_dir())
     return sorted((f for f in files if f.startswith(PREFIX) and f.endswith(".tar.gz")), reverse=True)
@@ -63,7 +96,7 @@ class Command(BaseCommand):
         parser.add_argument("--no-media", action="store_true", help="Skip images.")
 
     def handle(self, *args, **options):
-        db = settings.DATABASES["default"]
+        db = database()
         stamp = timezone.now().strftime("%Y%m%d-%H%M")
         name = f"{PREFIX}{stamp}.tar.gz"
         with tempfile.TemporaryDirectory() as tmp:
@@ -88,24 +121,24 @@ class Command(BaseCommand):
                     info.size = len(data)
                     tar.addfile(info, io.BytesIO(data))
                 if not options["no_media"] and not getattr(settings, "USE_SUPABASE_STORAGE", False):
-                    for folder, arc in ((settings.MEDIA_ROOT, "media"), (getattr(settings, "PRIVATE_MEDIA_ROOT", ""), "private_media")):
-                        if folder and os.path.isdir(folder):
-                            tar.add(str(folder), arcname=arc)
+                    for path, arc in media_folders():
+                        if os.path.isdir(path):
+                            tar.add(path, arcname=arc)
             size = os.path.getsize(archive)
             storage = remote_storage()
             if storage:
                 with open(archive, "rb") as fh:
                     from django.core.files import File
-                    storage.save(f"{FOLDER}/{name}", File(fh, name=name))
+                    storage.save(f"{folder()}/{name}", File(fh, name=name))
                 where = "Supabase Storage (private bucket)"
             else:
                 shutil.copy(archive, os.path.join(local_dir(), name))
-                where = os.path.join(settings.BASE_DIR, FOLDER)
+                where = local_dir()
 
         removed = 0
         for old in list_backups()[options["keep"]:]:
             if storage:
-                storage.delete(f"{FOLDER}/{old}")
+                storage.delete(f"{folder()}/{old}")
             else:
                 os.remove(os.path.join(local_dir(), old))
             removed += 1

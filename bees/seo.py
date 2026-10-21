@@ -6,6 +6,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.urls import reverse
 from django.utils import timezone
+from .multistore import store_settings  # per-store values in multi-store mode
 
 
 def _abs(request, url):
@@ -25,7 +26,7 @@ def product(request, product, reviews):
     site = SiteSettings.load()
     url = request.build_absolute_uri(reverse("product_detail", args=[product.pk]))
     images = [_abs(request, product.image_url)] + [_abs(request, i.image_url) for i in product.extra_images.all()[:5]]
-    currency = settings.STORE_CURRENCY.upper()
+    currency = store_settings.STORE_CURRENCY.upper()
     offer = {
         "@type": "Offer", "url": url, "priceCurrency": currency, "price": f"{product.price:.2f}",
         "priceValidUntil": (timezone.localdate() + timedelta(days=30)).isoformat(),

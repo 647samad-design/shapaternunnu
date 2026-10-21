@@ -185,7 +185,8 @@ def on_hold_items(seller):
         "price", "quantity", "commission_amount", "delivered_at", "order__delivered_at", "order__status")
     settled = (Q(delivered_at__lte=cutoff) | Q(delivered_at=None, order__status="delivered", order__delivered_at__lte=cutoff))
     disputed = (Q(return_requests__status__in=["requested", "approved"])
-                | Q(claims__status__in=["open", "seller_replied", "escalated"]))
+                | Q(claims__status__in=["open", "seller_replied", "escalated"])
+                | Q(order__payment_status="invoiced"))  # business invoice not paid yet
     return items.filter(~settled | disputed).distinct()
 
 

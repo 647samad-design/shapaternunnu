@@ -1,0 +1,86 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}{{ show.title }} — Live at {{ brand.site_name }}{% endblock %}
+{% block meta_description %}{{ show.description|default:show.title|truncatechars:150 }}{% endblock %}
+{% block content %}
+<div class="wrap page">
+    <p class="small"><a class="link" href="{% url 'live_list' %}">← Live shopping</a></p>
+    <div class="ls-layout">
+        <div class="ls-main">
+            <div class="ls-player">
+                {% with v=show.embed %}
+                {% if v and show.status != "scheduled" %}
+                    {% if v.kind == "twitch" %}<iframe src="https://player.twitch.tv/?channel={{ v.channel }}&parent={{ twitch_parent }}" title="{{ show.title }}" allowfullscreen></iframe>
+                    {% elif v.kind == "file" %}<video src="{{ v.src }}" controls playsinline></video>
+                    {% else %}<iframe src="{{ v.src }}?autoplay=1&mute=1" title="{{ show.title }}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>{% endif %}
+                {% else %}
+                    <div class="ls-wait"><strong>{% if show.status == "scheduled" %}Starts {{ show.starts_at|date:"l j F, H:i" }}{% else %}No replay for this show{% endif %}</strong>
+                    {% if show.status == "scheduled" %}{% if reminded %}<span>✓ We'll remind you</span>{% elif user.is_authenticated %}<form method="post" action="{% url 'live_remind' show.id %}">{% csrf_token %}<button class="btn btn-accent" type="submit">🔔 Remind me</button></form>{% else %}<a class="btn btn-accent" href="{% url 'login' %}?next={{ request.path|urlencode }}">Sign in for a reminder</a>{% endif %}{% endif %}</div>
+                {% endif %}
+                {% endwith %}
+            </div>
+            <div class="ls-head">
+                <div style="min-width:0;"><h1>{% if show.status == "live" %}<span class="live-dot" aria-label="Live">●</span> {% endif %}{{ show.title }}</h1>
+                <p class="muted" data-no-translate>{% if show.seller_account %}<a class="link" href="{% url 'store_page' show.seller_account.display_name %}">{{ show.host_name }}</a>{% else %}{{ show.host_name }}{% endif %}</p></div>
+            </div>
+            {% if show.description %}<p>{{ show.description|linebreaksbr }}</p>{% endif %}
+            {% if products %}<section class="section"><div class="section-head"><h2>Shop the show</h2></div><div class="grid-products">{% for product in products %}{% include "bees/partials/product_card.html" %}{% endfor %}</div></section>{% endif %}
+        </div>
+        <aside class="ls-chat panel" data-live-chat data-url="{% url 'live_comments' show.id %}">
+            <h2>Live chat</h2>
+            <div class="ls-log" data-log aria-live="polite">{% for c in comments %}<p data-id="{{ c.id }}"{% if c.from_host %} class="host"{% endif %}><strong data-no-translate>{{ c.name }}</strong> {{ c.body }}</p>{% empty %}<p class="muted small" data-empty>{% if show.status == "live" %}Say hello and ask anything about the products.{% else %}The chat opens when the show is live.{% endif %}</p>{% endfor %}</div>
+            {% if show.status == "live" %}
+            {% if user.is_authenticated %}<form class="ls-form" data-form>{% csrf_token %}<label class="sr-only" for="ls-msg">Message</label><input id="ls-msg" name="body" maxlength="300" autocomplete="off" placeholder="Ask a question…"><button class="btn btn-primary btn-sm" type="submit">Send</button></form>
+            {% else %}<a class="btn btn-secondary btn-block" href="{% url 'login' %}?next={{ request.path|urlencode }}">Sign in to chat</a>{% endif %}
+            {% endif %}
+        </aside>
+    </div>
+</div>
+<style>
+    .ls-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+    .ls-player { aspect-ratio: 16 / 9; background: #0b0f12; border-radius: var(--radius); overflow: hidden; }
+    .ls-player iframe, .ls-player video { width: 100%; height: 100%; border: 0; display: block; }
+    .ls-wait { height: 100%; display: grid; place-content: center; gap: 12px; text-align: center; color: #fff; padding: 16px; }
+    .ls-head h1 { margin: 14px 0 2px; font-size: 1.5rem; overflow-wrap: anywhere; }
+    .live-dot { color: var(--sale); }
+    .ls-chat { position: sticky; top: 90px; display: flex; flex-direction: column; max-height: 75vh; }
+    .ls-chat h2 { margin: 0 0 8px; font-size: 1.1rem; }
+    .ls-log { flex: 1; overflow-y: auto; display: grid; gap: 6px; align-content: start; min-height: 200px; }
+    .ls-log p { margin: 0; font-size: .92rem; overflow-wrap: anywhere; }
+    .ls-log p.host strong::after { content: " · host"; color: var(--sale); font-weight: 700; font-size: .78rem; }
+    .ls-form { display: flex; gap: 6px; margin-top: 10px; }
+    .ls-form input { flex: 1; min-width: 0; }
+    @media (max-width: 900px) { .ls-layout { grid-template-columns: minmax(0, 1fr); } .ls-chat { position: static; max-height: 420px; } }
+</style>
+<script>
+(function () {
+    var box = document.querySelector('[data-live-chat]');
+    if (!box) return;
+    var log = box.querySelector('[data-log]'), form = box.querySelector('[data-form]'), url = box.dataset.url;
+    function last() { var n = 0; log.querySelectorAll('p[data-id]').forEach(function (p) { n = Math.max(n, +p.dataset.id); }); return n; }
+    function add(c) {
+        if (log.querySelector('p[data-id="' + c.id + '"]')) return;
+        var e = log.querySelector('[data-empty]'); if (e) e.remove();
+        var p = document.createElement('p'); p.dataset.id = c.id; if (c.host) p.className = 'host';
+        var b = document.createElement('strong'); b.textContent = c.name; p.appendChild(b); p.appendChild(document.createTextNode(' ' + c.body));
+        log.appendChild(p); log.scrollTop = log.scrollHeight;
+    }
+    function poll() {
+        fetch(url + '?after=' + last(), { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) {
+            (j.comments || []).forEach(add);
+            if (j.status === 'ended' && form) form.remove();
+        }).catch(function () {});
+    }
+    log.scrollTop = log.scrollHeight;
+    {% if show.status == "live" %}setInterval(function () { if (!document.hidden) poll(); }, 4000);{% endif %}
+    if (form) form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var input = form.querySelector('input[name=body]');
+        if (!input.value.trim()) return;
+        fetch(url, { method: 'POST', credentials: 'same-origin', body: new FormData(form) }).then(function (r) { return r.json(); }).then(function (j) {
+            if (j.comments) { j.comments.forEach(add); input.value = ''; }
+        });
+    });
+})();
+</script>
+{% endblock %}

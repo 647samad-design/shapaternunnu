@@ -56,7 +56,8 @@ def set_items_status(items, new_status, user=None, by_staff=False, forward_only=
     with transaction.atomic():
         for item in items:
             item = OrderItem.objects.select_for_update(of=("self",)).select_related("order", "seller_account").get(pk=item.pk)
-            reason = blocked_reason(item.order)
+            reason = blocked_reason(item.order) or (
+                f"The customer cancelled '{item.product_name}' - don't ship it." if item.cancelled_at else "")
             if reason:
                 reasons.append(reason)
                 continue

@@ -36,7 +36,8 @@ class SocialError(Exception):
 
 
 def _env(name):
-    value = os.environ.get(name, "").strip()
+    from .multistore import env as _store_env
+    value = _store_env(name)
     return value.replace("\\n", "\n") if name == "APPLE_PRIVATE_KEY" else value
 
 

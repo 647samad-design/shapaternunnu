@@ -124,7 +124,7 @@ class SecurityHeadersMiddleware:
         "img-src 'self' data: blob: https:",
         "media-src 'self' https:",
         "connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.facebook.com",
-        "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com",
+        "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://player.twitch.tv",
         "worker-src 'self'",
         "manifest-src 'self'",
         "object-src 'none'",
@@ -152,6 +152,13 @@ class SecurityHeadersMiddleware:
         response = self.get_response(request)
         if request.path.startswith("/admin/"):
             return response  # Django's own admin
-        response.setdefault(self.header, self.csp)
+        csp = self.csp
+        extra = getattr(request, "csp_connect", None)
+        if extra:  # e.g. the host of a product's 3D model
+            csp = csp.replace("connect-src 'self'", "connect-src 'self' " + " ".join(extra), 1)
+        script = getattr(request, "csp_script", None)
+        if script:
+            csp = csp.replace("script-src 'self'", "script-src 'self' " + " ".join(script), 1)
+        response.setdefault(self.header, csp)
         response.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(self), usb=(), interest-cohort=()")
         return response

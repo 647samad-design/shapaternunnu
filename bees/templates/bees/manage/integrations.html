@@ -1,0 +1,52 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Integrations{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Integrations</h1><p>Connect the store to other apps: Zapier, Make, n8n, Google Sheets, your ERP or warehouse system. They get a message the moment something happens.</p></div></div>
+<section class="panel">
+    <h2>Accounting export</h2>
+    <p class="muted small">Download sales as invoices and import them into Xero (Business &gt; Invoices &gt; Import) or QuickBooks Online (Settings &gt; Import data &gt; Invoices). Cancelled and unpaid orders are left out.</p>
+    <form method="get" action="{% url 'accounting_export' %}" class="acc-form">
+        <div class="field"><label for="ac-f">From</label><input id="ac-f" type="date" name="from" value="{{ month_start|date:'Y-m-d' }}"></div>
+        <div class="field"><label for="ac-t">To</label><input id="ac-t" type="date" name="to" value="{{ today|date:'Y-m-d' }}"></div>
+        <div class="field"><label for="ac-a">Xero sales account code</label><input id="ac-a" name="account" value="200" maxlength="10"></div>
+        <div class="acc-btns"><button class="btn btn-secondary" name="format" value="xero">Download for Xero</button><button class="btn btn-secondary" name="format" value="quickbooks">Download for QuickBooks</button></div>
+    </form>
+</section>
+<section class="panel">
+    <h2>Webhooks</h2>
+    <p class="muted small">Paste the address your app gives you (in Zapier: <em>Webhooks by Zapier &gt; Catch Hook</em>; in Make: <em>Webhooks &gt; Custom webhook</em>). Each message is JSON, signed with <code>X-Lumen-Signature: sha256=…</code> (HMAC of the body with the secret). Failed messages are retried for 12 hours.</p>
+    {% for ep in endpoints %}
+    <div class="wh">
+        <div class="wh-head"><div style="min-width:0;"><strong class="wh-url">{{ ep.url }}</strong><span class="muted small">{% for e in ep.events %}{{ e }}{% if not forloop.last %}, {% endif %}{% endfor %}</span></div>
+            <span class="pill {% if ep.active %}ok{% endif %}">{% if ep.active %}On{% else %}Off{% endif %}</span></div>
+        {% if ep.id == new_id %}<p class="callout small">Signing secret (copy it now): <code>{{ ep.secret }}</code></p>{% else %}<details class="small"><summary>Signing secret</summary><code>{{ ep.secret }}</code></details>{% endif %}
+        <p class="small muted">Last: {{ ep.last_status|default:"nothing sent yet" }}{% if ep.last_sent_at %} · {{ ep.last_sent_at|timesince }} ago{% endif %}</p>
+        {% if ep.recent %}<ul class="wh-log">{% for d in ep.recent %}<li>{% if d.delivered_at %}✓{% else %}✗{% endif %} {{ d.event }} · {{ d.created_at|date:"j M H:i" }}{% if d.error %} · <span class="muted">{{ d.error|truncatechars:60 }}</span>{% endif %}</li>{% endfor %}</ul>{% endif %}
+        <form method="post" class="wh-actions">{% csrf_token %}<input type="hidden" name="id" value="{{ ep.id }}">
+            <button class="btn btn-secondary btn-sm" name="action" value="test">Send a test</button>
+            <button class="btn btn-ghost btn-sm" name="action" value="toggle">{% if ep.active %}Turn off{% else %}Turn on{% endif %}</button>
+            <button class="btn btn-ghost btn-sm" name="action" value="delete" style="color:var(--sale);">Delete</button></form>
+    </div>
+    {% endfor %}
+    <form method="post" class="wh-add">{% csrf_token %}<input type="hidden" name="action" value="add">
+        <div class="field"><label for="wh-u">Send to (https://…)</label><input id="wh-u" name="url" type="url" required maxlength="500" placeholder="https://hooks.zapier.com/hooks/catch/…"></div>
+        <fieldset class="field" style="border:0;padding:0;margin:0;"><legend class="label">When</legend>
+            <div class="wh-events">{% for v, l in event_choices %}<label><input type="checkbox" name="events" value="{{ v }}"{% if v == "order.created" %} checked{% endif %}> {{ l }}</label>{% endfor %}</div></fieldset>
+        <button class="btn btn-primary" type="submit">Add webhook</button>
+    </form>
+</section>
+<style>
+    .acc-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: end; }
+    .acc-btns { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+    .wh { padding: 12px 0; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+    .wh-head { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
+    .wh-head > div { display: grid; }
+    .wh-url { overflow-wrap: anywhere; }
+    .wh code { overflow-wrap: anywhere; }
+    .wh-log { margin: 0; padding-left: 18px; font-size: .85rem; }
+    .wh-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 0; }
+    .wh-add { display: grid; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+    .wh-events { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .92rem; }
+    @media (max-width: 760px) { .acc-form { grid-template-columns: minmax(0, 1fr); } }
+</style>
+{% endblock %}

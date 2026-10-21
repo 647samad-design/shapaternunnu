@@ -1,0 +1,31 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}{{ reg.title }} — gift registry at {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page">
+    <div class="page-head"><div><span class="badge badge-accent">🎁 {{ reg.get_event_display }}</span><h1 data-no-translate>{{ reg.title }}</h1>
+        <p>{% if reg.event_date %}{{ reg.event_date|date:"l j F Y" }} · {% endif %}{{ items|length }} gift{{ items|length|pluralize }}</p></div></div>
+    {% if reg.message %}<p class="panel" data-no-translate>{{ reg.message|linebreaksbr }}</p>{% endif %}
+    {% if items %}<div class="rg-grid">{% for i in items %}
+        <article class="rg-card{% if not i.remaining %} done{% endif %}">
+            <a href="{% url 'product_detail' i.product_id %}"><img src="{{ i.product.image_url }}" alt="" loading="lazy"></a>
+            <div class="rg-body"><a class="rg-name" href="{% url 'product_detail' i.product_id %}">{{ i.product.name }}</a>{% if i.variant %}<span class="muted small">{{ i.variant.label }}</span>{% endif %}
+                <strong>{{ i.product.price|price }}</strong>
+                <span class="small">{% if i.remaining %}{{ i.remaining }} of {{ i.wanted }} still wanted{% else %}✓ All bought{% endif %}</span>
+                {% if i.note %}<span class="muted small" data-no-translate>“{{ i.note }}”</span>{% endif %}
+                {% if i.remaining and i.product.stock > 0 %}<form method="post" action="{% url 'registry_buy' i.id %}">{% csrf_token %}<button class="btn btn-primary btn-sm btn-block" type="submit">Buy this gift</button></form>{% endif %}
+            </div>
+        </article>{% endfor %}</div>
+    {% else %}<div class="panel empty"><h2>No gifts yet</h2><p>Check back later.</p></div>{% endif %}
+</div>
+<style>
+    .rg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 16px; }
+    .rg-card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; display: grid; }
+    .rg-card.done { opacity: .6; }
+    .rg-card img { width: 100%; aspect-ratio: 1; object-fit: cover; }
+    .rg-body { padding: 12px; display: grid; gap: 4px; }
+    .rg-name { font-weight: 700; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+    .rg-body form { margin-top: 6px; }
+</style>
+{% endblock %}

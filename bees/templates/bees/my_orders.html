@@ -96,6 +96,8 @@
                 {% endwith %}
                 </div>
                 {% endif %}
+                {% if item.cancelled_at %}<div style="margin-top:4px;"><span class="badge">Cancelled · refunded</span></div>
+                {% elif not guest and item.customer_can_cancel %}<form method="post" action="{% url 'cancel_item' item.id %}" style="margin-top:4px;">{% csrf_token %}<button class="link-btn small" type="submit" onclick="return confirm('Cancel {{ item.product_name|escapejs }}? It will be refunded.')">Cancel this item</button></form>{% endif %}
                 {% if not guest and order.status != "cancelled" and order.status != "pending" %}<div style="margin-top:4px;">{% with claim=item.open_claim %}{% if claim %}<a class="link small" href="{% url 'claim_detail' claim.id %}">⚠ Problem report: {{ claim.get_status_display|lower }}</a>{% elif item.fulfillment_status == "handed_to_courier" or item.received_at %}<a class="link small muted" href="{% url 'open_claim' item.id %}">Report a problem</a>{% endif %}{% endwith %}</div>{% endif %}
             </div>
             <strong>{{ item.subtotal|money }}</strong>
@@ -108,6 +110,7 @@
                 {% if stripe_enabled and order.payment_method == "cod" and order.payment_status == "not_applicable" and order.is_cancellable and order.total_cents %}<form method="post" action="{% url 'pay_online' order.id %}">{% csrf_token %}<button type="submit" class="btn btn-primary btn-sm">Pay online now</button></form>{% endif %}
                 {% if not guest and order.items_on_the_way %}<form method="post" action="{% url 'confirm_received' order.id %}">{% csrf_token %}<button type="submit" class="btn btn-primary btn-sm">✓ I've received it</button></form>{% endif %}
                 <a class="btn btn-secondary btn-sm" href="{% url 'invoice_pdf' order.id %}{% if guest %}?t={{ order.access_token }}{% endif %}">Invoice</a>
+                {% if not guest and order.address_editable %}<a class="btn btn-secondary btn-sm" href="{% url 'change_address' order.id %}">Change address</a>{% endif %}
                 {% if not guest %}<form method="post" action="{% url 'buy_again' order.id %}">{% csrf_token %}<button type="submit" class="btn btn-secondary btn-sm">Buy again</button></form>{% endif %}
                 {% if not guest %}{% regroup order.items.all by seller_account as sellers %}{% for g in sellers %}{% if g.grouper %}<a class="btn btn-secondary btn-sm" href="{% url 'message_store' g.grouper.id %}">💬 {% if sellers|length > 1 %}{{ g.grouper.display_name }}{% else %}{{ t.message_seller }}{% endif %}</a>{% endif %}{% endfor %}{% endif %}
                 {% if order.is_cancellable %}

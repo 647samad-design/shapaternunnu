@@ -2,6 +2,7 @@ from decimal import Decimal, InvalidOperation
 
 from django import template
 from django.conf import settings
+from ..multistore import store_settings  # per-store values in multi-store mode
 
 register = template.Library()
 
@@ -23,7 +24,7 @@ def get_item(dictionary, key):
 @register.filter
 def money(value):
     """Formats an amount in the store currency, e.g. 1234.5 -> $1,234.50."""
-    currency = getattr(settings, "STORE_CURRENCY", "usd").lower()
+    currency = getattr(store_settings, "STORE_CURRENCY", "usd").lower()
     symbol = CURRENCY_SYMBOLS.get(currency, currency.upper() + " ")
     try:
         amount = Decimal(str(value if value not in (None, "") else 0))
@@ -36,7 +37,7 @@ def money(value):
 
 @register.simple_tag
 def currency_code():
-    return getattr(settings, "STORE_CURRENCY", "usd").upper()
+    return getattr(store_settings, "STORE_CURRENCY", "usd").upper()
 
 
 @register.filter
@@ -258,3 +259,13 @@ def wa_link(number, text=""):
     if len(digits) < 8:
         return ""
     return f"https://wa.me/{digits}" + (f"?text={quote(str(text))}" if text else "")
+
+
+@register.filter
+def is_future(value):
+    """True for a date after today."""
+    from django.utils import timezone
+    try:
+        return value > timezone.localdate()
+    except TypeError:
+        return False

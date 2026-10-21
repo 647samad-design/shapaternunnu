@@ -1,0 +1,32 @@
+<div class="adm-head"><div><h1>Stock locations</h1><p>Keep stock in several places (warehouses, shops, a supplier). Each order ships from the location in the buyer's country if it has enough, otherwise from the first one in your list. The product's stock is the total of all locations.</p></div></div>
+<section class="panel">
+    <h2>Locations</h2>
+    {% if warehouses %}<div class="table-scroll"><table class="table"><thead><tr><th>#</th><th>Name</th><th>Country</th><th>Status</th><th></th></tr></thead><tbody>
+    {% for w in warehouses %}<tr><td>{{ w.priority }}</td><td>{{ w.name }}{% if w.city %} <span class="muted small">{{ w.city }}</span>{% endif %}</td><td>{{ w.country }}</td><td>{% if w.active %}<span class="pill ok">In use</span>{% else %}<span class="pill">Off</span>{% endif %}</td>
+        <td><form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="{{ w.id }}"><button class="btn btn-ghost btn-sm" type="submit">{% if w.active %}Turn off{% else %}Turn on{% endif %}</button></form></td></tr>{% endfor %}
+    </tbody></table></div>{% endif %}
+    <form method="post" class="loc-add">{% csrf_token %}<input type="hidden" name="action" value="add">
+        <div class="field"><label for="lc-n">Name</label><input id="lc-n" name="name" maxlength="80" required placeholder="e.g. Lisbon warehouse"></div>
+        <div class="field"><label for="lc-c">Country</label><select id="lc-c" name="country" required><option value="">Choose…</option>{% for code, name in countries %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="lc-ci">City</label><input id="lc-ci" name="city" maxlength="80"></div>
+        <button class="btn btn-secondary" type="submit">Add location</button>
+    </form>
+</section>
+{% if active %}
+<section class="panel">
+    <h2>Stock at each location</h2>
+    <p class="muted small">Leave a box empty if that location doesn't carry the product. Products without any location keep using their normal stock number.</p>
+    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="stock">
+        <div class="table-scroll"><table class="table loc-table"><thead><tr><th>Product</th>{% for w in active %}<th class="num">{{ w.name }}</th>{% endfor %}<th class="num">Total</th></tr></thead><tbody>
+        {% for r in rows %}<tr><td>{{ r.label }}</td>{% for w, q in r.cells %}<td class="num"><label class="sr-only" for="q_{{ w.id }}_{{ r.key }}">{{ r.label }} at {{ w.name }}</label><input id="q_{{ w.id }}_{{ r.key }}" name="q_{{ w.id }}_{{ r.key }}" type="number" min="0" value="{% if q is not None %}{{ q }}{% endif %}"></td>{% endfor %}
+            <td class="num">{% if r.variant %}{{ r.variant.stock }}{% else %}{{ r.product.stock }}{% endif %}</td></tr>{% endfor %}
+        </tbody></table></div>
+        <button class="btn btn-primary" type="submit" style="margin-top:12px;">Save stock</button>
+    </form>
+</section>
+{% endif %}
+<style>
+    .loc-add { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; margin-top: 12px; }
+    .loc-table input { width: 84px; text-align: right; }
+    @media (max-width: 760px) { .loc-add { grid-template-columns: minmax(0, 1fr); } }
+</style>

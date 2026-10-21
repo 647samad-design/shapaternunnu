@@ -94,6 +94,12 @@
                     <span><strong><span class="paypal-mark" aria-hidden="true">Pay<b>Pal</b></span> PayPal</strong><span class="muted">Pay with your PayPal balance, bank or card on PayPal's secure page. Buyer protection included.</span></span>
                 </label>
                 {% endif %}
+                {% if "invoice" in payment_methods %}
+                <label class="pay-option">
+                    <input type="radio" name="payment_method" value="invoice">
+                    <span><strong>Pay by invoice</strong><span class="muted">{{ company.name }} pays within {{ company.payment_terms }} days. We email the invoice with the order.</span></span>
+                </label>
+                {% endif %}
                 {% if "cod" in payment_methods %}
                 <label class="pay-option">
                     <input type="radio" name="payment_method" value="cod" {% if "card" not in payment_methods and "paypal" not in payment_methods %}checked{% endif %}>
@@ -108,6 +114,7 @@
                 </label>
                 {% endif %}
                 <p id="duties-note" class="muted small" style="display:none;margin:10px 0 0;"><span aria-hidden="true">🌍 </span><span>{% if checkout_data.taxes.duties == "included" %}International order: import duties are included - nothing more to pay on delivery.{% else %}International order: the destination country may charge import duties or taxes on delivery. These are paid to the courier and aren't part of this total.{% endif %}</span><span id="duty-estimate" hidden><br><strong id="duty-text"></strong></span></p>
+                {% if company %}<div class="field" style="margin-top:12px;"><label for="id_po">Purchase order (PO) number <span class="muted">(optional)</span></label><input type="text" id="id_po" name="po_number" maxlength="40" value="{{ form.po_number|default:'' }}"><span class="hint">Buying for {{ company.name }}{% if company.tax_exempt %} - tax-exempt{% endif %}. Printed on the invoice.</span></div>{% endif %}
                 <details class="vat-box" style="margin-top:12px;"><summary class="small">Buying for a business? Add your VAT / tax number</summary><div class="field" style="margin-top:8px;"><label for="id_customer_tax_id">VAT / tax number</label><input type="text" id="id_customer_tax_id" name="customer_tax_id" maxlength="40" autocomplete="off" value="{{ form.customer_tax_id|default:'' }}"><span class="hint">Printed on your invoice.</span></div></details>
                 {% if has_digital %}<p class="muted small" style="margin:12px 0 0;">⬇ Your order includes a digital download. By paying you ask for it to be available right away and agree that downloads can't be returned once delivered.</p>{% endif %}
                 <p id="ship-note" class="badge badge-sale" style="margin-top:12px;{% if pricing.ships %}display:none;{% endif %}">Sorry, we don't deliver to this country yet.</p>
@@ -213,7 +220,7 @@ function fillAddress(sel) {
         if ((d.member || d.free_ship) && ship.known) ship = { known: true, ships: ship.ships, fee: 0 };
         const tx = d.taxes || {};
         const code = point ? point.country : (country ? country.value : '');
-        const rule = (tx.countries || {})[code] || tx.default;
+        const rule = d.tax_exempt ? null : ((tx.countries || {})[code] || tx.default);
         let tax = 0;
         if (rule) {
             const base = goods + (rule.ship ? ship.fee : 0);
@@ -265,4 +272,52 @@ document.getElementById('checkout-form')?.addEventListener('submit', function ()
     if (b) { b.disabled = true; b.textContent = 'Processing…'; }
 });
 </script>
+{% if address_autocomplete %}
+<script>
+/* Address suggestions (Google Places, through the store's server). */
+(function () {
+    var input = document.getElementById('id_address');
+    if (!input) return;
+    var box = document.createElement('div'); box.className = 'addr-sugg'; box.setAttribute('role', 'listbox'); box.hidden = true;
+    input.parentNode.style.position = 'relative'; input.parentNode.appendChild(box);
+    input.setAttribute('aria-autocomplete', 'list');
+    var session = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())), timer, last = '';
+    function country() { var c = document.querySelector('select[name=country]'); return c ? c.value : ''; }
+    function close() { box.hidden = true; box.innerHTML = ''; }
+    function set(id, v) { var el = document.getElementById(id); if (el && v) { el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); } }
+    input.addEventListener('input', function () {
+        clearTimeout(timer);
+        var q = input.value.trim();
+        if (q.length < 4 || q === last) { if (q.length < 4) close(); return; }
+        timer = setTimeout(function () {
+            last = q;
+            fetch('{% url "address_suggest" %}?' + new URLSearchParams({ q: q, country: country(), session: session })).then(function (r) { return r.json(); }).then(function (j) {
+                box.innerHTML = '';
+                (j.suggestions || []).forEach(function (s) {
+                    var b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'option'); b.textContent = s.text;
+                    b.addEventListener('click', function () {
+                        close();
+                        fetch('{% url "address_details" %}?' + new URLSearchParams({ id: s.id, session: session })).then(function (r) { return r.json(); }).then(function (a) {
+                            set('id_address', a.address); set('id_city', a.city); set('id_state', a.state); set('id_postal_code', a.postal_code);
+                            var c = document.querySelector('select[name=country]');
+                            if (c && a.country && c.querySelector('option[value="' + a.country + '"]')) { c.value = a.country; c.dispatchEvent(new Event('change', { bubbles: true })); }
+                            session = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+                        });
+                    });
+                    box.appendChild(b);
+                });
+                box.hidden = !box.children.length;
+            }).catch(close);
+        }, 250);
+    });
+    document.addEventListener('click', function (e) { if (!box.contains(e.target) && e.target !== input) close(); });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+})();
+</script>
+<style>
+    .addr-sugg { position: absolute; left: 0; right: 0; top: 100%; z-index: 30; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: 0 10px 30px rgba(0,0,0,.12); overflow: hidden; }
+    .addr-sugg button { display: block; width: 100%; text-align: left; padding: 10px 12px; border: 0; background: none; font: inherit; cursor: pointer; color: var(--ink); }
+    .addr-sugg button:hover, .addr-sugg button:focus { background: var(--surface-2); }
+</style>
+{% endif %}
 {% endblock %}

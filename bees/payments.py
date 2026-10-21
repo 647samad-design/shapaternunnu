@@ -36,6 +36,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.conf import settings
 from django.db import transaction
 from django.urls import reverse
+from .multistore import store_settings  # per-store values in multi-store mode
 
 logger = logging.getLogger(__name__)
 
@@ -48,19 +49,49 @@ class PaymentError(Exception):
 
 
 def is_configured():
-    return bool(getattr(settings, "STRIPE_SECRET_KEY", ""))
+    return bool(getattr(store_settings, "STRIPE_SECRET_KEY", ""))
 
 
 def webhook_configured():
-    return bool(getattr(settings, "STRIPE_WEBHOOK_SECRET", ""))
+    return bool(getattr(store_settings, "STRIPE_WEBHOOK_SECRET", ""))
 
 
 def _stripe():
+    """The Stripe library, with this store's secret key passed on every API
+    call (in multi-store mode each store has its own Stripe account, and the
+    library's global key is shared by the whole process)."""
     import stripe
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    key = store_settings.STRIPE_SECRET_KEY
+    stripe.api_key = key
     stripe.max_network_retries = 2
     stripe.api_base = getattr(settings, "STRIPE_API_BASE", "") or "https://api.stripe.com"
-    return stripe
+    from .multistore import enabled
+    return _Keyed(stripe, key) if enabled() else stripe
+
+
+class _Keyed:
+    """Passes ``api_key`` to Stripe API calls (create, retrieve, list...)."""
+    API_METHODS = {"create", "retrieve", "modify", "delete", "list", "expire", "detach", "attach", "cancel", "capture",
+                   "confirm", "search", "list_line_items", "create_reversal"}
+
+    def __init__(self, target, key):
+        self._target, self._key = target, key
+
+    def __getattr__(self, name):
+        import inspect
+        value = getattr(self._target, name)
+        if inspect.isclass(value) and issubclass(value, BaseException):
+            return value  # exceptions are caught by class
+        if inspect.ismodule(value) or inspect.isclass(value):
+            return _Keyed(value, self._key)
+        if name in self.API_METHODS and callable(value) and inspect.isclass(self._target):
+            key = self._key
+
+            def call(*args, **kwargs):
+                kwargs.setdefault("api_key", key)
+                return value(*args, **kwargs)
+            return call
+        return value
 
 
 def _plain(obj):
@@ -81,7 +112,7 @@ def to_cents(amount, currency=None):
     """Amount in Stripe's smallest currency unit (cents for USD, whole yen
     for JPY ...)."""
     from .templatetags.bees_extras import ZERO_DECIMAL
-    currency = (currency or settings.STORE_CURRENCY).lower()
+    currency = (currency or store_settings.STORE_CURRENCY).lower()
     factor = 1 if currency in ZERO_DECIMAL else 100
     return int((Decimal(str(amount)) * factor).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
@@ -93,7 +124,7 @@ def _absolute(request, path):
 def create_checkout_session(request, order):
     """Creates a Stripe Checkout Session for ``order`` and returns its URL."""
     stripe = _stripe()
-    currency = settings.STORE_CURRENCY.lower()
+    currency = store_settings.STORE_CURRENCY.lower()
 
     line_items = []
     if order.charge_currency:
@@ -214,7 +245,7 @@ def create_plan_checkout(request, payment):
     """Stripe payment page for a seller plan (one-off payment for
     ``payment.months`` months; nothing renews automatically)."""
     stripe = _stripe()
-    currency = settings.STORE_CURRENCY.lower()
+    currency = store_settings.STORE_CURRENCY.lower()
     months = payment.months
     params = {
         "mode": "payment",
@@ -256,7 +287,7 @@ def confirm_plan_payment(payment_id, session):
         return None
     if session.get("payment_status") != "paid":
         return payment
-    currency = settings.STORE_CURRENCY.lower()
+    currency = store_settings.STORE_CURRENCY.lower()
     expected = to_cents(payment.amount / payment.months, currency) * payment.months
     if int(session.get("amount_total") or 0) < expected:
         logger.error("Plan payment %s: Stripe total %s < expected %s", payment.id, session.get("amount_total"), expected)
@@ -402,7 +433,7 @@ def create_card_setup_session(request, customer_id, user=None):
             customer=cid,
             # Stripe's current API takes the payment methods from the
             # Dashboard settings; passing payment_method_types is rejected.
-            currency=settings.STORE_CURRENCY.lower(),
+            currency=store_settings.STORE_CURRENCY.lower(),
             success_url=_absolute(request, reverse("payment_methods")) + "?added={CHECKOUT_SESSION_ID}",
             cancel_url=_absolute(request, reverse("payment_methods")),
         )
@@ -495,7 +526,7 @@ def parse_webhook(payload: bytes, signature: str):
     Raises ValueError if the payload or signature is invalid."""
     stripe = _stripe()
     try:
-        stripe.Webhook.construct_event(payload, signature, settings.STRIPE_WEBHOOK_SECRET)
+        stripe.Webhook.construct_event(payload, signature, store_settings.STRIPE_WEBHOOK_SECRET)
     except Exception as exc:
         raise ValueError("Invalid Stripe webhook") from exc
     return json.loads(payload)
@@ -675,6 +706,8 @@ def restock_item(item, quantity):
     if item.variant_id:
         ProductVariant.objects.filter(pk=item.variant_id).update(stock=F("stock") + quantity)
     Product.objects.filter(pk=item.product_id).update(stock=F("stock") + quantity)
+    from .ops import put_back
+    put_back(item, quantity)
     from .stock_alerts import notify_restocked
     notify_restocked(item.product_id, item.variant_id)
 
@@ -700,7 +733,7 @@ def self_test(request):
     order, and reports each step in plain words. Everything it creates is
     cleaned up again. Used by Admin > System check."""
     stripe = _stripe()
-    currency = settings.STORE_CURRENCY.lower()
+    currency = store_settings.STORE_CURRENCY.lower()
     steps, made = [], {}
 
     def step(name, fn):

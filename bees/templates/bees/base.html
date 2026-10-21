@@ -85,6 +85,7 @@
         .locale-menu .menu-panel a { gap: 6px; }
         .locale-menu .menu-panel a.on { font-weight: 800; color: var(--brand); }
         html[data-theme="dark"] .locale-menu .menu-panel a.on { color: var(--accent); }
+        .nav-live { color: var(--sale) !important; font-weight: 800; }
         .deal-timer { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; padding: 6px 12px; border-radius: 999px; background: color-mix(in srgb, var(--sale) 10%, var(--surface)); color: var(--sale); font-weight: 700; font-size: .95rem; }
         .deal-timer strong { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
         .bulk-offer { margin-top: 10px; display: inline-block; padding: 6px 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--ok) 10%, var(--surface)); color: var(--ok); font-weight: 700; font-size: .95rem; }
@@ -640,6 +641,7 @@
                 <ul>
                     <li><a href="{% url 'all_products' %}" class="{% if request.resolver_match.url_name == 'all_products' %}active{% endif %}">{{ t.all_products }}</a></li>
                     <li><a href="{% url 'deals' %}" class="nav-deals {% if request.resolver_match.url_name == 'deals' %}active{% endif %}">🔥 Deals</a></li>
+                    {% if live_on %}<li><a href="{% url 'live_list' %}" class="nav-live">🔴 Live</a></li>{% endif %}
                     <li><a href="{% url 'shop_assistant' %}" class="{% if request.resolver_match.url_name == 'shop_assistant' %}active{% endif %}">✨ Ask</a></li>
                     {% for slug, label in nav_categories %}
                     <li><a href="{% url 'category_products' slug %}" class="{% if category == slug %}active{% endif %}">{{ label }}</a></li>
@@ -685,6 +687,11 @@
                         {% if brand.gift_cards_enabled %}<li><a href="{% url 'gift_cards' %}">Gift cards</a></li>{% endif %}
                         <li><a href="{% url 'deals' %}">Today's deals</a></li>
                         <li><a href="{% url 'vouchers' %}">Vouchers</a></li>
+                        <li><a href="{% url 'live_list' %}">Live shopping</a></li>
+                        <li><a href="{% url 'videos' %}">Shop by video</a></li>
+                        <li><a href="{% url 'blog_list' %}">Blog</a></li>
+                        {% if brand.spin_enabled %}<li><a href="{% url 'spin' %}">Spin &amp; win</a></li>{% endif %}
+                        <li><a href="{% url 'registries' %}">Gift registry</a></li>
                     </ul>
                 </div>
                 <div>

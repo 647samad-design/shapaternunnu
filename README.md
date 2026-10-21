@@ -160,6 +160,80 @@ Either side can report a conversation; staff review them at /manage/messages/.
 - **Chat translation:** buyers and sellers tap "Translate" on a message to read it in their own
   language (needs `ANTHROPIC_API_KEY`).
 
+## Live shopping, group buys, registries and more
+
+- **Live shopping** (`/live-shopping/`): sellers plan shows in Seller Center > Live shows, stream on
+  YouTube Live, Vimeo or Twitch, and pin products under the video. Shoppers get reminders, chat live and
+  buy without leaving. Followers are told when the show starts. **Shop by video** (`/videos/`) lists every
+  product that has a video.
+- **Group buy:** on a product set "Group buy: people" and "% back". When that many people buy through
+  the same group link within 24 hours, each gets the % back as store credit after delivery
+  (paid by the scheduled job `run_promotions`).
+- **Pre-order:** set "Pre-order: ships on" - the product shows a Pre-order badge and delivery dates
+  count from that day.
+- **Spin & win** (`/spin/`, Store settings > Spin & win): one spin a day for a single-use coupon,
+  free shipping or points; prizes and chances are editable.
+- **Blog** (`/blog/`, Admin > Blog): posts with linked products, RSS feed and sitemap entries.
+- **Gift registries** (Account > Gift registries): a shareable list for weddings, baby showers and
+  birthdays; guests see what's still wanted and the owner is told when something is bought.
+- **'Still looking?' emails:** signed-in shoppers who viewed products without buying get one email
+  (at most weekly; daily task `send_browse_reminders`).
+- **Address suggestions at checkout:** add a Google Maps Platform key (Places API (New)) under
+  Keys & passwords. Requests go through the store's server, so the key stays private.
+- **Filters:** material (from product specifications) and condition, next to brand, size and colour.
+
+## Business accounts, stock locations, integrations
+
+- **Business accounts (B2B):** companies apply under Account > Business account. In Admin > Business
+  accounts you approve them, set invoice terms (15/30/60 days), a credit limit and tax exemption.
+  Buyers add PO numbers and can choose **Pay by invoice**; invoices show the PO and due date, reminders go
+  out 3 days before and weekly when overdue (`invoice_reminders`), and seller earnings wait until the
+  invoice is marked paid.
+- **Stock locations:** Seller Center / Admin > Stock locations. Stock per warehouse or shop; each order line
+  ships from the location in the buyer's country (else by priority) and the seller sees "Ship from".
+- **Integrations:** Admin > Integrations sends signed webhooks (order created/paid/shipped/delivered/
+  cancelled, product changed, new review, new customer) to Zapier, Make, n8n or any app, with retries;
+  and exports sales as invoices for **Xero** or **QuickBooks Online** (CSV).
+- **Customers change their order:** change the delivery address until it ships, or cancel one item of a
+  card/PayPal order before it's packed (refunded automatically, put back in stock, seller told).
+- **AI help chat:** questions the quick answers don't cover are answered from the store's rules and the
+  customer's own orders (needs `ANTHROPIC_API_KEY`); anything unclear goes to the team.
+- **3D & AR:** add a `.glb` link (and optional `.usdz` for iPhone) to a product; shoppers rotate it and
+  place it in their room. The viewer is served from the store itself.
+- **Seller ID checks:** with Stripe Identity turned on in Store settings, sellers verify their ID and a
+  selfie; verified sellers get the Verified badge automatically (Stripe webhook events
+  `identity.verification_session.*`).
+
+## Multi-store mode (run many client stores from one installation)
+
+Sell the platform as a service: each client gets their own store at their own address, with its own
+database, team, sellers, customers, orders, settings, uploaded files, backups and keys (Stripe, PayPal,
+email, Twilio...). Nothing is shared between stores. Off by default; a normal install is unchanged.
+
+```bash
+# 1. In the main .env
+MULTISTORE=True
+# 2. Add a client store (its own SQLite file, or --database postgres://... for an empty PostgreSQL database)
+python manage.py store_create acme --host shop.acme.com --name "Acme Market" --owner-email owner@acme.com --currency EUR
+# 3. Reload the web app (new addresses are accepted at start-up). Point shop.acme.com at this server.
+python manage.py stores                     # list stores with order counts
+python manage.py stores --pause acme        # client stopped paying: shoppers see a short-break page
+python manage.py stores --resume acme
+# Scheduled jobs and updates run per store:
+python manage.py for_each_store daily_tasks
+python manage.py for_each_store run_promotions
+python manage.py for_each_store migrate
+```
+
+- Stores live in `stores/<slug>/` (`store.json`, `db.sqlite3`, `.env`, `backups/`), set `MULTISTORE_DIR`
+  to keep them elsewhere. The folder is git-ignored - back it up.
+- Each store's owner adds their own keys under Keys & passwords; they're saved in that store's `.env`.
+  Keys a store doesn't set (e.g. the AI key) come from the main `.env`. Image storage, error alerts and
+  the CDN are shared by the platform.
+- The platform owner sees every store under **Admin > Stores** on the main address.
+- Hosting: on a VPS/Docker one server serves every domain. On PythonAnywhere each custom domain needs
+  its own web app (paid plan), all pointing at the same code.
+
 ## Demo copy for clients
 
 On a separate copy of the store (never your live store):

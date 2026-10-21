@@ -489,3 +489,28 @@ if SENTRY_DSN:
         send_default_pii=False,
         environment=os.environ.get('SENTRY_ENVIRONMENT', 'production' if not DEBUG else 'development'),
     )
+
+# ---------------------------------------------------------------------------
+# Multi-store mode: many separate stores (own address, database, keys and
+# files) from this one installation. See bees/multistore.py and
+# `python manage.py store_create`. Off by default.
+# ---------------------------------------------------------------------------
+MULTISTORE = env_bool('MULTISTORE', False)
+MULTISTORE_DIR = os.environ.get('MULTISTORE_DIR', '') or str(BASE_DIR / 'stores')
+if MULTISTORE:
+    from bees.multistore import all_hosts as _store_hosts
+    _hosts = _store_hosts()
+    if '*' not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS += _hosts
+    CSRF_TRUSTED_ORIGINS += [f'https://{h}' for h in _hosts]
+    MIDDLEWARE.insert(0, 'bees.multistore.StoreMiddleware')
+    _STORE_BACKENDS = {
+        'django.core.files.storage.FileSystemStorage': 'bees.store_storage.StoreFileSystemStorage',
+        'storages.backends.s3.S3Storage': 'bees.store_storage.StoreS3Storage',
+    }
+    for _name in ('default', 'private'):
+        STORAGES[_name]['BACKEND'] = _STORE_BACKENDS.get(STORAGES[_name]['BACKEND'], STORAGES[_name]['BACKEND'])
+    for _cache in CACHES.values():
+        _cache['KEY_FUNCTION'] = 'bees.multistore.cache_key'
+    MULTISTORE_BASE_EMAIL_BACKEND = EMAIL_BACKEND
+    EMAIL_BACKEND = 'bees.multistore.StoreEmailBackend'

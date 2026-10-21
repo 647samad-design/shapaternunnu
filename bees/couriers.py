@@ -37,7 +37,8 @@ class CourierError(Exception):
 
 def setting(name):
     """Keys live in .env (edited from Store settings > Keys & passwords)."""
-    return os.environ.get(name, "").strip()
+    from .multistore import env as _store_env
+    return _store_env(name)
 
 
 def _request(method, url, headers, body=None):

@@ -1,0 +1,66 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Business account — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:920px;">
+    <div class="page-head"><div><h1>Your account</h1><p>Signed in as <span data-no-translate>{{ request.user.username }}</span></p></div></div>
+    {% include "bees/partials/account_tabs.html" %}
+    <div style="display:grid;gap:20px;grid-template-columns:minmax(0,1fr);">
+    {% if company %}
+        <section class="panel">
+            <h2 data-no-translate>{{ company.name }} <span class="badge {% if company.status == 'approved' %}badge-ok{% endif %}">{{ company.get_status_display }}</span></h2>
+            {% if company.status == "pending" %}<p class="muted">We're checking your details, usually within one working day. You can keep shopping as normal.</p>{% endif %}
+            {% if company.status == "approved" %}
+            <div class="co-stats">
+                <div><b>{% if company.payment_terms %}{{ company.payment_terms }} days{% else %}-{% endif %}</b><span>{% if company.payment_terms %}to pay invoices{% else %}Pay at checkout{% endif %}</span></div>
+                <div><b>{{ unpaid|money }}</b><span>unpaid invoices</span></div>
+                <div><b>{{ room|money }}</b><span>left to buy on invoice</span></div>
+                <div><b>{% if company.tax_exempt %}Yes{% else %}No{% endif %}</b><span>tax-exempt</span></div>
+            </div>
+            <p class="muted small">At checkout you can add a PO number{% if company.payment_terms %} and choose "Pay by invoice"{% endif %}. Every buyer on this account sees the company's orders here.</p>
+            {% endif %}
+        </section>
+        <section class="panel">
+            <h2>Buyers</h2>
+            <ul class="co-members">{% for m in members %}<li><span data-no-translate>{{ m.user.get_full_name|default:m.user.username }} · {{ m.user.email }}</span><span class="muted small">{{ m.get_role_display }}</span>
+                {% if member.role == "admin" and m.user != request.user %}<form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="action" value="remove_member"><input type="hidden" name="member" value="{{ m.id }}"><button class="btn btn-ghost btn-sm" type="submit">Remove</button></form>{% endif %}</li>{% endfor %}</ul>
+            {% if member.role == "admin" %}<form method="post" class="co-add">{% csrf_token %}<input type="hidden" name="action" value="add_member"><label class="sr-only" for="co-e">Email</label><input id="co-e" class="input" type="email" name="email" required placeholder="colleague@company.com"><button class="btn btn-secondary" type="submit">Add buyer</button></form>
+            <p class="muted small">They need an account on {{ brand.site_name }} first.</p>{% endif %}
+        </section>
+        <section class="panel">
+            <h2>Company orders</h2>
+            {% if orders %}<div class="table-scroll"><table class="table"><thead><tr><th>Order</th><th>Buyer</th><th>PO</th><th class="num">Total</th><th>Payment</th></tr></thead><tbody>
+            {% for o in orders %}<tr><td>#{{ o.id }}<br><span class="muted small">{{ o.created_at|date:"j M Y" }}</span></td><td class="small">{{ o.user.username|default:"-" }}</td><td class="small">{{ o.po_number|default:"-" }}</td><td class="num">{{ o.total|money }}</td>
+                <td>{% if o.payment_status == "invoiced" %}<span class="badge{% if o.payment_due and o.payment_due < today %} badge-sale{% endif %}">Due {{ o.payment_due|date:"j M" }}</span>{% else %}{{ o.get_payment_status_display }}{% endif %} {% if o.user_id == request.user.id %}<a class="link small" href="{% url 'invoice_pdf' o.id %}">Invoice</a>{% endif %}</td></tr>{% endfor %}
+            </tbody></table></div>{% else %}<p class="muted">No orders yet.</p>{% endif %}
+        </section>
+    {% else %}
+        <section class="panel">
+            <h2>Open a business account</h2>
+            <p class="muted">For companies, schools and organisations: several buyers on one account, PO numbers on invoices, tax-exempt buying (with a certificate) and paying by invoice once approved.</p>
+            <form method="post" class="co-form">{% csrf_token %}<input type="hidden" name="action" value="apply">
+                <div class="field"><label for="cf-n">Company name</label><input id="cf-n" name="name" required maxlength="150"></div>
+                <div class="field"><label for="cf-t">VAT / tax number</label><input id="cf-t" name="tax_id" maxlength="40"></div>
+                <div class="field"><label for="cf-e">Billing email</label><input id="cf-e" name="billing_email" type="email" required value="{{ request.user.email }}"></div>
+                <div class="field"><label for="cf-c">Country</label><select id="cf-c" name="country"><option value="">Choose…</option>{% for code, name in countries %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select></div>
+                <div class="field co-wide"><label for="cf-a">Billing address</label><textarea id="cf-a" name="billing_address" rows="2" maxlength="500"></textarea></div>
+                <label class="check co-wide"><input type="checkbox" name="tax_exempt_requested" value="1"> <span>We're tax-exempt</span></label>
+                <div class="field co-wide"><label for="cf-x">Exemption certificate number or reason <span class="muted">(if tax-exempt)</span></label><input id="cf-x" name="exemption_note" maxlength="300"></div>
+                <div class="co-wide"><button class="btn btn-primary" type="submit">Apply</button></div>
+            </form>
+        </section>
+    {% endif %}
+    </div>
+</div>
+<style>
+    .co-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+    .co-stats > div { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); display: grid; }
+    .co-stats b { font-size: 1.2rem; } .co-stats span { color: var(--muted); font-size: .85rem; }
+    .co-members { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
+    .co-members li { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .co-add { display: flex; gap: 8px; } .co-add input { flex: 1; min-width: 0; }
+    .co-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .co-wide { grid-column: 1 / -1; }
+    @media (max-width: 640px) { .co-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .co-form { grid-template-columns: minmax(0, 1fr); } }
+</style>
+{% endblock %}

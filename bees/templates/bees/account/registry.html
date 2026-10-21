@@ -1,0 +1,45 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}{{ reg.title }} — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page" style="max-width:920px;">
+    <div class="page-head"><div><h1>Your account</h1><p>Signed in as <span data-no-translate>{{ request.user.username }}</span></p></div></div>
+    {% include "bees/partials/account_tabs.html" %}
+    <div style="display:grid;gap:20px;grid-template-columns:minmax(0,1fr);">
+        <section class="panel">
+            <p class="small"><a class="link" href="{% url 'registries' %}">← All registries</a></p>
+            <h2>{{ reg.title }}</h2>
+            <label class="small" for="rg-link">Share this link with guests</label>
+            <div class="rg-share"><input id="rg-link" class="input" readonly value="{{ share_url }}"><button type="button" class="btn btn-secondary btn-sm" data-share-product data-url="{{ share_url }}" data-title="{{ reg.title }}">Share</button><a class="btn btn-ghost btn-sm" href="{{ share_url }}" target="_blank" rel="noopener">Preview</a></div>
+        </section>
+        <section class="panel">
+            <h2>Gifts</h2>
+            {% if items %}<div class="table-scroll"><table class="table"><thead><tr><th>Gift</th><th>Wanted</th><th>Bought</th><th></th></tr></thead><tbody>
+            {% for i in items %}<tr><td><a class="rowlink" href="{% url 'product_detail' i.product_id %}">{{ i.product.name }}</a>{% if i.variant %} <span class="muted small">{{ i.variant.label }}</span>{% endif %}{% if i.note %}<br><span class="muted small">{{ i.note }}</span>{% endif %}</td>
+                <td><form method="post" class="rg-qty">{% csrf_token %}<input type="hidden" name="action" value="wanted"><input type="hidden" name="item" value="{{ i.id }}"><label class="sr-only" for="w{{ i.id }}">Wanted</label><input id="w{{ i.id }}" name="wanted" type="number" min="1" max="50" value="{{ i.wanted }}"><input type="hidden" name="note" value="{{ i.note }}"><button class="btn btn-ghost btn-sm" type="submit">Save</button></form></td>
+                <td>{{ i.bought }}</td>
+                <td><form method="post" style="margin:0;">{% csrf_token %}<input type="hidden" name="action" value="remove"><input type="hidden" name="item" value="{{ i.id }}"><button class="btn btn-ghost btn-sm" type="submit" style="color:var(--sale);">Remove</button></form></td></tr>{% endfor %}
+            </tbody></table></div>
+            {% else %}<p class="muted">No gifts yet. Open any product and use <strong>🎁 Add to registry</strong>.</p>{% endif %}
+        </section>
+        <section class="panel">
+            <h2>Details</h2>
+            <form method="post" class="rg-details">{% csrf_token %}<input type="hidden" name="action" value="details">
+                <div class="field"><label for="rd-t">Name</label><input id="rd-t" name="title" maxlength="100" value="{{ reg.title }}"></div>
+                <div class="field"><label for="rd-d">Date</label><input id="rd-d" name="event_date" type="date" value="{{ reg.event_date|date:'Y-m-d' }}"></div>
+                <div class="field rg-wide"><label for="rd-m">Message for guests</label><textarea id="rd-m" name="message" rows="2" maxlength="600">{{ reg.message }}</textarea></div>
+                <div class="rg-wide" style="display:flex;gap:8px;"><button class="btn btn-primary" type="submit">Save</button><button class="btn btn-ghost" name="action" value="delete" style="color:var(--sale);margin-left:auto;" onclick="return confirm('Delete this registry?')">Delete registry</button></div>
+            </form>
+        </section>
+    </div>
+</div>
+<style>
+    .rg-share { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+    .rg-share input { flex: 1; min-width: 200px; }
+    .rg-qty { display: flex; gap: 6px; margin: 0; } .rg-qty input[type=number] { width: 70px; }
+    .rg-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .rg-wide { grid-column: 1 / -1; }
+    @media (max-width: 640px) { .rg-details { grid-template-columns: minmax(0, 1fr); } }
+</style>
+{% endblock %}

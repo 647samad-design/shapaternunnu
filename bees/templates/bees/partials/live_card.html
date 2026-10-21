@@ -1,0 +1,6 @@
+<a class="live-card" href="{% url 'live_detail' s.id %}">
+    {% if s.status == "live" %}<span class="live-tag on">● LIVE</span>{% elif s.status == "ended" %}<span class="live-tag">Replay</span>{% else %}<span class="live-tag">{{ s.starts_at|date:"D j M, H:i" }}</span>{% endif %}
+    <h3>{{ s.title }}</h3>
+    <span class="muted small" data-no-translate>{{ s.host_name }}</span>
+    <span class="live-thumbs">{% for p in s.products.all|slice:":5" %}<img src="{{ p.image_url }}" alt="" loading="lazy">{% endfor %}</span>
+</a>

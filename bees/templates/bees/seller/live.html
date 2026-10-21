@@ -1,0 +1,39 @@
+{% extends "bees/seller/base.html" %}
+{% block page_title %}Live shows{% endblock %}
+{% block seller %}
+<div class="adm-head"><div><h1>Live shows</h1><p>Go live on YouTube, Vimeo or Twitch and pin your products under the video. Shoppers chat with you and buy while watching. Your followers are told when you start.</p></div></div>
+<section class="panel">
+    <h2>{% if edit %}Edit show{% else %}Plan a show{% endif %}</h2>
+    <form method="post" class="live-form">{% csrf_token %}<input type="hidden" name="action" value="save">{% if edit %}<input type="hidden" name="id" value="{{ edit.id }}">{% endif %}
+        <div class="field lf-wide"><label for="lv-t">Title</label><input id="lv-t" name="title" maxlength="120" required value="{{ edit.title|default:'' }}" placeholder="e.g. New summer collection - live try-on"></div>
+        <div class="field"><label for="lv-s">Starts</label><input id="lv-s" name="starts_at" type="datetime-local" required value="{% if edit %}{{ edit.starts_at|date:'Y-m-d\TH:i' }}{% endif %}"></div>
+        <div class="field"><label for="lv-u">Stream link</label><input id="lv-u" name="stream_url" maxlength="300" value="{{ edit.stream_url|default:'' }}" placeholder="https://youtube.com/live/…"><small class="muted">Start the stream in YouTube Studio, Vimeo or Twitch, then paste its link. Needed before you go live.</small></div>
+        <div class="field lf-wide"><label for="lv-d">Description</label><textarea id="lv-d" name="description" rows="2" maxlength="1000">{{ edit.description|default:'' }}</textarea></div>
+        <fieldset class="field lf-wide"><legend class="label">Products to show (up to 20)</legend>
+            <div class="lf-products">{% for p in products %}<label><input type="checkbox" name="products" value="{{ p.id }}"{% if edit and p in edit.products.all %} checked{% endif %}><span>{{ p.name|truncatechars:40 }}</span></label>{% empty %}<span class="muted small">Add products first.</span>{% endfor %}</div>
+        </fieldset>
+        <div class="lf-wide"><button class="btn btn-primary" type="submit">Save show</button>{% if edit %} <a class="btn btn-ghost" href="{% url 'seller_live' %}">Cancel</a>{% endif %}</div>
+    </form>
+</section>
+<section class="panel">
+    <h2>Your shows</h2>
+    {% if shows %}<div class="table-scroll"><table class="table"><thead><tr><th>Show</th><th>Starts</th><th>Status</th><th></th></tr></thead><tbody>
+    {% for s in shows %}<tr><td><a class="rowlink" href="{% url 'live_detail' s.id %}" target="_blank" rel="noopener">{{ s.title }}</a><br><span class="muted small">{{ s.products.all|length }} product{{ s.products.all|length|pluralize }}</span></td>
+        <td>{{ s.starts_at|date:"j M Y, H:i" }}</td>
+        <td>{% if s.status == "live" %}<span class="pill bad">● Live</span>{% elif s.status == "ended" %}<span class="pill">Ended</span>{% else %}<span class="pill ok">Planned</span>{% endif %}</td>
+        <td><form method="post" style="display:flex;gap:6px;flex-wrap:wrap;margin:0;">{% csrf_token %}<input type="hidden" name="id" value="{{ s.id }}">
+            {% if s.status == "scheduled" %}<button class="btn btn-primary btn-sm" name="action" value="start">Go live</button><a class="btn btn-ghost btn-sm" href="?edit={{ s.id }}">Edit</a>{% endif %}
+            {% if s.status == "live" %}<button class="btn btn-secondary btn-sm" name="action" value="end">End show</button>{% endif %}
+            {% if s.status != "live" %}<button class="btn btn-ghost btn-sm" name="action" value="delete" style="color:var(--sale);">Delete</button>{% endif %}</form></td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="muted">No shows yet.</p>{% endif %}
+</section>
+<style>
+    .live-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .lf-wide { grid-column: 1 / -1; }
+    .lf-products { display: flex; flex-wrap: wrap; gap: 6px; max-height: 220px; overflow-y: auto; padding: 2px; }
+    .lf-products label { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: .88rem; cursor: pointer; }
+    .lf-products label:has(input:checked) { border-color: var(--brand); background: var(--surface-2); }
+    fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
+    @media (max-width: 720px) { .live-form { grid-template-columns: minmax(0, 1fr); } }
+</style>
+{% endblock %}

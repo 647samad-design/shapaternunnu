@@ -26,6 +26,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from .ratelimit import ratelimit
+from .multistore import store_settings  # per-store values in multi-store mode
 
 logger = logging.getLogger(__name__)
 AMOUNTS = [25, 50, 100, 200]
@@ -277,7 +278,7 @@ def buy(request):
             messages.error(request, " ".join(exc.messages))
             return render(request, "bees/gift_cards.html", {"form": form, "amounts": AMOUNTS, "methods": methods})
         card = GiftCard.objects.create(
-            code=new_code(), amount=amount, currency=settings.STORE_CURRENCY.lower(),
+            code=new_code(), amount=amount, currency=store_settings.STORE_CURRENCY.lower(),
             purchaser=request.user if request.user.is_authenticated else None, purchaser_email=form["email"].lower(),
             from_name=form["from_name"][:80], recipient_name=form["recipient_name"][:80],
             recipient_email=form["recipient_email"].lower(), message=form["message"][:300], payment_method=form["method"])
@@ -380,7 +381,7 @@ def admin_page(request):
                 messages.error(request, "Enter an amount (1 - 5,000) and a valid email.")
                 return redirect("manage_gift_cards")
             card = GiftCard.objects.create(
-                code=new_code(), amount=amount, currency=settings.STORE_CURRENCY.lower(), purchaser_email=email,
+                code=new_code(), amount=amount, currency=store_settings.STORE_CURRENCY.lower(), purchaser_email=email,
                 recipient_email=email, recipient_name=request.POST.get("name", "").strip()[:80], from_name=_site().site_name,
                 message=request.POST.get("message", "").strip()[:300], payment_method="staff", issued_by=request.user,
                 note=request.POST.get("note", "").strip()[:200])
