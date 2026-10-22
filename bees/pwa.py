@@ -37,9 +37,40 @@ def manifest(request):
             {"name": "Messages", "url": reverse("messages_inbox")},
         ],
     }
+    from .multistore import env
+    package = env("ANDROID_APP_PACKAGE")
+    if package:
+        data["related_applications"] = [{"platform": "play", "id": package,
+                                         "url": f"https://play.google.com/store/apps/details?id={package}"}]
     response = JsonResponse(data, content_type="application/manifest+json")
     response["Cache-Control"] = "public, max-age=3600"
     return response
+
+
+@require_GET
+def assetlinks(request):
+    """Digital Asset Links: proves the Play Store app (a Trusted Web
+    Activity) belongs to this site, so it opens full-screen without a
+    browser bar. Set ANDROID_APP_PACKAGE and ANDROID_APP_SHA256."""
+    from .multistore import env
+    package = env("ANDROID_APP_PACKAGE")
+    prints = [p.strip().upper() for p in env("ANDROID_APP_SHA256").split(",") if p.strip()]
+    data = [] if not (package and prints) else [{
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {"namespace": "android_app", "package_name": package, "sha256_cert_fingerprints": prints}}]
+    response = JsonResponse(data, safe=False)
+    response["Cache-Control"] = "public, max-age=3600"
+    return response
+
+
+def mobile_app(request):
+    """Admin > Mobile app: how to publish the store on Google Play."""
+    from .manage_views import _render
+    from .multistore import env
+    site = request.build_absolute_uri("/").rstrip("/").replace("http://", "https://")
+    return _render(request, "mobile_app.html", {
+        "section": "mobile_app", "site": site, "package": env("ANDROID_APP_PACKAGE"), "prints": env("ANDROID_APP_SHA256"),
+        "play_url": env("PLAY_STORE_URL"), "assetlinks": site + "/.well-known/assetlinks.json", "manifest": site + "/manifest.webmanifest"})
 
 
 @require_GET

@@ -73,8 +73,11 @@ def attention_counts(force=False):
             "messages": ChatThread.objects.filter(is_resolved=False).filter(Exists(unread_user_msgs)).count(),
             "reported": Conversation.objects.filter(reported=True).count(),
             "claims": Claim.objects.filter(status="escalated").count(),
+            "transfers": Order.objects.filter(payment_method="transfer", payment_status="pending", status="pending",
+                                              transfer_submitted_at__isnull=False).count(),
         }
         data["messages"] += data["reported"]
+        data["orders"] += data["transfers"]
         data["total"] = data["orders"] + data["products"] + data["sellers"] + data["returns"] + data["messages"] + data["claims"]
         cache.set("manage:attention", data, 30)
     return data
@@ -1345,12 +1348,14 @@ def keys(request):
         groups.append((title, hint, [{"key": key, "label": label, "secret": secret, "set": bool(current.get(key)),
                                       "shown": envfile.mask(current.get(key, ""), secret)} for key, label, secret, _p in rows]))
     paypal_webhook = request.build_absolute_uri(_reverse("paypal_webhook"))
+    jazzcash_return = request.build_absolute_uri(_reverse("jazzcash_return")).replace("http://", "https://")
+    whatsapp_hook = request.build_absolute_uri(_reverse("whatsapp_webhook")).replace("http://", "https://")
     social_redirects = {"google": request.build_absolute_uri(_reverse("social_callback", args=["google"])),
                         "apple": request.build_absolute_uri(_reverse("social_callback", args=["apple"]))}
     token = current.get("SHIPPING_WEBHOOK_TOKEN", "")
     webhook = request.build_absolute_uri(_reverse("courier_webhook", args=[token])) if token else ""
     return _render(request, "keys.html", {
-        "section": "keys", "groups": groups, "webhook_url": webhook, "paypal_webhook": paypal_webhook, "social_redirects": social_redirects, "push_ready": bool(current.get("VAPID_PRIVATE_KEY")), "env_exists": os.path.exists(envfile.path()),
+        "section": "keys", "groups": groups, "webhook_url": webhook, "paypal_webhook": paypal_webhook, "jazzcash_return": jazzcash_return, "whatsapp_hook": whatsapp_hook, "social_redirects": social_redirects, "push_ready": bool(current.get("VAPID_PRIVATE_KEY")), "env_exists": os.path.exists(envfile.path()),
         "locked": [(k, bool(current.get(k))) for k in envfile.LOCKED],
     })
 
@@ -1470,7 +1475,9 @@ class SiteSettingsForm(forms.ModelForm):
         ("Announcement bar", "A message across the top of every page, e.g. a sale.", ["banner_active", "banner_text", "banner_link"]),
         ("Selling", "Commission taken from each sale. Applies to sellers who join from now on; change an existing seller's rate on their page.",
          ["commission_individual", "commission_organization"]),
-        ("Shipping & payment", "Applied at checkout.", ["shipping_flat_fee", "free_shipping_threshold", "delivery_days", "return_days", "allow_cash_on_delivery", "allow_guest_checkout"]),
+        ("Shipping & payment", "Applied at checkout.", ["shipping_flat_fee", "free_shipping_threshold", "delivery_days", "return_days", "allow_cash_on_delivery", "delivery_codes", "allow_guest_checkout"]),
+        ("Easypaisa, JazzCash & bank transfer", "For Pakistan: customers send money to your wallet or bank (Raast) and enter the transaction ID; you confirm it under Orders > Payments to check. JazzCash online checkout turns on by itself once its keys are added under Keys & passwords.",
+         ["transfer_enabled", "transfer_accounts", "transfer_hours"]),
         ("Privacy, analytics & search", "Analytics and ad pixels only load after a visitor accepts cookies. Verify your site in Google Search Console with its meta-tag code.",
          ["cookie_banner", "ga4_id", "meta_pixel_id", "google_site_verification"]),
         ("Taxes & duties", "Set rates per country under Tax rates. The default below is used for every other country.",
@@ -1521,7 +1528,7 @@ class SiteSettingsForm(forms.ModelForm):
     OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent",
                 "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams", "duties_policy",
                 "cod_max_order", "cod_refusal_limit", "min_auto_payout", "auto_payouts", "ads_min_bid", "ads_slots",
-                "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points", "bnpl_instalments", "affiliate_percent", "message_channel", "review_photo_points", "spin_prizes", "price_protection_days")
+                "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points", "bnpl_instalments", "affiliate_percent", "message_channel", "review_photo_points", "spin_prizes", "price_protection_days", "transfer_hours")
 
     def clean_spin_prizes(self):
         from .shopper import prizes
@@ -1562,6 +1569,18 @@ class SiteSettingsForm(forms.ModelForm):
 
     def clean_checkin_points(self):
         return self._keep("checkin_points")
+
+    def clean_transfer_hours(self):
+        value = self._keep("transfer_hours")
+        if value is not None and not 2 <= value <= 168:
+            raise ValidationError("Use 2 to 168 hours.")
+        return value
+
+    def clean_transfer_accounts(self):
+        value = self.cleaned_data.get("transfer_accounts", "")
+        if self.cleaned_data.get("transfer_enabled") is not False and self.data.get("transfer_enabled") and not any(":" in line for line in value.splitlines()):
+            raise ValidationError("Add at least one account as 'Name: details'.")
+        return value
 
     def clean_price_protection_days(self):
         value = self._keep("price_protection_days")
@@ -2150,6 +2169,22 @@ def operations_checks(dj=None):
     from .paypal import status_line as paypal_status
     p_state, p_text = paypal_status()
     add("Payments", "PayPal", p_state != "missing", p_text, level="ok" if p_state != "missing" else "warn")
+    from . import pk_payments
+    j_state, j_text = pk_payments.jazzcash_status_line()
+    add("Payments", "JazzCash", j_state != "missing", j_text, level="ok" if j_state != "missing" else "warn")
+    waiting = Order.objects.filter(payment_method="transfer", payment_status="pending", status="pending", transfer_submitted_at__isnull=False)
+    oldest = waiting.order_by("transfer_submitted_at").values_list("transfer_submitted_at", flat=True).first()
+    if pk_payments.transfer_on() or oldest:
+        add("Payments", "Transfers to confirm", not oldest or now - oldest < timedelta(hours=12),
+            "None waiting." if not oldest else f"{waiting.count()} waiting (oldest {timezone.localtime(oldest):%b %d, %H:%M}) - Orders > Payments to check.",
+            level=None if not oldest or now - oldest < timedelta(hours=12) else "warn")
+    from . import maps
+    add("Shipping", "Delivery map", True, "Google Maps." if maps.browser_key() else
+        "OpenStreetMap (free). Add a Google 'Map key' under Keys & passwords for Google Maps.", level="ok")
+    from .models import TrustFlag
+    flags = TrustFlag.objects.filter(status="open").count()
+    add("Security", "Trust & safety findings", not flags, "None open." if not flags else f"{flags} open - Admin > Trust & safety.",
+        level=None if not flags else "warn")
     from .couriers import status_line
     c_state, c_text = status_line()
     add("Shipping", "Courier service", c_state != "missing", c_text, level="ok" if c_state != "missing" else "warn")

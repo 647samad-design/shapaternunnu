@@ -1,0 +1,58 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Pay for order #{{ order.id }} — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block extra_css %}
+    .pt-wrap { max-width: 760px; margin: 0 auto; display: grid; gap: 16px; }
+    .pt-amount { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .pt-acc { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+    .pt-acc li { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; background: var(--surface); }
+    .pt-acc code { font-size: 1rem; overflow-wrap: anywhere; }
+    .pt-steps { margin: 10px 0 0 18px; display: grid; gap: 4px; }
+    .pt-form { display: grid; gap: 12px; }
+{% endblock %}
+{% block content %}
+<div class="wrap page">
+<div class="pt-wrap">
+    <a class="link small" href="{% if order.user_id %}{% url 'my_orders' %}{% else %}{{ order.tracking_path }}{% endif %}">← My orders</a>
+    <section class="panel">
+        {% if order.payment_status == "paid" %}
+            <h1>Payment confirmed</h1>
+            <p class="muted" style="margin-top:6px;">Thank you! Order #{{ order.id }} is confirmed and on its way to the seller.</p>
+        {% elif order.status == "cancelled" %}
+            <h1>Order #{{ order.id }} was cancelled</h1>
+            <p class="muted" style="margin-top:6px;">No payment arrived in time. If you already sent money, reply to your order email and we'll sort it out.</p>
+        {% else %}
+            <h1>Pay for order #{{ order.id }}</h1>
+            <div class="pt-amount" style="margin-top:8px;">{% if order.charge_currency %}{{ order.charge_amount|floatformat:2 }} {{ order.charge_currency|upper }}{% else %}{{ order.total|money }}{% endif %}</div>
+            {% if order.charge_currency %}<p class="muted small">= {{ order.total|money }}</p>{% endif %}
+            <ol class="pt-steps">
+                <li>Send exactly this amount to one of the accounts below (Easypaisa, JazzCash or bank / Raast).</li>
+                <li>Write {{ order.id }} in the payment note if your app allows it.</li>
+                <li>Enter the transaction ID from your receipt below. A screenshot helps us confirm it faster.</li>
+            </ol>
+            <ul class="pt-acc">{% for name, details in accounts %}<li><strong data-no-translate>{{ name }}</strong><code data-no-translate>{{ details }}</code></li>{% endfor %}</ul>
+            <p class="muted small" style="margin-top:10px;">Please send it within {{ hours }} hours - after that the order is cancelled and the items go back on sale.</p>
+        {% endif %}
+    </section>
+    {% if order.payment_status == "pending" and order.status == "pending" %}
+    <section class="panel">
+        {% if order.transfer_submitted_at %}
+            <h2>We're checking your payment</h2>
+            <p class="muted" style="margin-top:6px;"><span data-no-translate>{{ order.transfer_reference }} → {{ order.transfer_account }}</span></p>
+            <p class="muted" style="margin-top:4px;">You'll get an email as soon as it's confirmed - usually within a few hours.</p>
+        {% else %}
+            <h2>I've sent the money</h2>
+            {% if order.transfer_note %}<div class="callout warn" style="margin:10px 0;"><strong>We couldn't confirm your last payment:</strong> {{ order.transfer_note }} Please check and send the correct transaction ID.</div>{% endif %}
+            <form method="post" enctype="multipart/form-data" class="pt-form" style="margin-top:10px;">{% csrf_token %}
+                <div class="field"><label for="pt-a">Sent to</label><select id="pt-a" name="account" required>{% for name, details in accounts %}<option value="{{ name }}" data-no-translate>{{ name }}</option>{% endfor %}</select></div>
+                <div class="field"><label for="pt-r">Transaction ID</label><input class="input" id="pt-r" name="reference" required minlength="4" maxlength="60" autocomplete="off" placeholder="e.g. 0123456789"></div>
+                <div class="field"><label for="pt-p">Screenshot of the receipt (optional)</label><input id="pt-p" type="file" name="proof" accept="image/*"></div>
+                <button class="btn btn-primary" type="submit">Send for checking</button>
+            </form>
+        {% endif %}
+    </section>
+    {% endif %}
+</div>
+</div>
+{% endblock %}

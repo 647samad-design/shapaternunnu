@@ -384,6 +384,7 @@
         .footer a:hover { color: var(--on-brand); text-decoration: underline; }
         .footer-top { display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); gap: 40px; padding: 56px 0 40px; }
         .footer-brand .logo-text { color: var(--on-brand); }
+        .play-badge { display: inline-flex; align-items: center; gap: 8px; margin: 4px 0 12px; padding: 8px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--on-brand) 40%, transparent); font-weight: 600; }
         .footer-brand p { margin-top: 12px; max-width: 34ch; }
         .footer h3 { color: var(--on-brand); font-size: 1.05rem; margin-bottom: 14px; }
         .footer ul { list-style: none; display: grid; gap: 10px; }
@@ -670,6 +671,7 @@
                 <div class="footer-brand">
                     {% if brand.logo %}<img src="{{ brand.logo }}" alt="{{ brand.site_name }}" style="height:40px;width:auto;">{% else %}<span class="logo-text">{{ brand.site_name }}</span>{% endif %}
                     <p>{{ brand.tagline }}</p>
+                    {% if play_store_url %}<a class="play-badge" href="{{ play_store_url }}" rel="noopener" target="_blank"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><path d="M4 2.8v18.4c0 .4.4.7.8.5l10.4-9.2L4.8 2.3c-.4-.2-.8.1-.8.5Zm12.8 7.3-2.6 2.3 2.6 2.3 3.6-2c.6-.4.6-1.2 0-1.5l-3.6-1.1Z"/></svg> Get the app on Google Play</a>{% endif %}
                     {% if brand.facebook_url or brand.instagram_url or brand.twitter_url or brand.youtube_url %}
                     <div class="social">
                         {% if brand.facebook_url %}<a href="{{ brand.facebook_url }}" aria-label="Facebook" rel="noopener" target="_blank"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M22 12a10 10 0 1 0-11.6 9.9v-7H7.9V12h2.5V9.8c0-2.5 1.5-3.9 3.8-3.9 1.1 0 2.2.2 2.2.2v2.4h-1.2c-1.2 0-1.6.8-1.6 1.6V12h2.8l-.4 2.9h-2.4v7A10 10 0 0 0 22 12Z"/></svg></a>{% endif %}

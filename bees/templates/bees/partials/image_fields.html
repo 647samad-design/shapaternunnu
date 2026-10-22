@@ -5,6 +5,7 @@
             <img {% if p.image_url %}src="{{ p.image_url }}"{% elif product.image_url %}src="{{ product.image_url }}"{% endif %} alt="" data-preview-img {% if not p.image_url and not product.image_url %}hidden{% endif %}>
             <span class="imgf-empty" data-preview-empty {% if p.image_url or product.image_url %}hidden{% endif %}>No image yet</span>
         </div>
+        {% if product and product.pk and request.path|slice:":8" == "/seller/" %}<a class="btn btn-secondary btn-sm imgf-studio" href="{% url 'seller_photo_studio' product.pk %}">✨ Photo studio</a>{% endif %}
         <div class="imgf-inputs">
             <div class="field"><label for="img_file">Upload main image</label>
                 <input type="file" id="img_file" name="image_file" accept="image/jpeg,image/png,image/webp,image/gif" data-file-input style="padding:9px;min-height:0;">
@@ -38,6 +39,7 @@
     .imgf-preview { width: 160px; height: 160px; border-radius: var(--radius); background: var(--surface-2); border: 1.5px dashed var(--line); display: grid; place-items: center; overflow: hidden; }
     .imgf-preview img { width: 100%; height: 100%; object-fit: cover; }
     .imgf-preview.bad { border-color: var(--sale); }
+    .imgf-studio { margin-top: 8px; width: 160px; justify-content: center; }
     .imgf-empty { color: var(--muted); font-size: .9rem; padding: 10px; text-align: center; }
     .imgf-inputs { display: grid; gap: 14px; min-width: 0; }
     .imgf-gallery { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }

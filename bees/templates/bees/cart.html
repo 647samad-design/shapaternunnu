@@ -89,6 +89,7 @@
             <a class="btn btn-secondary btn-block" style="margin-top:8px;" href="{% url 'signup' %}?next={% url 'checkout' %}">New here? Create an account</a>
             <p class="summary-note" style="margin-top:8px;">Your cart is saved while you sign in.</p>
             {% endif %}
+            {% if wa_order %}<a class="btn btn-secondary btn-block" style="margin-top:8px;" href="{{ wa_order }}" target="_blank" rel="noopener">Order on WhatsApp instead</a>{% endif %}
             <p class="summary-note">{% if stripe_enabled %}Secure payment with card, Apple Pay or Google Pay{% else %}Secure checkout{% endif %}</p>
         </aside>
     </div>

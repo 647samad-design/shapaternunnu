@@ -16,6 +16,7 @@
             <div class="field"><label for="b_phone">Phone</label><input type="tel" id="b_phone" name="phone" placeholder="Include country code" required value="{{ form.phone|default:'' }}" autocomplete="tel"></div>
             <div class="field"><label for="b_country">Country</label><select id="b_country" name="country" required>{% load bees_extras %}{% countries as country_list %}<option value="">Choose…</option>{% for code, cname in country_list %}<option value="{{ cname }}" {% if form.country == cname %}selected{% endif %}>{{ cname }}</option>{% endfor %}</select></div>
         </div>
+        <div style="margin-top:16px;">{% include "bees/partials/location_picker.html" with lat=form.pickup_latitude lng=form.pickup_longitude prefix="pickup_" auto=True title="Your pickup location" hint="Where couriers collect your parcels. We use your current location - drag the pin if it's not exact. Only the store team and couriers see it." %}</div>
         <label class="check" style="margin-top:16px;display:flex;gap:8px;align-items:flex-start;"><input type="checkbox" name="agree" value="1" required {% if form.agree %}checked{% endif %}> <span>I agree to the <a class="link" href="{% url 'terms_page' %}" target="_blank" rel="noopener">seller terms</a> and will only sell items I'm allowed to sell.</span></label>
         <div class="field" style="margin-top:22px;"><button type="submit" class="btn btn-primary btn-block">Submit application</button></div>
     </form>

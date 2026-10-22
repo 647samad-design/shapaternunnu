@@ -223,6 +223,40 @@ Either side can report a conversation; staff review them at /manage/messages/.
   shopper's order, the difference goes to their store credit automatically (checked daily, once per drop).
   Shown on product pages, so shoppers don't wait for a sale.
 
+## Built for Pakistan and the Gulf - and power tools for sellers
+
+- **JazzCash online checkout:** wallet, card or voucher on JazzCash's own page. Every request and reply is
+  signed (HMAC-SHA256 with the Integrity Salt) and the amount is checked before an order counts as paid.
+  Keys under Keys & passwords > JazzCash; prices are charged in PKR (store currency PKR, or PKR added under
+  Currencies). Unfinished payments are checked with JazzCash's status API before being released.
+- **Easypaisa / JazzCash wallet / bank (Raast) transfer:** customers send money to your accounts (Store
+  settings), then enter the transaction ID and a screenshot. Orders > Payments to check: one click confirms.
+  A transaction ID can only be used once; unpaid orders are released after the hours you set.
+- **Doorstep delivery code:** cash-on-delivery customers get a 4-digit code (My orders, email, text). The
+  seller or rider must enter it to mark the parcel delivered; 5 wrong tries lock it and alert the team.
+- **Delivery map:** customers drop a pin on their door at checkout (or tap "Use my current location");
+  sellers' pickup point is set from their location at sign-up. Sellers get directions, the packing slip a
+  QR code to the door. OpenStreetMap by default (free); Google Maps with `GOOGLE_MAPS_BROWSER_KEY`.
+- **WhatsApp:** "Order on WhatsApp" on products and the cart. With a Twilio WhatsApp sender pointed at
+  `/whatsapp/incoming/`, customers reply YES/NO to confirm or cancel cash orders, STATUS for their order, or
+  send products and get a one-tap checkout link. Signatures are checked; only the customer's own number works.
+- **Photo studio (sellers):** removes plain backgrounds and centres the product on a white/grey/cream
+  studio background with a soft shadow. Any background with a remove.bg key (`REMOVE_BG_API_KEY`).
+- **Auto-repricer (sellers):** for products sold by several sellers - beat or match the lowest offer, never
+  below your minimum, back to normal when you're alone. Runs nightly and instantly on a competitor's change.
+- **Price tests:** two prices alternate day by day (everyone sees the same price on a day); visitors,
+  conversion, revenue/profit per visitor and confidence; the better price is kept automatically.
+- **Suggested chat replies:** sellers press "Suggest reply" for an answer built from stock, delivery dates and
+  the customer's order (AI-written with a key, templates without). The seller always reviews and sends.
+- **Trust & safety:** every night - photo fingerprints catch copied listings across sellers, suspicious
+  5-star review groups and copied review text, and phone numbers shared by accounts with refused cash orders
+  (also added to each order's risk score). One click takes a listing down, deletes reviews or blocks cash.
+- **Google Play app:** Admin > Mobile app walks through PWABuilder; `/.well-known/assetlinks.json` is served
+  from the package name and fingerprint you enter under Keys & passwords.
+
+Every key (Stripe, PayPal, JazzCash, Google Maps, Twilio/WhatsApp, remove.bg, AI, couriers, storage, the
+Android app...) is added, changed or removed from **Admin > Keys & passwords** - no console needed.
+
 ## Multi-store mode (run many client stores from one installation)
 
 Sell the platform as a service: each client gets their own store at their own address, with its own

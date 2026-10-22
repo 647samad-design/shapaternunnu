@@ -98,7 +98,8 @@ def send_code(order):
     now = timezone.now()
     Order.objects.filter(pk=order.pk).update(cod_otp_hash=_hash(order, code), cod_otp_sent_at=now, cod_otp_tries=0)
     order.cod_otp_hash, order.cod_otp_sent_at, order.cod_otp_tries = _hash(order, code), now, 0
-    sms.send(to, f"{_site().site_name}: your code to confirm cash order #{order.id} is {code}. It expires in {CODE_MINUTES} minutes.")
+    reply = " Or simply reply YES to confirm." if _site().message_channel == "whatsapp" else ""
+    sms.send(to, f"{_site().site_name}: your code to confirm cash order #{order.id} is {code}. It expires in {CODE_MINUTES} minutes.{reply}")
     return True
 
 

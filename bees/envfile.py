@@ -33,6 +33,15 @@ GROUPS = [
         ("PAYPAL_MODE", "Mode: sandbox or live", False, r"^(sandbox|live)$"),
         ("PAYPAL_WEBHOOK_ID", "Webhook ID", False, r"^[A-Z0-9]{10,}$"),
     ]),
+    ("JazzCash (Pakistan)", "JazzCash Merchant Portal > Integration: copy the Merchant ID, Password and Integrity Salt. Use sandbox keys until JazzCash approves you for live. Set the Return URL in the portal to the address shown below.", [
+        ("JAZZCASH_MERCHANT_ID", "Merchant ID", False, r"^[A-Za-z0-9]{4,30}$"),
+        ("JAZZCASH_PASSWORD", "Password", True, r"^\S{4,}$"),
+        ("JAZZCASH_INTEGRITY_SALT", "Integrity Salt", True, r"^\S{4,}$"),
+        ("JAZZCASH_MODE", "Mode: sandbox or live", False, r"^(sandbox|live)$"),
+    ]),
+    ("Photo studio (optional)", "The photo studio removes plain backgrounds by itself. For any background (a room, a hand, a street) add a remove.bg API key: remove.bg > Dashboard > API keys. Each studio photo then uses one remove.bg credit.", [
+        ("REMOVE_BG_API_KEY", "remove.bg API key", True, r"^[A-Za-z0-9]{16,}$"),
+    ]),
     ("Sign in with Google", "console.cloud.google.com > APIs & Services > Credentials > Create OAuth client ID (Web application). Add the redirect address shown below.", [
         ("GOOGLE_CLIENT_ID", "Client ID", False, r"^[0-9A-Za-z._-]+\.apps\.googleusercontent\.com$"),
         ("GOOGLE_CLIENT_SECRET", "Client secret", True, r"^\S{10,}$"),
@@ -81,8 +90,14 @@ GROUPS = [
         ("ANTHROPIC_API_KEY", "Anthropic API key", True, r"^sk-ant-\S+$"),
         ("AI_MODEL", "Model (optional)", False, r"^[a-z0-9.-]+$"),
     ]),
-    ("Address autocomplete", "console.cloud.google.com > APIs & Services > enable 'Places API (New)' > Credentials > Create API key, and restrict it to that API. Shoppers then get address suggestions at checkout.", [
-        ("GOOGLE_MAPS_API_KEY", "Google Maps Platform API key", True, r"^AIza[0-9A-Za-z_-]{30,}$"),
+    ("Google Maps", "console.cloud.google.com > APIs & Services. Server key: enable 'Places API (New)', restrict the key to it - shoppers get address suggestions at checkout. Map key: enable 'Maps JavaScript API', restrict it to your website address (HTTP referrers) - checkout and seller sign-up then show Google Maps instead of the free OpenStreetMap map.", [
+        ("GOOGLE_MAPS_API_KEY", "Server key (address suggestions)", True, r"^AIza[0-9A-Za-z_-]{30,}$"),
+        ("GOOGLE_MAPS_BROWSER_KEY", "Map key (shown in the browser, restrict it to your site)", False, r"^AIza[0-9A-Za-z_-]{30,}$"),
+    ]),
+    ("Android app (Play Store)", "After you build the app with PWABuilder (see Admin > Mobile app), paste its package name and the SHA-256 signing fingerprint from Play Console > App integrity. This links the app to your site so it opens without a browser bar.", [
+        ("ANDROID_APP_PACKAGE", "Package name (e.g. com.yourstore.app)", False, r"^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$"),
+        ("ANDROID_APP_SHA256", "SHA-256 fingerprint(s), comma separated", False, r"^([0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}(,\s*([0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2})*$"),
+        ("PLAY_STORE_URL", "Play Store link (shows 'Get the app')", False, r"^https://play\.google\.com/store/apps/details\?id=[\w.]+"),
     ]),
     ("Error alerts", "sentry.io > Create project > Django > copy the DSN.", [
         ("SENTRY_DSN", "Sentry DSN", True, r"^https://"),

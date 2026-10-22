@@ -113,7 +113,8 @@ def order_status(order, status):
     text = {
         "confirmed": f"{name}: order #{order.id} is confirmed. We'll text you when it ships.",
         "shipped": f"{name}: order #{order.id} is on its way" + (f" with {order.courier_name}" if order.courier_name else "")
-                   + (f", tracking {order.tracking_number}" if order.tracking_number else "") + ".",
+                   + (f", tracking {order.tracking_number}" if order.tracking_number else "") + "."
+                   + (f" Delivery code: {order.delivery_code} - give it to the rider only when you have your parcel." if order.delivery_code and order.payment_method == "cod" else ""),
         "delivered": f"{name}: order #{order.id} was delivered. Enjoy! Rate your items in My orders.",
         "cancelled": f"{name}: order #{order.id} has been cancelled.",
     }.get(status)

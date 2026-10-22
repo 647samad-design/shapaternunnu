@@ -4,7 +4,7 @@
 {% block admin %}
 <div class="adm-head">
     <div><h1>Orders</h1><p>{{ page_obj.paginator.count }} order{{ page_obj.paginator.count|pluralize }}{% if q or status or payment %} match your filters{% endif %}</p></div>
-    <div class="actions"><a class="btn btn-secondary btn-sm" href="?{% for k, v in request.GET.items %}{% if k != 'page' and k != 'export' %}{{ k|urlencode }}={{ v|urlencode }}&amp;{% endif %}{% endfor %}export=csv">Export CSV</a></div>
+    <div class="actions"><a class="btn btn-secondary btn-sm" href="{% url 'manage_transfers' %}">Payments to check{% if attention.transfers %} ({{ attention.transfers }}){% endif %}</a><a class="btn btn-secondary btn-sm" href="?{% for k, v in request.GET.items %}{% if k != 'page' and k != 'export' %}{{ k|urlencode }}={{ v|urlencode }}&amp;{% endif %}{% endfor %}export=csv">Export CSV</a></div>
 </div>
 <div class="tabs" role="group" aria-label="Quick filters">
     <a href="?" class="{% if not status %}on{% endif %}">All</a>

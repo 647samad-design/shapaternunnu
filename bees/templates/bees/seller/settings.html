@@ -30,6 +30,7 @@
                 <div class="field span-2"><label for="s_bank">Payout details</label><input type="text" id="s_bank" name="bank_details" value="{{ seller.bank_details }}" maxlength="255" autocomplete="off"><span class="hint">Bank account / IBAN, or PayPal / Wise / Payoneer email where we send your earnings.</span></div>
                 <div class="field span-2"><label for="s_brand">Brands you sell <span class="muted">(optional)</span></label><textarea id="s_brand" name="brand_info" rows="2" maxlength="5000">{{ seller.brand_info }}</textarea></div>
             </div>
+            <div style="margin-top:16px;">{% include "bees/partials/location_picker.html" with lat=seller.pickup_latitude lng=seller.pickup_longitude prefix="pickup_" title="Pickup location on the map" hint="Couriers and riders come here to collect parcels. Tap 'Use my current location' when you're at your shop or warehouse." %}</div>
             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:22px;">
                 <button type="submit" class="btn btn-primary">Save settings</button>
             </div>

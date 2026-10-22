@@ -30,6 +30,15 @@
     {% else %}You have not been charged.{% endif %}{% if order.credit_used %} The {{ order.credit_used|money }} of store credit you used is back in your account.{% endif %}</p>
 {% endif %}
 
+{% if kind == "shipped" or kind == "item_shipped" %}{% if order.delivery_code and order.payment_method == "cod" %}
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:16px;border:2px dashed #0E3B43;border-radius:10px;width:100%;">
+        <tr><td style="padding:14px 18px;">
+            <div style="color:#56606B;font-size:14px;">Your delivery code</div>
+            <div style="font-size:26px;font-weight:bold;letter-spacing:6px;">{{ order.delivery_code }}</div>
+            <div style="color:#56606B;font-size:13px;margin-top:4px;">Give it to the rider only when the parcel is in your hands. Nobody from the store will ever ask for it by phone.</div>
+        </td></tr>
+    </table>
+{% endif %}{% endif %}
 {% if kind == "confirmed" or kind == "shipped" or kind == "item_shipped" %}
     {% if order.estimated_delivery or order.tracking_number %}
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:20px;background:#F4F6F7;border-radius:10px;width:100%;">

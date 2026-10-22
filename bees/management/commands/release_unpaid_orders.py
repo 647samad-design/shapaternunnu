@@ -55,5 +55,7 @@ class Command(BaseCommand):
             order.save(update_fields=["status", "cancel_reason"])
             payments.restock(order)
             unconfirmed += 1
+        from bees.pk_payments import release_unpaid_transfers
+        released += release_unpaid_transfers()
         self.stdout.write(self.style.SUCCESS(
             f"Released {released} unpaid order(s); confirmed {paid} paid order(s); cancelled {unconfirmed} unconfirmed cash order(s)."))

@@ -163,6 +163,8 @@ def brand(request):
         "photo_search": bool(getattr(store_settings, "AI_API_KEY", "")),
         "live_on": _safe(_live_on, False),
         "multistore_platform": _safe(_multistore_platform, False),
+        "map_key": _safe(lambda: _map_key(request), ""),
+        "play_store_url": _safe(_play_url, ""),
         "demo_mode": getattr(dj_settings, "DEMO_MODE", False),
         "staging": getattr(dj_settings, "STAGING", False),
     }
@@ -177,6 +179,19 @@ def _safe(fn, default):
     except Exception:
         logging.getLogger(__name__).warning("Context extra %s failed", getattr(fn, "__name__", fn), exc_info=True)
         return default
+
+
+def _map_key(request):
+    from . import maps
+    key = maps.browser_key()
+    if key:
+        maps.allow_google(request)
+    return key
+
+
+def _play_url():
+    from .multistore import env
+    return env("PLAY_STORE_URL")
 
 
 def _live_on():

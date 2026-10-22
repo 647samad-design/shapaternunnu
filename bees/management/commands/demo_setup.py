@@ -58,6 +58,12 @@ class Command(BaseCommand):
             self._marketplace(users, seller, products, reset=options["reset"])
             self._shopper_pack(users, seller, products, reset=options["reset"])
             self._ops_pack(users, seller, products)
+            self._power_pack(users, seller, products, reset=options["reset"])
+        try:
+            from bees.trustcheck import run_checks
+            run_checks()
+        except Exception:
+            pass
         site = SiteSettings.load()
         site.setup_completed = True
         site.show_language_menu = True  # show off languages and currencies in the demo
@@ -284,6 +290,63 @@ class Command(BaseCommand):
                 StockLevel.objects.create(warehouse=lisbon, product=product, quantity=a)
                 StockLevel.objects.create(warehouse=berlin, product=product, quantity=b)
                 sync_total(product.pk)
+
+    def _power_pack(self, users, seller, products, reset=False):
+        """Pakistan payments, a cash order with a map pin and doorstep code,
+        a transfer to check, a running price test, a repricer rule and a
+        copied listing for Trust & safety."""
+        from decimal import Decimal as D
+        from bees.models import DailyStat, PriceTest, PriceTestBlock, RepriceRule, SellerAccount
+        mug, tote, candle, kit, beanie = products
+        shopper = users["shopper"]
+        site = SiteSettings.load()
+        site.transfer_enabled = True
+        site.transfer_accounts = site.transfer_accounts or ("Easypaisa: 0345 0000000 (demo account - don't send money)\n"
+                                                            "Meezan Bank (Raast): PK00 MEZN 0000 0000 0000 0000 (demo)")
+        site.delivery_codes = True
+        site.save(update_fields=["transfer_enabled", "transfer_accounts", "delivery_codes"])
+        SellerAccount.objects.filter(pk=seller.pk, pickup_latitude__isnull=True).update(pickup_latitude=D("38.711200"), pickup_longitude=D("-9.139800"))
+        now = timezone.now()
+        if reset or not Order.objects.filter(user=shopper, payment_method="cod").exists():
+            cod = Order.objects.create(user=shopper, email=shopper.email, full_name="Sam Shopper", address="House 14, Street 7, Gulberg III",
+                                       city="Lahore", country="PK", phone="+923000000000", payment_method="cod", payment_status="not_applicable",
+                                       status="confirmed", cod_confirmed=True, sellers_notified=True,
+                                       latitude=D("31.511996"), longitude=D("74.343584"))
+            item = OrderItem(order=cod, product=beanie, product_name=beanie.name, price=beanie.price, quantity=1)
+            item.apply_commission(beanie.seller_account)
+            item.save()
+            from bees.delivery_code import assign
+            assign(cod)
+            transfer = Order.objects.create(user=shopper, email=shopper.email, full_name="Sam Shopper", address="House 14, Street 7, Gulberg III",
+                                            city="Lahore", country="PK", phone="+923000000000", payment_method="transfer", payment_status="pending",
+                                            status="pending", cod_confirmed=True, transfer_account="Easypaisa: 0345 0000000",
+                                            transfer_reference="DEMO48213377", transfer_submitted_at=now)
+            item = OrderItem(order=transfer, product=candle, product_name=candle.name, price=candle.price, quantity=2)
+            item.apply_commission(candle.seller_account)
+            item.save()
+        rule, _ = RepriceRule.objects.update_or_create(product=tote, defaults={"min_price": (tote.price * D("0.8")).quantize(D("0.01")),
+                                                                               "max_price": tote.price, "mode": "beat", "step": D("0.50"), "active": True})
+        from bees.repricer import apply_rule
+        apply_rule(rule)
+        if reset:
+            PriceTest.objects.filter(product=kit).delete()
+        if not PriceTest.objects.filter(product=kit).exists():
+            b_price = (kit.price * D("0.85")).quantize(D("0.01"))
+            test = PriceTest.objects.create(product=kit, price_a=kit.price, price_b=b_price, days=14, current_arm="b")
+            PriceTest.objects.filter(pk=test.pk).update(started_at=now - timedelta(days=6))
+            for i in range(6):
+                arm = "a" if i % 2 == 0 else "b"
+                PriceTestBlock.objects.create(test=test, arm=arm, start=now - timedelta(days=6 - i), end=None if i == 5 else now - timedelta(days=5 - i))
+                day = timezone.localdate() - timedelta(days=5 - i)
+                stat, _ = DailyStat.objects.get_or_create(date=day, kind="view", key=str(kit.pk), defaults={"count": 0})
+                DailyStat.objects.filter(pk=stat.pk).update(count=stat.count + (34 if arm == "a" else 41))
+            Product.objects.filter(pk=kit.pk).update(price=b_price)
+        # A listing that reuses another seller's photo (waiting for approval, never shown in the shop).
+        second = SellerAccount.objects.filter(business_name="Second Hand Lisboa").first()
+        if second and not Product.objects.filter(seller_account=second, name="Ceramic Coffee Mug").exists():
+            Product.objects.create(name="Ceramic Coffee Mug", category=mug.category, image_url=mug.image_url, price=D("9.99"), stock=50,
+                                   seller_account=second, seller_name=second.display_name, approval_status="pending",
+                                   description="Coffee mug.")
 
     def _orders(self, shopper, products):
         Order.objects.filter(user=shopper).delete()

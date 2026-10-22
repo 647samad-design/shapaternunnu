@@ -71,6 +71,7 @@
                     <div class="field" data-home-only><label for="id_postal_code">Postal / ZIP code</label><input type="text" id="id_postal_code" name="postal_code" autocomplete="postal-code" value="{{ form.postal_code|default:'' }}" required></div>
                     <div class="field" data-home-only><label for="id_country">Country</label>{% country_select selected=form.country %}</div>
                 </div>
+                {% if not has_digital_only %}<div data-home-only style="margin-top:14px;">{% include "bees/partials/location_picker.html" with lat=form.latitude lng=form.longitude prefix="" title="Pin your door on the map (optional)" hint="The rider sees exactly where to come - very helpful when the street address is hard to find." %}</div>{% endif %}
                 {% if brand.gift_wrap_enabled and not has_digital_only %}
                 <details class="gift-box" {% if form.gift_wrap %}open{% endif %}><summary><strong>🎁 This is a gift</strong> <span class="muted small">free gift wrap, a message, no prices on the packing slip</span></summary>
                     <label class="check small" style="margin-top:10px;"><input type="checkbox" name="gift_wrap" value="1" {% if form.gift_wrap %}checked{% endif %}> Gift wrap it (free)</label>
@@ -94,6 +95,18 @@
                     <span><strong><span class="paypal-mark" aria-hidden="true">Pay<b>Pal</b></span> PayPal</strong><span class="muted">Pay with your PayPal balance, bank or card on PayPal's secure page. Buyer protection included.</span></span>
                 </label>
                 {% endif %}
+                {% if "jazzcash" in payment_methods %}
+                <label class="pay-option">
+                    <input type="radio" name="payment_method" value="jazzcash" {% if "card" not in payment_methods and "paypal" not in payment_methods %}checked{% endif %}>
+                    <span><strong>JazzCash</strong><span class="muted">Pay with your JazzCash wallet, a debit/credit card or a voucher on JazzCash's secure page.</span></span>
+                </label>
+                {% endif %}
+                {% if "transfer" in payment_methods %}
+                <label class="pay-option">
+                    <input type="radio" name="payment_method" value="transfer" {% if "card" not in payment_methods and "paypal" not in payment_methods and "jazzcash" not in payment_methods %}checked{% endif %}>
+                    <span><strong>Easypaisa, JazzCash or bank transfer</strong><span class="muted">Send the money from your app or bank (Raast), then enter the transaction ID. We confirm it and ship.</span></span>
+                </label>
+                {% endif %}
                 {% if "invoice" in payment_methods %}
                 <label class="pay-option">
                     <input type="radio" name="payment_method" value="invoice">
@@ -102,7 +115,7 @@
                 {% endif %}
                 {% if "cod" in payment_methods %}
                 <label class="pay-option">
-                    <input type="radio" name="payment_method" value="cod" {% if "card" not in payment_methods and "paypal" not in payment_methods %}checked{% endif %}>
+                    <input type="radio" name="payment_method" value="cod" {% if "card" not in payment_methods and "paypal" not in payment_methods and "jazzcash" not in payment_methods and "transfer" not in payment_methods %}checked{% endif %}>
                     <span><strong>{{ t.cash_on_delivery }}</strong><span class="muted">Pay the courier when your order arrives{% if "card" in payment_methods %}, or pay online any time before it ships from My orders{% endif %}.</span></span>
                 </label>
                 {% endif %}
@@ -119,7 +132,7 @@
                 {% if has_digital %}<p class="muted small" style="margin:12px 0 0;">⬇ Your order includes a digital download. By paying you ask for it to be available right away and agree that downloads can't be returned once delivered.</p>{% endif %}
                 <p id="ship-note" class="badge badge-sale" style="margin-top:12px;{% if pricing.ships %}display:none;{% endif %}">Sorry, we don't deliver to this country yet.</p>
                 <button type="submit" class="btn btn-primary btn-block place" id="place-btn">
-                    {% if "card" in payment_methods or "paypal" in payment_methods %}Continue to payment{% else %}{{ t.place_order }}{% endif %} · {% if store_credit > 0 %}{{ total_after_credit|money }}{% else %}{{ pricing.total|money }}{% endif %}
+                    {% if "card" in payment_methods or "paypal" in payment_methods or "jazzcash" in payment_methods %}Continue to payment{% else %}{{ t.place_order }}{% endif %} · {% if store_credit > 0 %}{{ total_after_credit|money }}{% else %}{{ pricing.total|money }}{% endif %}
                 </button>
                 {% else %}
                 {% if cod_note %}<p class="callout warn">{{ cod_note }}</p>{% else %}<p class="muted">Checkout is temporarily unavailable. Please contact support{% if brand.support_email %} at <a class="link" href="mailto:{{ brand.support_email }}">{{ brand.support_email }}</a>{% endif %}.</p>{% endif %}

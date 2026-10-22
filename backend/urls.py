@@ -27,6 +27,8 @@ from bees import agents, feeds, round5_views as r5
 from bees import shopper_views as shv
 from bees import ops_views as opv
 from bees import smart_views as smv
+from bees import pk_views
+from bees import power_views as pwv
 from bees import multistore_views
 from bees import reports_listing
 from bees.sitemaps import ProductSitemap, CategorySitemap, SellerSitemap, StaticViewSitemap, BlogSitemap
@@ -52,6 +54,8 @@ urlpatterns = [
     path('product/<int:pk>/report/', reports_listing.report, name='report_listing'),
     path('manage/listing-reports/', mv.staff_required(reports_listing.admin_page), name='manage_listing_reports'),
     path('.well-known/ucp', agents.profile, name='ucp_profile'),
+    path('.well-known/assetlinks.json', pwa.assetlinks, name='assetlinks'),
+    path('manage/mobile-app/', mv.staff_required(pwa.mobile_app), name='manage_mobile_app'),
     path('ucp/v1/checkout-sessions', agents.checkout_sessions, name='ucp_sessions'),
     path('ucp/v1/checkout-sessions/<uuid:pk>', agents.checkout_session, name='ucp_session'),
     path('ucp/v1/checkout-sessions/<uuid:pk>/<str:action>', agents.checkout_action, name='ucp_session_action'),
@@ -94,9 +98,14 @@ urlpatterns = [
     path('manage/companies/<int:pk>/', mv.staff_required(opv.manage_company), name='manage_company'),
     path('manage/locations/', mv.staff_required(opv.manage_locations), name='manage_locations'),
     path('manage/restock/', mv.staff_required(smv.manage_restock), name='manage_restock'),
+    path('manage/trust/', mv.staff_required(pwv.manage_trust), name='manage_trust'),
     path('manage/customers/segments/', mv.staff_required(smv.manage_segments), name='manage_segments'),
     path('manage/copilot/', mv.staff_required(smv.manage_copilot), name='manage_copilot'),
     path('seller/restock/', sv.seller_required()(smv.seller_restock), name='seller_restock'),
+    path('seller/repricer/', sv.seller_required(approved=True)(pwv.seller_repricer), name='seller_repricer'),
+    path('seller/price-tests/', sv.seller_required(approved=True)(pwv.seller_price_tests), name='seller_price_tests'),
+    path('manage/price-tests/', mv.staff_required(pwv.manage_price_tests), name='manage_price_tests'),
+    path('seller/products/<int:pk>/studio/', sv.seller_required(approved=True)(pwv.seller_photo_studio), name='seller_photo_studio'),
     path('seller/locations/', sv.seller_required()(opv.seller_locations), name='seller_locations'),
     path('manage/integrations/', mv.staff_required(opv.manage_integrations), name='manage_integrations'),
     path('manage/integrations/accounting.csv', mv.staff_required(opv.accounting_export), name='accounting_export'),
@@ -157,6 +166,7 @@ urlpatterns = [
     path('messages/<int:pk>/send/', msgs.send_view, name='message_send'),
     path('messages/<int:pk>/poll/', msgs.poll_view, name='message_poll'),
     path('messages/<int:pk>/typing/', msgs.typing_view, name='message_typing'),
+    path('messages/<int:pk>/draft/', pwv.reply_draft, name='message_draft'),
     path('messages/photo/<int:pk>/', msgs.message_image, name='message_image'),
     path('seller/messages/replies/', msgs.quick_replies_view, name='seller_quick_replies'),
     path('live/', live.live_view, name='live'),
@@ -363,6 +373,13 @@ urlpatterns = [
     path('payment/paypal/<int:order_id>/return/', views.paypal_return, name='paypal_return'),
     path('payment/paypal/<int:order_id>/cancel/', views.paypal_cancel, name='paypal_cancel'),
     path('payment/paypal/webhook/', views.paypal_webhook, name='paypal_webhook'),
+    path('payment/jazzcash/return/', pk_views.jazzcash_return, name='jazzcash_return'),
+    path('payment/jazzcash/done/', pk_views.jazzcash_done, name='jazzcash_done'),
+    path('whatsapp/incoming/', pk_views.whatsapp_incoming, name='whatsapp_webhook'),
+    path('whatsapp/cart/<str:token>/', pk_views.whatsapp_cart, name='whatsapp_cart'),
+    path('order/<int:order_id>/pay/transfer/', pk_views.pay_transfer, name='pay_transfer'),
+    path('order/<int:order_id>/pay/transfer/proof/', pk_views.transfer_proof, name='transfer_proof'),
+    path('manage/orders/transfers/', mv.staff_required(pk_views.manage_transfers), name='manage_transfers'),
     path('staff/seller-document/<int:seller_id>/<str:field>/', views.seller_document, name='seller_document'),
 ]
 

@@ -27,7 +27,8 @@
             <label class="sr-only" for="cv-text">Message</label>
             <textarea id="cv-text" name="body" rows="2" maxlength="2000" placeholder="Write a message…"></textarea>
         </div>
-        <button class="btn btn-primary" type="submit">Send</button>
+        <div class="chat-send">{% if side == "seller" %}<button class="btn btn-ghost btn-sm" type="button" data-draft="{% url 'message_draft' conv.id %}" title="Writes an answer to the customer's last message from your stock, delivery and order details. Check it, then send.">✨ Suggest reply</button>{% endif %}
+        <button class="btn btn-primary" type="submit">Send</button></div>
     </form>
     <p class="muted small chat-safe">For your safety, keep payments and conversations on {{ brand.site_name }}.</p>
     {% endif %}
@@ -47,6 +48,7 @@
     .chat-empty { margin: auto; text-align: center; max-width: 36ch; }
     .chat-compose { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px; border-top: 1px solid var(--line); align-items: end; }
     .chat-compose textarea { min-height: 48px; max-height: 160px; resize: vertical; }
+    .chat-send { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
     .chat-about { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: .9rem; }
     .chat-about img { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; }
     .chat-about button { margin-left: auto; border: 0; background: none; font-size: 1.2rem; cursor: pointer; color: var(--muted); }
@@ -164,6 +166,16 @@
             if (items && items.length && /^image\//.test(items[0].type)) { var dt = new DataTransfer(); dt.items.add(items[0]); photo.files = dt.files; showPhoto(); e.preventDefault(); }
         });
     }
+    var draftBtn = form.querySelector('[data-draft]');
+    if (draftBtn) draftBtn.addEventListener('click', function () {
+        var label = draftBtn.textContent;
+        draftBtn.disabled = true; draftBtn.textContent = 'Writing…';
+        fetch(draftBtn.dataset.draft, { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value, 'X-Requested-With': 'fetch' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d && d.draft) { ta.value = d.draft; ta.focus(); ta.dispatchEvent(new Event('input')); } })
+            .catch(function () {})
+            .then(function () { draftBtn.disabled = false; draftBtn.textContent = label; });
+    });
     form.querySelectorAll('[data-quick] .chip').forEach(function (c) {
         c.addEventListener('click', function () { ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + c.textContent.trim(); ta.focus(); });
     });

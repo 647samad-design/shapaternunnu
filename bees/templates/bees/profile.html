@@ -106,6 +106,7 @@
                         <div class="field"><label for="a_country">Country</label>{% country_select field_id="a_country" %}</div>
                         <div class="field span-2"><label for="a_phone">Phone</label><input type="tel" id="a_phone" name="phone"></div>
                     </div>
+                    <div style="margin-top:14px;">{% include "bees/partials/location_picker.html" with lat=None lng=None prefix="" title="Pin it on the map (optional)" hint="Riders find you faster." %}</div>
                     <button type="submit" class="btn btn-secondary" style="margin-top:16px;">Save address</button>
                 </form>
             </details>

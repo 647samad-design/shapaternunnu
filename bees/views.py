@@ -321,6 +321,15 @@ def _send_order_confirmation(request, order):
     seller_center.notify_new_order(order)
 
 
+def send_order_confirmation_for(order):
+    """The confirmation email outside a web request (payment callbacks, staff confirming a transfer)."""
+    from .order_emails import absolute
+
+    class _Req:
+        build_absolute_uri = staticmethod(absolute)
+    _send_order_confirmation(_Req(), order)
+
+
 # ---------------------------------------------------------------------------
 # Catalogue
 # ---------------------------------------------------------------------------
@@ -502,6 +511,9 @@ def _market_context(request, product, also):
     ctx = {"other_offers": market.other_offers(product), "is_member": market.is_member(request.user),
            "bought_label": insights.bought_label(product.pk), "best_seller": insights.best_seller_badge(product),
            "delivery_window": insights.delivery_window(product)}
+    from . import whatsapp
+    if whatsapp.enabled() and product.stock > 0 and not product.has_variants and not product.is_auction and not product.quote_only:
+        ctx["wa_order"] = whatsapp.product_link(request, product, max(product.min_order_qty or 1, 1))
     from . import shopper
     shopper.log_view(request, product)
     if product.model_3d_url:
@@ -1145,6 +1157,8 @@ def add_address(request):
         messages.error(request, "Please fill in name, street address, city and country.")
         return redirect("profile")
     first = not Address.objects.filter(user=request.user).exists()
+    from . import maps
+    data["latitude"], data["longitude"] = maps.from_post(request)
     Address.objects.create(user=request.user, label=request.POST.get("label", "Home")[:30] or "Home", is_default=first, **data)
     messages.success(request, "Address saved.")
     return redirect("profile")
@@ -1364,7 +1378,9 @@ def cart_view(request):
         from .recommend import also_bought
         in_cart = {i["product"].id for i in items}
         recs = [p for p in also_bought(sorted(in_cart), limit=8) if p.id not in in_cart][:4]
+    from . import whatsapp
     return render(request, "bees/cart.html", {
+        "wa_order": whatsapp.cart_link(request, items) if items and whatsapp.enabled() else "",
         "recommended": recs,
         "items": items,
         "total": total,
@@ -1441,6 +1457,11 @@ def _payment_methods():
     from . import paypal
     if paypal.is_configured():
         methods.append("paypal")
+    from . import pk_payments
+    if pk_payments.jazzcash_configured():
+        methods.append("jazzcash")
+    if pk_payments.transfer_on():
+        methods.append("transfer")
     if _brand().allow_cash_on_delivery:
         methods.append("cod")
     return methods
@@ -1601,6 +1622,8 @@ def checkout_view(request):
                              "postal_code": pickup.postal_code or "-", "country": pickup.country, "state": ""})
         data["pickup_point"] = pickup
         data["delivery"] = request.POST.get("delivery", "")
+        from . import maps
+        data["latitude"], data["longitude"] = maps.from_post(request) if pickup is None else (None, None)
         data["member"] = member
         data["company"] = company
         data["tax_exempt"] = exempt
@@ -1681,6 +1704,20 @@ def checkout_view(request):
                 messages.error(request, f"PayPal isn't available right now ({exc}). Please try again or choose another way to pay.")
                 return redirect("cart")
 
+        if payment_method == "jazzcash" and order.total_cents > 0:
+            from . import pk_payments
+            url, fields = pk_payments.jazzcash_form(request, order)
+            return render(request, "bees/jazzcash_redirect.html", {"url": url, "fields": fields, "order": order})
+        if payment_method == "transfer" and order.total_cents > 0:
+            from . import pk_payments
+            if pk_payments.pkr_rate() is not None:
+                pk_payments._fix_pkr_charge(order)
+            _send_order_confirmation(request, order)
+            if order.user_id:
+                Notification.objects.create(user=request.user, message=f"Order #{order.id}: send the payment and enter the transaction ID.",
+                                            link=reverse("pay_transfer", args=[order.id]))
+            return redirect(reverse("pay_transfer", args=[order.id]) + (f"?t={order.access_token}" if order.is_guest else ""))
+
         if order.total_cents == 0:  # covered by coupon / store credit, nothing to charge
             order.payment_status = "paid"
             order.status = "confirmed"
@@ -1724,7 +1761,8 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
             form["email"] = request.session["agent_email"]  # from the shopper's AI assistant
         default = Address.objects.filter(user=request.user, is_default=True).first() if signed_in else None
         if default:
-            form.update({f: getattr(default, f) for f in ("full_name", "phone", "address", "city", "state", "postal_code", "country")})
+            form.update({f: getattr(default, f) for f in ("full_name", "phone", "address", "city", "state", "postal_code", "country",
+                                                           "latitude", "longitude")})
     from . import shipping as shipping_rules
     credit = _store_credit(request.user) if request.user.is_authenticated else Decimal("0")
     credit_applicable = min(credit, pricing["total"])
@@ -1740,6 +1778,8 @@ def _checkout_context(request, items, pricing, coupon, methods, form=None):
     from .models import CouponClaim, PickupPoint
     pickups = list(PickupPoint.objects.filter(active=True)[:200])
     checkout_data["member"] = bool(pricing.get("member"))
+    from . import maps
+    maps.allow_google(request)
     checkout_data["free_ship"] = bool(coupon and coupon.free_shipping)
     from .ops import company_for
     company = company_for(request.user)
@@ -1883,7 +1923,7 @@ def _place_order(request, items, data, payment_method, use_credit=False):
                                   pickup=data.get("pickup_point"), tax_exempt=data.get("tax_exempt", False))
         if not pricing["ships"]:
             raise CheckoutError("Sorry, we don't deliver to that country yet.")
-        is_card = payment_method in ("card", "paypal")  # paid online before it ships
+        is_card = payment_method in ("card", "paypal", "jazzcash", "transfer")  # paid before it ships
         signed_in = request.user.is_authenticated
         from .email_i18n import remember, request_language
         shop_lang = request_language(request)
@@ -1916,12 +1956,19 @@ def _place_order(request, items, data, payment_method, use_credit=False):
             gift_wrap=data.get("gift_wrap", False), gift_message=data.get("gift_message", ""),
             affiliate_code=_affiliate_code(request),
             pickup_point=data.get("pickup_point"),
+            latitude=data.get("latitude"), longitude=data.get("longitude"),
             estimated_delivery=_preorder_delivery(lines) or order_emails.default_delivery_date(country=data["country"]),
             courier_name=tracking.suggest_courier(data["country"]),
             # Cash orders from accounts with an unconfirmed email need one
             # click on an emailed link before sellers pack them (stops fake orders).
             cod_confirmed=is_card or payment_method == "invoice" or (not _cod_phone_check() and (not signed_in or _email_verified(request.user))),
         )
+        from . import delivery_code
+        delivery_code.assign(order)
+        if data.get("latitude") is not None and signed_in:
+            # Remember the pin on the matching saved address for next time.
+            Address.objects.filter(user=request.user, address__iexact=order.address, city__iexact=order.city,
+                                   latitude__isnull=True).update(latitude=data["latitude"], longitude=data["longitude"])
         seller_cache = {}
         for (product, variant, price, qty), (quote, note) in zip(lines, line_quotes):
             name = f"{product.name} ({variant.label})" if variant else product.name
@@ -2406,6 +2453,14 @@ def payment_cancel(request, order_id):
 
 def resume_payment(request, order_id):
     order = _order_access(request, order_id, owner_only=True)
+    if order.payment_status == "pending" and order.status != "cancelled" and order.payment_method == "transfer":
+        return redirect("pay_transfer", order.id)
+    if order.payment_status == "pending" and order.status != "cancelled" and order.payment_method == "jazzcash":
+        from . import pk_payments
+        if pk_payments.jazzcash_configured():
+            url, fields = pk_payments.jazzcash_form(request, order)
+            return render(request, "bees/jazzcash_redirect.html", {"url": url, "fields": fields, "order": order})
+        return _orders_page(request, order)
     if order.payment_status == "pending" and order.payment_method == "paypal" and order.status != "cancelled":
         from . import paypal
         try:
@@ -2679,6 +2734,7 @@ def become_seller(request):
     if request.method == "POST":
         from .countries import COUNTRIES
         form = {k: request.POST.get(k, "").strip() for k in ("account_type", "business_name", "phone", "country", "agree")}
+        form["pickup_latitude"], form["pickup_longitude"] = request.POST.get("pickup_latitude", ""), request.POST.get("pickup_longitude", "")
         account_type = form["account_type"] if form["account_type"] in dict(SellerAccount.ACCOUNT_TYPE_CHOICES) else "individual"
         name = " ".join(form["business_name"].split())[:150]
         error = ""
@@ -2698,8 +2754,11 @@ def become_seller(request):
             return render(request, "bees/become_seller.html", {"form": form})
         try:
             with transaction.atomic():
+                from . import maps
+                plat, plng = maps.from_post(request, "pickup_")
                 SellerAccount.objects.create(user=request.user, account_type=account_type, business_name=name,
-                                             phone=form["phone"][:30], country=form["country"][:100], terms_accepted_at=timezone.now())
+                                             phone=form["phone"][:30], country=form["country"][:100], terms_accepted_at=timezone.now(),
+                                             pickup_latitude=plat, pickup_longitude=plng)
         except IntegrityError:
             return redirect("seller_dashboard")  # double click: the account already exists
         from .alerts import notify_staff
@@ -2725,7 +2784,8 @@ def update_fulfillment_status(request, item_id):
         messages.error(request, "Please choose a valid status.")
         return redirect_back(request, "seller_orders")
     try:
-        changed, moved = fulfilment.set_items_status([item], new_status, user=request.user)
+        changed, moved = fulfilment.set_items_status([item], new_status, user=request.user,
+                                                      delivery_code=request.POST.get("delivery_code"))
     except fulfilment.FulfilmentError as exc:
         messages.error(request, str(exc))
         return redirect_back(request, "seller_orders")

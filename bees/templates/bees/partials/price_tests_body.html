@@ -1,0 +1,40 @@
+{% load bees_extras %}
+<div class="adm-head"><div><h1>Price tests</h1><p>Not sure if a lower (or higher) price sells better? The product switches between two prices day by day - every shopper sees the same price on the same day - and you see which one brings more revenue or profit per visitor. At the end the better price is kept automatically.</p></div></div>
+<section class="panel">
+    <h2>Start a test</h2>
+    {% if choices %}
+    <form method="post" class="pt-new">{% csrf_token %}<input type="hidden" name="action" value="start">
+        <div class="field pt-wide"><label for="ptp">Product (price A = its current price)</label><select id="ptp" name="product" required>{% for p in choices %}<option value="{{ p.pk }}">{{ p.name|truncatechars:60 }} - {{ p.price|money }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="ptb">Price B</label><input class="input" id="ptb" name="price_b" inputmode="decimal" required placeholder="e.g. 19.99"></div>
+        <div class="field"><label for="ptd">Days</label><select id="ptd" name="days"><option value="7">7</option><option value="14" selected>14</option><option value="21">21</option><option value="28">28</option></select></div>
+        <div class="field"><label for="ptc">Your cost per unit (optional)</label><input class="input" id="ptc" name="unit_cost" inputmode="decimal" placeholder="for profit"></div>
+        <button class="btn btn-primary" type="submit">Start test</button>
+    </form>
+    <p class="muted small" style="margin-top:8px;">Tip: 14 days or more gives each price both weekdays and weekends. Don't change the price by hand while a test runs.</p>
+    {% else %}<p class="muted">No products available to test.</p>{% endif %}
+</section>
+{% for r in rows %}
+<section class="panel pt-card">
+    <div class="pt-top"><div><h2>{{ r.test.product.name|truncatechars:70 }}</h2><p class="muted small">Started {{ r.test.started_at|date:"M j" }} · {{ r.test.days }} days · {% if r.test.status == "running" %}today at {% if r.test.current_arm == "a" %}price A{% else %}price B{% endif %}{% else %}{{ r.test.get_status_display }}, kept price {{ r.test.applied|upper }}{% endif %}</p></div>
+        {% if r.test.status == "running" %}<span class="pill warn">Running</span>{% else %}<span class="pill ok">{{ r.test.get_status_display }}</span>{% endif %}</div>
+    <div class="table-scroll"><table class="table" style="min-width:560px;">
+        <thead><tr><th></th><th class="num">Price</th><th class="num">Days</th><th class="num">Visitors</th><th class="num">Orders</th><th class="num">Conversion</th><th class="num">Revenue / visitor</th>{% if r.test.unit_cost is not None %}<th class="num">Profit / visitor</th>{% endif %}</tr></thead>
+        <tbody>{% for key, a in r.res.items %}{% if key == "a" or key == "b" %}<tr{% if r.res.winner == key %} class="pt-win"{% endif %}><td><strong>{{ key|upper }}</strong>{% if r.res.winner == key %} 🏆{% endif %}</td><td class="num">{{ a.price|money }}</td><td class="num">{{ a.days }}</td><td class="num">{{ a.views }}</td><td class="num">{{ a.orders }}</td><td class="num">{{ a.conversion }}%</td><td class="num">{{ a.per_view|money }}</td>{% if r.test.unit_cost is not None %}<td class="num">{{ a.profit_per_view|money }}</td>{% endif %}</tr>{% endif %}{% endfor %}</tbody>
+    </table></div>
+    <p class="small" style="margin-top:8px;"><strong>Result so far:</strong> {{ r.res.summary }}.</p>
+    {% if r.test.status == "running" %}
+    <form method="post" class="pt-stop">{% csrf_token %}<input type="hidden" name="action" value="stop"><input type="hidden" name="test" value="{{ r.test.pk }}">
+        <button class="btn btn-ghost btn-sm" name="keep" value="a">Stop, keep A ({{ r.test.price_a|money }})</button>
+        <button class="btn btn-ghost btn-sm" name="keep" value="b">Stop, keep B ({{ r.test.price_b|money }})</button>
+    </form>{% endif %}
+</section>
+{% endfor %}
+<style>
+    .pt-new { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; }
+    .pt-card { margin-top: 16px; display: grid; gap: 8px; }
+    .pt-top { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
+    .pt-top h2 { margin: 0; font-size: 1.02rem; }
+    .pt-win td { background: color-mix(in srgb, var(--ok) 9%, transparent); }
+    .pt-stop { display: flex; gap: 8px; flex-wrap: wrap; }
+    @media (max-width: 900px) { .pt-new { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .pt-wide { grid-column: 1 / -1; } }
+</style>

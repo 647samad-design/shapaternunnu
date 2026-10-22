@@ -1,0 +1,34 @@
+{% extends "bees/manage/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Payments to check{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><a class="link small" href="{% url 'manage_orders' %}">← Orders</a><h1 style="margin-top:6px;">Payments to check</h1>
+    <p>Easypaisa, JazzCash and bank transfers. Open your account app, find the transaction ID, then confirm. Confirming tells the customer and the seller to ship.</p></div></div>
+{% if not accounts %}<div class="callout warn" style="margin:0 0 16px;">Add the accounts customers pay into under <a class="link" href="{% url 'manage_settings' %}">Store settings</a> (Easypaisa / JazzCash / bank transfer).</div>{% endif %}
+<section class="panel">
+    <h2>Waiting for you {% if to_check %}<span class="pill warn">{{ to_check|length }}</span>{% endif %}</h2>
+    {% if to_check %}
+    <div class="table-scroll"><table class="table" style="min-width:720px;">
+        <thead><tr><th>Order</th><th>Customer</th><th class="num">Amount</th><th>Sent to</th><th>Transaction ID</th><th></th></tr></thead>
+        <tbody>{% for o in to_check %}<tr>
+            <td><a class="rowlink" href="{% url 'manage_order' o.id %}">#{{ o.id }}</a><div class="muted small">{{ o.transfer_submitted_at|date:"M j, H:i" }}</div></td>
+            <td>{{ o.full_name }}<div class="muted small">{{ o.phone }}</div></td>
+            <td class="num"><strong>{% if o.charge_currency %}{{ o.charge_amount|floatformat:2 }} {{ o.charge_currency|upper }}{% else %}{{ o.total|money }}{% endif %}</strong></td>
+            <td class="small">{{ o.transfer_account }}</td>
+            <td><code>{{ o.transfer_reference }}</code>{% if o.transfer_proof %}<div><a class="link small" href="{% url 'transfer_proof' o.id %}" target="_blank" rel="noopener">Screenshot</a></div>{% endif %}</td>
+            <td><div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <form method="post">{% csrf_token %}<input type="hidden" name="order" value="{{ o.id }}"><input type="hidden" name="action" value="approve"><button class="btn btn-primary btn-sm">Money received</button></form>
+                <form method="post" style="display:flex;gap:6px;">{% csrf_token %}<input type="hidden" name="order" value="{{ o.id }}"><input type="hidden" name="action" value="reject"><label class="sr-only" for="rj{{ o.id }}">Reason</label><input class="input" id="rj{{ o.id }}" name="reason" placeholder="Reason (optional)" style="width:150px;"><button class="btn btn-ghost btn-sm">Not found</button></form>
+            </div></td>
+        </tr>{% endfor %}</tbody></table></div>
+    {% else %}<p class="muted">Nothing to check right now.</p>{% endif %}
+</section>
+<div class="two-col" style="margin-top:16px;">
+<section class="panel"><h2>Not sent yet</h2>
+    {% if not_sent %}<ul class="plain-list">{% for o in not_sent %}<li><a class="link" href="{% url 'manage_order' o.id %}">#{{ o.id }}</a> · {{ o.full_name }} · {{ o.total|money }} <span class="muted small">placed {{ o.created_at|timesince }} ago</span></li>{% endfor %}</ul>
+    {% else %}<p class="muted">None.</p>{% endif %}</section>
+<section class="panel"><h2>Recently confirmed</h2>
+    {% if recent %}<ul class="plain-list">{% for o in recent %}<li><a class="link" href="{% url 'manage_order' o.id %}">#{{ o.id }}</a> · {{ o.transfer_reference }} · {{ o.total|money }}</li>{% endfor %}</ul>
+    {% else %}<p class="muted">None yet.</p>{% endif %}</section>
+</div>
+{% endblock %}

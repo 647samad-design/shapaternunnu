@@ -1,0 +1,30 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Mobile app{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Mobile app</h1><p>Your store already works as an app: on any phone shoppers can tap "Add to Home screen". To be on Google Play as well, package it in about 15 minutes - no coding, and every change to your store shows up in the app instantly.</p></div></div>
+<div class="two-col">
+<section class="panel">
+    <h2>Publish on Google Play</h2>
+    <ol class="ma-steps">
+        <li><strong>Create a Google Play developer account</strong> at play.google.com/console (one-time fee of US$25).</li>
+        <li><strong>Open PWABuilder</strong> (pwabuilder.com), enter <code data-no-translate>{{ site }}</code> and press Start. It reads your app details from <code data-no-translate>{{ manifest }}</code>.</li>
+        <li><strong>Package for Android</strong>: choose "Google Play", set the package name (e.g. <code>com.yourstore.app</code>) and download. Keep the signing key file safe - you need it for every update.</li>
+        <li><strong>Upload the .aab file</strong> to Play Console > Create app > Production, add screenshots and a description.</li>
+        <li><strong>Link the app to your site</strong>: copy the SHA-256 fingerprint from Play Console > App integrity > App signing, and paste it with the package name under <a class="link" href="{% url 'manage_keys' %}">Keys &amp; passwords > Android app</a>.</li>
+        <li><strong>Add the Play Store link</strong> there too - a "Get the app" badge then appears in your store's footer.</li>
+    </ol>
+</section>
+<section class="panel">
+    <h2>Status</h2>
+    <dl class="kv">
+        <dt>Installable app (PWA)</dt><dd><span class="pill ok">Ready</span></dd>
+        <dt>Package name</dt><dd>{% if package %}<code>{{ package }}</code>{% else %}<span class="muted">Not set</span>{% endif %}</dd>
+        <dt>Signing fingerprint</dt><dd>{% if prints %}<span class="pill ok">Set</span>{% else %}<span class="muted">Not set</span>{% endif %}</dd>
+        <dt>App link file</dt><dd><a class="link small" href="{{ assetlinks }}" target="_blank" rel="noopener" data-no-translate>{{ assetlinks }}</a> {% if package and prints %}<span class="pill ok">Live</span>{% else %}<span class="pill">Empty until set</span>{% endif %}</dd>
+        <dt>Play Store link</dt><dd>{% if play_url %}<a class="link" href="{{ play_url }}" target="_blank" rel="noopener">Open</a>{% else %}<span class="muted">Not set</span>{% endif %}</dd>
+    </dl>
+    <p class="muted small" style="margin-top:12px;">iPhone: Apple doesn't accept simple web apps; shoppers use "Add to Home Screen" in Safari, which gives the same full-screen app with notifications (iOS 16.4+).</p>
+</section>
+</div>
+<style>.ma-steps { margin: 8px 0 0 18px; display: grid; gap: 10px; } .ma-steps code { overflow-wrap: anywhere; }</style>
+{% endblock %}

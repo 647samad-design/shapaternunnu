@@ -269,3 +269,22 @@ def is_future(value):
         return value > timezone.localdate()
     except TypeError:
         return False
+
+
+@register.filter
+def gmaps_pin(obj):
+    """Google Maps link for an order's (or address's) map pin."""
+    from bees.maps import pin_link
+    return pin_link(getattr(obj, "latitude", None), getattr(obj, "longitude", None))
+
+
+@register.filter
+def gmaps_directions(obj):
+    from bees.maps import directions_link
+    return directions_link(getattr(obj, "latitude", None), getattr(obj, "longitude", None))
+
+
+@register.filter
+def qr_uri(text):
+    from bees.maps import qr_data_uri
+    return qr_data_uri(text) if text else ""

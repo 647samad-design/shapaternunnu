@@ -3,6 +3,7 @@
 {% block title %}{{ t.my_orders }} — {{ brand.site_name }}{% endblock %}
 {% block robots_meta %}noindex, nofollow{% endblock %}
 {% block extra_css %}
+    .dcode-n { font-size: 1.15rem; letter-spacing: .18em; font-variant-numeric: tabular-nums; }
     .order + .order { margin-top: 18px; }
     .order-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 20px; align-items: center; margin-bottom: 16px; }
     .order-top h2 { font-size: 1.2rem; }
@@ -57,6 +58,9 @@
         </div>
         {% elif order.payment_method == "cod" and order.status != "cancelled" and order.payment_status == "not_applicable" %}
         <p class="order-note">{% if order.cod_collected_at %}✓ Paid in cash on delivery ({{ order.cod_collected_at|date:"M j" }}).{% else %}💵 Pay <strong>{{ order.total|money }}</strong> in cash when the courier delivers.{% endif %}</p>
+        {% if order.delivery_code and order.status != "delivered" and not order.cod_collected_at %}<p class="order-note dcode">🔑 Delivery code: <strong data-no-translate class="dcode-n">{{ order.delivery_code }}</strong> <span class="muted small">Give it to the rider only when you have your parcel.</span></p>{% endif %}
+        {% elif order.payment_method == "transfer" and order.payment_status == "pending" and order.status == "pending" %}
+        <p class="order-note">{% if order.transfer_submitted_at %}⏳ We're checking your payment.{% else %}💸 Send <strong>{{ order.total|money }}</strong> and enter the transaction ID.{% endif %} <a class="link" href="{% url 'pay_transfer' order.id %}{% if guest %}?t={{ order.access_token }}{% endif %}">Payment details</a></p>
         {% endif %}
         {% if order.payment_status == "refunded" %}<p class="order-note ok">↩ {{ order.total|money }} refunded{% if order.card_label %} to {{ order.card_label }}{% endif %}{% if order.refunded_at %} on {{ order.refunded_at|date:"M j, Y" }}{% endif %}. Banks usually show it within 5–10 business days.</p>
         {% elif order.payment_status == "paid" and order.card_label %}<p class="order-note">Paid with {{ order.card_label }}{% if order.charge_currency %} · <span data-no-translate>{{ order.charge_amount }} {{ order.charge_currency|upper }}</span>{% endif %}</p>{% endif %}

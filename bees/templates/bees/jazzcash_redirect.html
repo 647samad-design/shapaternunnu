@@ -1,0 +1,17 @@
+{% extends "bees/base.html" %}
+{% load bees_extras %}
+{% block title %}Paying with JazzCash — {{ brand.site_name }}{% endblock %}
+{% block robots_meta %}noindex, nofollow{% endblock %}
+{% block content %}
+<div class="wrap page">
+    <div class="panel" style="max-width:520px;margin:0 auto;text-align:center;">
+        <h1>Taking you to JazzCash…</h1>
+        <p class="muted" style="margin:8px 0 18px;">Order #{{ order.id }} · {{ order.charge_amount|default:order.total }} {% if order.charge_currency %}{{ order.charge_currency|upper }}{% else %}{{ order.currency|upper }}{% endif %}. Pay with your JazzCash wallet, card or a voucher, then you'll come back here.</p>
+        <form id="jc-form" method="post" action="{{ url }}">
+            {% for k, v in fields.items %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+            <button class="btn btn-primary" type="submit">Continue to JazzCash</button>
+        </form>
+    </div>
+</div>
+<script>setTimeout(function () { document.getElementById('jc-form').submit(); }, 400);</script>
+{% endblock %}
