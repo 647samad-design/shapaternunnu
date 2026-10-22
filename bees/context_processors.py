@@ -1,3 +1,4 @@
+import logging
 from .translations import TRANSLATIONS, LANGUAGE_NAMES, RTL_LANGUAGES
 from .categories import top_level as category_top_level
 from .content import footer_pages
@@ -157,14 +158,25 @@ def brand(request):
         "brand": brand_obj,
         "stripe_enabled": payments.is_configured(),
         "store_currency": store_settings.STORE_CURRENCY.upper(),
-        "nav_categories": category_top_level(),
-        "footer_pages": footer_pages(),
+        "nav_categories": _safe(category_top_level, []),
+        "footer_pages": _safe(footer_pages, []),
         "photo_search": bool(getattr(store_settings, "AI_API_KEY", "")),
-        "live_on": _live_on(),
-        "multistore_platform": _multistore_platform(),
+        "live_on": _safe(_live_on, False),
+        "multistore_platform": _safe(_multistore_platform, False),
         "demo_mode": getattr(dj_settings, "DEMO_MODE", False),
         "staging": getattr(dj_settings, "STAGING", False),
     }
+
+
+def _safe(fn, default):
+    """Menu extras must never break a page: during a deploy (code pulled
+    before migrations ran / app reloaded) a new model or table may be
+    missing for a few seconds."""
+    try:
+        return fn()
+    except Exception:
+        logging.getLogger(__name__).warning("Context extra %s failed", getattr(fn, "__name__", fn), exc_info=True)
+        return default
 
 
 def _live_on():

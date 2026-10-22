@@ -174,7 +174,12 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'bees.middleware.NoCacheMiddleware',
     'bees.middleware.ErrorAlertMiddleware',
+    'bees.catchup.DailyCatchupMiddleware',
 ]
+
+# Run missed daily jobs automatically when the scheduled task stops.
+DAILY_CATCHUP = env_bool('DAILY_CATCHUP', 'test' not in sys.argv)
+DAILY_CATCHUP_HOURS = int(os.environ.get('DAILY_CATCHUP_HOURS', '26'))
 
 ROOT_URLCONF = 'backend.urls'
 
@@ -444,6 +449,7 @@ if os.environ.get('EMAIL_HOST'):
 STAGING = env_bool('STAGING', False)
 STAGING_PASSWORD = os.environ.get('STAGING_PASSWORD', '')
 STAGING_EMAIL_TO = os.environ.get('STAGING_EMAIL_TO', '')
+EMAIL_REAL_BACKEND = EMAIL_BACKEND  # before the wrappers below (System check reads it)
 if STAGING:
     STAGING_REAL_EMAIL_BACKEND = EMAIL_BACKEND
     EMAIL_BACKEND = 'bees.staging.RedirectEmailBackend'
@@ -514,3 +520,8 @@ if MULTISTORE:
         _cache['KEY_FUNCTION'] = 'bees.multistore.cache_key'
     MULTISTORE_BASE_EMAIL_BACKEND = EMAIL_BACKEND
     EMAIL_BACKEND = 'bees.multistore.StoreEmailBackend'
+
+# Outermost email backend: skips reserved test addresses (demo accounts,
+# sample data) and retries once if the mail server drops the connection.
+MAILGUARD_INNER_BACKEND = EMAIL_BACKEND
+EMAIL_BACKEND = 'bees.mailguard.GuardedBackend'

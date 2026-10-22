@@ -13,6 +13,17 @@ PAYMENT_OK = "Payments working"
 WEBHOOK_REJECTED = "Webhook rejected"
 SERVER_ERROR = "Server error"
 DAILY_TASKS = "Daily tasks ran"
+ALERTS_CLEARED = "Alerts marked resolved"
+
+
+def cleared_since():
+    """When staff last marked email failures / page crashes as resolved
+    (older entries stay in the audit log but no longer count as problems)."""
+    from .models import AuditLog
+    try:
+        return AuditLog.objects.filter(action__startswith=ALERTS_CLEARED).order_by("-created_at").values_list("created_at", flat=True).first()
+    except Exception:
+        return None
 
 
 def log_once(prefix, message, minutes=10):

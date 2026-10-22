@@ -17,6 +17,7 @@
         <form method="post">{% csrf_token %}<input type="hidden" name="action" value="storage"><button class="btn btn-secondary btn-sm">Test image storage</button></form>
         <form method="post">{% csrf_token %}<input type="hidden" name="action" value="backup"><button class="btn btn-secondary btn-sm">Back up now</button></form>
         <form method="post">{% csrf_token %}<input type="hidden" name="action" value="daily"><button class="btn btn-secondary btn-sm" title="Releases unpaid orders, sends cart reminders and makes a backup">Run daily tasks now</button></form>
+        {% if resolvable %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="resolve"><button class="btn btn-secondary btn-sm" title="Hide the email failures and page crashes listed now (they stay in the Activity log)">Mark errors as resolved</button></form>{% endif %}
     </div>
 </section>
 {% if stripe_test %}

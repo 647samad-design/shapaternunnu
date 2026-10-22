@@ -25,6 +25,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from .mailguard import is_console as _mail_console
 from . import badges as seller_badges
 from . import payments
 from .models import (
@@ -818,7 +819,7 @@ def system_check(request):
                 msg = EmailMultiAlternatives(f"Test email from {SiteSettings.load().site_name}",
                                              "If you can read this, your store can send emails.", None, [to])
                 msg.send(fail_silently=False)
-                if dj.EMAIL_BACKEND.endswith("console.EmailBackend"):
+                if _mail_console():
                     messages.error(request, "Email isn't set up: messages are only printed to the server log. Add EMAIL_HOST_USER and EMAIL_HOST_PASSWORD (Gmail app password) to .env and reload.")
                 else:
                     messages.success(request, f"Test email sent to {to}. Check the inbox (and spam folder).")
@@ -854,12 +855,20 @@ def system_check(request):
             from django.core.management import call_command
             out = StringIO()
             try:
-                call_command("backup_data" if action == "backup" else "daily_tasks", stdout=out, stderr=out)
+                if action == "backup":
+                    call_command("backup_data", stdout=out, stderr=out)
+                else:
+                    call_command("daily_tasks", "--skip-demo-reset", stdout=out, stderr=out)
                 messages.success(request, "Backup saved." if action == "backup" else "Daily tasks finished: unpaid orders released, cart reminders sent, backup saved.")
                 _log(request, "Ran " + ("a backup" if action == "backup" else "the daily tasks") + " from System check")
             except (Exception, SystemExit) as exc:
                 messages.error(request, f"That didn't finish: {str(exc)[:200] or out.getvalue()[-300:]}")
             cache.delete("manage:auto_backup")
+        elif action == "resolve":
+            from .alerts import ALERTS_CLEARED
+            AuditLog.objects.create(user=request.user, action=f"{ALERTS_CLEARED} by {request.user.username}"[:255])
+            cache.delete("manage:health")
+            messages.success(request, "Marked as resolved. Older email failures and page crashes stay in the Activity log; only new ones show here.")
         elif action == "storage":
             from django.core.files.base import ContentFile
             from django.core.files.storage import default_storage
@@ -889,15 +898,18 @@ def system_check(request):
         add("Database", "Connection", False, str(exc)[:300])
 
     # Email
-    console = dj.EMAIL_BACKEND.endswith("console.EmailBackend")
+    console = _mail_console()
     add("Email", "Sending", not console,
         "Not set up - customers get NO emails. Add EMAIL_HOST_USER and EMAIL_HOST_PASSWORD to .env." if console
         else f"Sending through {getattr(dj, 'EMAIL_HOST', '')} as {dj.DEFAULT_FROM_EMAIL}.")
-    week_ago = timezone.now() - timedelta(days=7)
-    failures = AuditLog.objects.filter(action__startswith=EMAIL_FAILED, created_at__gte=week_ago)
+    from .alerts import cleared_since
+    week_ago = max(filter(None, [timezone.now() - timedelta(days=7), cleared_since()]))
+    failures = AuditLog.objects.filter(action__startswith=EMAIL_FAILED, created_at__gt=week_ago)
     last_fail = failures.order_by("-created_at").first()
     add("Email", "Failures (7 days)", not failures.exists(),
-        "None." if not last_fail else f"{failures.count()} failed. Latest: {last_fail.action[len(EMAIL_FAILED) + 2:][:220]}",
+        "None." if not last_fail else f"{failures.count()} failed. Latest: {last_fail.action[len(EMAIL_FAILED) + 2:][:220]}"
+        + (" The mail server closed the connection - usually a short Gmail hiccup. Use 'Send test email' above; if it works, press 'Mark as resolved'."
+           if "Disconnected" in last_fail.action or "unexpectedly closed" in last_fail.action else ""),
         level=None if not last_fail else "bad")
 
     # Payments
@@ -998,6 +1010,9 @@ def system_check(request):
         add("Security", "Demo mode", False, "DEMO_MODE is on: anyone can sign in as the demo admin. Only use it on a separate demo copy.", level="warn")
     staff = User.objects.filter(is_staff=True, is_active=True)
     without = [u.username for u in staff if not getattr(getattr(u, "profile", None), "totp_enabled", False)]
+    if getattr(dj, "DEMO_MODE", False):
+        from .management.commands.demo_setup import DEMO_USERNAMES
+        without = [n for n in without if n not in DEMO_USERNAMES]  # shared demo logins can't use a phone app
     import ipaddress
     remote = request.META.get("REMOTE_ADDR", "")
     try:
@@ -1021,6 +1036,7 @@ def system_check(request):
         "stripe_test": stripe_test,
         "section": "system", "groups": groups,
         "problems": sum(1 for c in checks if c["level"] == "bad"),
+        "resolvable": any(c["name"] in ("Failures (7 days)", "Page crashes (24 hours)") and c["level"] != "ok" for c in checks),
         "warnings": sum(1 for c in checks if c["level"] == "warn"),
     })
 
@@ -1704,7 +1720,7 @@ def _launch_checklist(site):
         ("Logo added", bool(site.logo), "manage_setup", "?step=look"),
         ("Card payments (Stripe) connected", payments.is_configured(), "manage_system", ""),
         ("Stripe webhook set", payments.is_configured() and payments.webhook_configured(), "manage_system", ""),
-        ("Emails can be sent", "console" not in getattr(dj, "EMAIL_BACKEND", "console"), "manage_system", ""),
+        ("Emails can be sent", not _mail_console(), "manage_system", ""),
         ("At least one product live", Product.objects.live().exists(), "manage_product_new", ""),
         ("Seller plans ready", SellerPlan.objects.filter(active=True).exists(), "manage_plans", ""),
         ("Two-step sign-in for staff", site.require_staff_2fa, "manage_settings", ""),
@@ -2017,21 +2033,33 @@ def operations_checks(dj=None):
 
     # Scheduled jobs & crashes
     ran = AuditLog.objects.filter(action__startswith=DAILY_TASKS).order_by("-created_at").first()
+    howto = ("On PythonAnywhere open Tasks and add a daily task with this command: "
+             "cd ~/Lumen-Market && venv/bin/python manage.py daily_tasks "
+             "(change the folder name if yours differs). Free accounts must log in once a month or the task stops.")
     if ran:
         age = now - ran.created_at
-        ok = age <= timedelta(hours=36) and ran.action.endswith(": ok")
-        add("Daily jobs & errors", "Daily tasks", ok,
-            f"Last run {timezone.localtime(ran.created_at):%b %d, %H:%M}" + ("." if ok else f" - {ran.action.split(': ', 1)[-1]}" if age <= timedelta(hours=36) else " - more than a day ago. Is the PythonAnywhere task still set?"),
-            level=None if ok else ("bad" if age > timedelta(hours=36) else "warn"))
+        note = ran.action.split(": ", 1)[-1]
+        when = f"Last run {timezone.localtime(ran.created_at):%b %d, %H:%M}"
+        if age > timedelta(hours=36):
+            add("Daily jobs & errors", "Daily tasks", False, f"{when} - more than a day ago. {howto}", level="bad")
+        elif not note.startswith("ok"):
+            add("Daily jobs & errors", "Daily tasks", False, f"{when} - {note}. Open the task log on PythonAnywhere to see the error.", level="warn")
+        elif "catch-up" in note:
+            add("Daily jobs & errors", "Daily tasks", False,
+                f"{when}, started automatically because the scheduled run was missed. {howto}", level="warn")
+        else:
+            add("Daily jobs & errors", "Daily tasks", True, f"{when}.")
     else:
         add("Daily jobs & errors", "Daily tasks", False,
-            "Never ran. On PythonAnywhere > Tasks add a daily task: cd ~/Lumen-Market && venv/bin/python manage.py daily_tasks "
-            "(releases unpaid orders, cancels unconfirmed cash orders, sends reminders, updates badges and currency rates, backs up).",
-            level="warn")
-    errors = AuditLog.objects.filter(action__startswith=SERVER_ERROR, created_at__gte=now - timedelta(days=1))
+            "Never ran. " + howto + " It releases unpaid orders, cancels unconfirmed cash orders, sends reminders, "
+            "updates badges and currency rates and makes backups.", level="warn")
+    from .alerts import cleared_since
+    errors = AuditLog.objects.filter(action__startswith=SERVER_ERROR, created_at__gt=max(filter(None, [now - timedelta(days=1), cleared_since()])))
     latest = errors.order_by("-created_at").first()
     add("Daily jobs & errors", "Page crashes (24 hours)", latest is None,
-        "None." if latest is None else f"{errors.count()}. Latest {timezone.localtime(latest.created_at):%H:%M}: {latest.action[len(SERVER_ERROR) + 2:][:200]}")
+        "None." if latest is None else f"{errors.count()}. Latest {timezone.localtime(latest.created_at):%H:%M}: {latest.action[len(SERVER_ERROR) + 2:][:200]}"
+        + (" This often happens for a few seconds while new code is being deployed (before 'migrate' and Reload). If the page opens now, press 'Mark as resolved'."
+           if "ImportError" in latest.action or "OperationalError" in latest.action or "no such" in latest.action else ""))
 
     # Orders that need someone
     late = Order.objects.filter(status="confirmed", created_at__lt=now - timedelta(days=3)).exclude(payment_status__in=["pending", "failed"]).count()
@@ -2132,7 +2160,7 @@ def quick_health():
         from django.conf import settings as dj
         checks = operations_checks(dj)
         problems = [c for c in checks if c["level"] == "bad"]
-        if dj.EMAIL_BACKEND.endswith("console.EmailBackend"):
+        if _mail_console():
             problems.append({"name": "Email isn't set up"})
         data = {"bad": len(problems), "warn": sum(1 for c in checks if c["level"] == "warn"), "names": [p["name"] for p in problems][:3]}
         cache.set("manage:health", data, 600)

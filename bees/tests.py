@@ -7962,3 +7962,98 @@ print('LOGIN', r.status_code, r2.status_code)
         self.assertIn("alpha", run("stores"))
         import shutil
         shutil.rmtree(root, ignore_errors=True)
+
+
+class LaunchReadyTests(TestCase):
+    """Mail guard, daily-task catch-up, 'mark resolved' and crash-safe menus."""
+
+    def test_mail_guard_drops_reserved_addresses_and_retries(self):
+        import smtplib
+        from django.core.mail import EmailMessage
+        from .mailguard import GuardedBackend, deliverable
+        self.assertFalse(deliverable("shopper@demo.invalid"))
+        self.assertFalse(deliverable("a@example.com"))
+        self.assertTrue(deliverable("real@gmail.com"))
+        with override_settings(MAILGUARD_INNER_BACKEND="django.core.mail.backends.locmem.EmailBackend"):
+            backend = GuardedBackend()
+            self.assertEqual(backend.send_messages([EmailMessage("Hi", "x", None, ["shopper@demo.invalid"])]), 0)
+            self.assertEqual(len(mail.outbox), 0)
+            msg = EmailMessage("Hi", "x", None, ["real@gmail.com", "b@demo.invalid"])
+            calls = []
+
+            def flaky(messages):
+                calls.append(1)
+                if len(calls) == 1:
+                    raise smtplib.SMTPServerDisconnected("Connection unexpectedly closed")
+                return len(messages)
+            with mock.patch.object(backend.inner, "send_messages", side_effect=flaky):
+                self.assertEqual(backend.send_messages([msg]), 1)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(msg.to, ["real@gmail.com"])
+
+    def test_console_detection_looks_through_wrappers(self):
+        from .mailguard import is_console
+        with override_settings(EMAIL_BACKEND="bees.mailguard.GuardedBackend",
+                               EMAIL_REAL_BACKEND="django.core.mail.backends.console.EmailBackend"):
+            self.assertTrue(is_console())
+        with override_settings(EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend"):
+            self.assertFalse(is_console())
+
+    def test_overdue_daily_tasks_start_once(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from . import catchup
+        from .alerts import DAILY_TASKS
+        from .models import AuditLog
+        entry = AuditLog.objects.create(action=f"{DAILY_TASKS}: ok")
+        AuditLog.objects.filter(pk=entry.pk).update(created_at=timezone.now() - timedelta(hours=2))
+        with override_settings(DAILY_CATCHUP=True), mock.patch("bees.catchup.threading.Thread") as thread:
+            self.assertFalse(catchup.maybe_start())
+            AuditLog.objects.filter(pk=entry.pk).update(created_at=timezone.now() - timedelta(days=3))
+            cache.clear()
+            self.assertTrue(catchup.maybe_start())
+            self.assertFalse(catchup.maybe_start())  # checked recently
+            cache.delete("daily_catchup_checked:-")
+            self.assertFalse(catchup.maybe_start())  # already running
+        self.assertEqual(thread.call_count, 1)
+
+    def test_catchup_run_skips_demo_reset_and_is_flagged(self):
+        from django.core.management import call_command
+        from .alerts import DAILY_TASKS
+        from .models import AuditLog
+        ran = []
+        real = call_command
+
+        def fake(name, *args, **kwargs):
+            if name == "daily_tasks":
+                return real(name, *args, **kwargs)
+            ran.append(name)
+        with override_settings(DEMO_MODE=True), mock.patch("bees.management.commands.daily_tasks.call_command", side_effect=fake):
+            call_command("daily_tasks", "--catchup", stdout=io.StringIO())
+        self.assertNotIn("demo_setup", ran)
+        self.assertIn("backup_data", ran)
+        self.assertIn("catch-up", AuditLog.objects.get(action__startswith=DAILY_TASKS).action)
+
+    def test_mark_resolved_and_demo_staff_two_step(self):
+        from .alerts import EMAIL_FAILED, SERVER_ERROR
+        from .models import AuditLog
+        boss = User.objects.create_user("boss2", "boss2@example.com", "pass12345", is_staff=True, is_superuser=True)
+        User.objects.create_user("demo_admin", "admin@demo.invalid", "x", is_staff=True)
+        AuditLog.objects.create(action=f"{EMAIL_FAILED}: 'Your order' to a@b.com - SMTPServerDisconnected: Connection unexpectedly closed")
+        AuditLog.objects.create(action=f"{SERVER_ERROR}: GET /ask/ - ImportError: cannot import name 'LiveShow'")
+        self.client.force_login(boss)
+        page = self.client.get(reverse("manage_system")).content.decode()
+        self.assertIn("Mark errors as resolved", page)
+        self.assertIn("Gmail hiccup", page)
+        self.assertIn("deployed", page)
+        with override_settings(DEMO_MODE=True):
+            page = self.client.get(reverse("manage_system")).content.decode()
+        self.assertNotIn("demo_admin", page.split("Staff two-step sign-in", 1)[1][:400])
+        self.client.post(reverse("manage_system"), {"action": "resolve"})
+        page = self.client.get(reverse("manage_system")).content.decode()
+        self.assertNotIn("Mark errors as resolved", page)
+        self.assertNotIn("Gmail hiccup", page)
+
+    def test_menu_extras_never_break_a_page(self):
+        with mock.patch("bees.context_processors._live_on", side_effect=RuntimeError("table missing")):
+            self.assertEqual(self.client.get("/").status_code, 200)
