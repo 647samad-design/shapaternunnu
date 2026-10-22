@@ -246,8 +246,12 @@ def orders(request):
             w.writerow([o.id, o.created_at.strftime("%Y-%m-%d %H:%M"), o.full_name, o.contact_email, o.country,
                         o.status, o.payment_status, o.payment_method, sum(i.quantity for i in o.items.all()), f"{o.total:.2f}"])
         return response
+    page_obj = _page(request, qs)
+    for o in page_obj:
+        if o.status in ("pending", "confirmed"):
+            o.risk = _safe_risk(o)
     return _render(request, "orders.html", {
-        "section": "orders", "page_obj": _page(request, qs), "q": q, "status": status, "payment": payment,
+        "section": "orders", "page_obj": page_obj, "q": q, "status": status, "payment": payment,
         "status_choices": Order.STATUS_CHOICES, "payment_choices": Order.PAYMENT_STATUS_CHOICES,
     })
 
@@ -346,7 +350,16 @@ def order_detail(request, pk):
         "fulfilment_choices": OrderItem.FULFILLMENT_CHOICES,
         "returns": ReturnRequest.objects.filter(order_item__order=order).select_related("order_item"),
         "stripe_test": str(getattr(payments.settings, "STRIPE_SECRET_KEY", "")).startswith("sk_test"),
+        "risk": _safe_risk(order),
     })
+
+
+def _safe_risk(order):
+    from .smart import order_risk
+    try:
+        return order_risk(order)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -1481,8 +1494,8 @@ class SiteSettingsForm(forms.ModelForm):
          ["ai_agents"]),
         ("Help, business & sellers", "AI answers in the help chat use only your store's rules and the customer's own orders. Business accounts let companies buy with PO numbers, tax exemption and invoices. ID checks verify sellers with Stripe Identity.",
          ["support_ai", "b2b_enabled", "identity_checks"]),
-        ("Spin & win and reminders", "A daily prize wheel brings shoppers back (prizes: '10% off', 'Free shipping', '50 points' or 'Try again', each with a chance). 'Still looking?' emails go to signed-in shoppers who viewed products without buying.",
-         ["spin_enabled", "spin_prizes", "browse_reminders"]),
+        ("Spin & win, reminders and price protection", "A daily prize wheel brings shoppers back (prizes: '10% off', 'Free shipping', '50 points' or 'Try again', each with a chance). 'Still looking?' emails go to signed-in shoppers who viewed products without buying. Price drop protection lets shoppers buy now without waiting for a sale.",
+         ["spin_enabled", "spin_prizes", "browse_reminders", "price_protection_days"]),
         ("Reviews", "Reviews sell. A few days after delivery customers get an email asking how it went; photo reviews earn reward points.",
          ["review_requests", "review_photo_points"]),
         ("Gift cards", "Sell digital gift cards on /gift-cards/. Manage and send free ones under Gift cards.", ["gift_cards_enabled"]),
@@ -1508,7 +1521,7 @@ class SiteSettingsForm(forms.ModelForm):
     OPTIONAL = ("commission_individual", "commission_organization", "referral_friend_percent", "referral_reward_percent",
                 "auto_cancel_days", "auto_deliver_days", "claim_reply_days", "default_weight_grams", "duties_policy",
                 "cod_max_order", "cod_refusal_limit", "min_auto_payout", "auto_payouts", "ads_min_bid", "ads_slots",
-                "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points", "bnpl_instalments", "affiliate_percent", "message_channel", "review_photo_points", "spin_prizes")
+                "membership_name", "membership_price", "membership_days", "membership_discount", "checkin_points", "bnpl_instalments", "affiliate_percent", "message_channel", "review_photo_points", "spin_prizes", "price_protection_days")
 
     def clean_spin_prizes(self):
         from .shopper import prizes
@@ -1549,6 +1562,12 @@ class SiteSettingsForm(forms.ModelForm):
 
     def clean_checkin_points(self):
         return self._keep("checkin_points")
+
+    def clean_price_protection_days(self):
+        value = self._keep("price_protection_days")
+        if value is not None and value > 90:
+            raise ValidationError("Use 90 days or less.")
+        return value
 
     def clean_bnpl_instalments(self):
         value = self._keep("bnpl_instalments")

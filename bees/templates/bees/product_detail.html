@@ -409,6 +409,7 @@
                 <li {% if has_shipping_zones %}hidden{% endif %}><span>Shipping</span><span>{% if has_shipping_zones %}By country, shown at checkout{% elif brand.free_shipping_threshold %}Free over {{ brand.free_shipping_threshold|money }}{% elif brand.shipping_flat_fee %}{{ brand.shipping_flat_fee|money }} flat rate{% else %}Free{% endif %}</span></li>
                 {% if product.is_digital %}<li><span>Returns</span><span>Downloads can't be returned</span></li>{% else %}<li><span>Returns</span><span>{{ brand.return_days }} days from delivery</span></li>{% endif %}
                 <li><span>Protection</span><span><a href="{% url 'buyer_protection' %}" class="link">🛡️ Money back if it's not as described</a></span></li>
+                {% if brand.price_protection_days and not product.is_auction %}<li><span>Price drop</span><span title="Signed-in orders only. Checked daily.">📉 Price drops within {{ brand.price_protection_days }} days? You get the difference back</span></li>{% endif %}
                 <li><span>Payment</span><span>{% if stripe_enabled %}Secure card checkout via Stripe{% else %}{{ t.cash_on_delivery }}{% endif %}</span></li>
             </ul>
         </div>

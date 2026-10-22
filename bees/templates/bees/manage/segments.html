@@ -1,0 +1,37 @@
+{% extends "bees/manage/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Customer segments{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><a class="link small" href="{% url 'manage_customers' %}">← Customers</a><h1 style="margin-top:6px;">Customer segments</h1>
+    <p>{{ total }} customer{{ total|pluralize }} grouped by how recently, how often and how much they buy. Updated live from orders.</p></div>
+    <div class="actions"><a class="btn btn-secondary btn-sm" href="?export=all">Download all (CSV)</a></div></div>
+<div class="seg-grid">
+{% for s in segments %}
+<section class="panel seg seg-{{ s.key }}">
+    <div class="seg-head"><h2>{{ s.label }}</h2><span class="seg-n">{{ s.count }}</span></div>
+    <p class="muted small">{{ s.hint }}</p>
+    <dl class="seg-facts"><div><dt>Share of sales</dt><dd>{{ s.share }}%</dd></div><div><dt>Spent each</dt><dd>{{ s.avg|money }}</dd></div></dl>
+    {% if s.top %}<ul class="seg-list">{% for p in s.top %}<li><span data-no-translate>{{ p.name|default:p.email|truncatechars:28 }}</span><span class="muted small">{{ p.orders }} order{{ p.orders|pluralize }} · {{ p.spent|money }} · {{ p.days }}d ago</span></li>{% endfor %}</ul>{% endif %}
+    {% if s.count %}<div class="seg-actions">
+        {% if s.key == "vip" or s.key == "loyal" or s.key == "at_risk" %}<a class="btn btn-primary btn-sm" href="{% url 'manage_campaigns' %}?new=1&audience={{ s.key }}">Email them</a>{% endif %}
+        <a class="btn btn-ghost btn-sm" href="?export={{ s.key }}">CSV</a></div>{% endif %}
+</section>
+{% endfor %}
+</div>
+<p class="muted small" style="margin-top:12px;">VIP: 3+ orders, bought in the last 60 days and in the top 20% by spend. Loyal: 2+ orders in the last 90 days. At risk: 2+ orders but none for 90 days. Promising: one recent order. Lost: one order more than 90 days ago. Emails go only to people subscribed to your newsletter.</p>
+<style>
+    .seg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+    .seg { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .seg-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+    .seg-head h2 { margin: 0; }
+    .seg-n { font-size: 1.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .seg-vip .seg-n { color: var(--brand); }
+    .seg-at_risk .seg-n { color: var(--warn); }
+    .seg-facts { display: flex; gap: 18px; margin: 0; }
+    .seg-facts dt { font-size: .78rem; color: var(--muted); }
+    .seg-facts dd { margin: 0; font-weight: 600; }
+    .seg-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+    .seg-list li { display: flex; flex-direction: column; min-width: 0; border-top: 1px solid var(--line); padding-top: 6px; overflow-wrap: anywhere; }
+    .seg-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 6px; }
+</style>
+{% endblock %}

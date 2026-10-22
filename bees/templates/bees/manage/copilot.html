@@ -1,0 +1,54 @@
+{% extends "bees/manage/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Store copilot{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Store copilot</h1><p>What's happening in your store and what to do next - worked out from your orders, stock, searches and customers.</p></div>
+    <div class="actions"><a class="btn btn-ghost btn-sm" href="?refresh=1">Refresh</a></div></div>
+<div class="kpis" style="margin:0 0 16px;">
+    <div class="kpi"><strong>{{ data.currency }} {{ data.last_7_days.revenue|floatformat:2 }}</strong><span>Sales, last 7 days</span></div>
+    <div class="kpi"><strong>{{ data.last_7_days.orders }}</strong><span>Orders, last 7 days</span></div>
+    <div class="kpi"><strong>{{ data.last_30_days.repeat_rate }}%</strong><span>Customers who came back (30 days)</span></div>
+    <div class="kpi"><strong>{{ data.running_out|length }}</strong><span>Products running out</span></div>
+</div>
+<div class="two-col">
+<div class="col-stack">
+<section class="panel">
+    <h2>Today's insights</h2>
+    <ul class="cp-list">{% for kind, text in insights %}<li class="cp-{{ kind }}"><span class="cp-dot" aria-hidden="true">{% if kind == "up" %}▲{% elif kind == "down" %}▼{% elif kind == "warn" %}!{% else %}✦{% endif %}</span><span>{{ text }}</span></li>{% endfor %}</ul>
+    <div class="cp-links"><a class="link small" href="{% url 'manage_restock' %}">Restock forecast →</a><a class="link small" href="{% url 'manage_segments' %}">Customer segments →</a><a class="link small" href="{% url 'manage_reports' %}">Reports →</a></div>
+</section>
+</div>
+<div class="col-stack">
+<section class="panel">
+    <h2>Ask about your store</h2>
+    {% if not ai_on %}<p class="muted small">Add an <code>ANTHROPIC_API_KEY</code> under Keys &amp; passwords for answers in plain words. Until then you get the insights on the left.</p>{% endif %}
+    <form method="post" class="cp-form">{% csrf_token %}
+        <label class="sr-only" for="cp-q">Your question</label>
+        <textarea class="input" id="cp-q" name="question" rows="3" maxlength="500" placeholder="e.g. Which products should I promote this week?" required>{{ question }}</textarea>
+        <button class="btn btn-primary" type="submit">Ask</button>
+    </form>
+    <div class="cp-examples">{% for ex in examples %}<button type="button" class="chip" data-q="{{ ex }}">{{ ex }}</button>{% endfor %}</div>
+    {% if answer %}<div class="cp-answer" aria-live="polite"><div class="muted small">{% if used_ai %}Answer (AI, from your store's numbers){% else %}Quick insights{% endif %}</div><div>{{ answer|linebreaksbr }}</div></div>{% endif %}
+    <p class="muted small" style="margin-top:10px;">Only totals are used - no customer names or emails are sent to the AI.</p>
+</section>
+</div>
+</div>
+<style>
+    .cp-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+    .cp-list li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; align-items: start; line-height: 1.45; }
+    .cp-dot { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: .72rem; font-weight: 700; background: var(--surface); border: 1px solid var(--line); }
+    .cp-up .cp-dot { color: var(--ok); } .cp-down .cp-dot, .cp-warn .cp-dot { color: var(--warn); } .cp-idea .cp-dot { color: var(--brand); }
+    .cp-links { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; }
+    .cp-form { display: grid; gap: 8px; }
+    .cp-form textarea { width: 100%; }
+    .cp-form button { justify-self: start; }
+    .cp-examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .cp-examples .chip { border: 1px solid var(--line); background: var(--surface); color: inherit; border-radius: 999px; padding: 5px 10px; font-size: .82rem; cursor: pointer; text-align: left; }
+    .cp-answer { margin-top: 14px; padding: 12px 14px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); display: grid; gap: 6px; overflow-wrap: anywhere; }
+</style>
+<script>
+document.querySelectorAll('.cp-examples .chip').forEach(function (b) {
+    b.addEventListener('click', function () { var t = document.getElementById('cp-q'); t.value = b.dataset.q; t.focus(); });
+});
+</script>
+{% endblock %}

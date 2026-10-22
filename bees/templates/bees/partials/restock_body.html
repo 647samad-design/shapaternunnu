@@ -1,0 +1,29 @@
+{% load bees_extras %}
+<div class="adm-head"><div><h1>Restock forecast</h1><p>How long each product's stock will last at the speed it sold over the last 30 days, and how many to reorder so new stock arrives in time ({{ lead_days }} days to restock, enough for {{ cover_days }} more days).</p></div>
+    <div class="actions"><a class="btn btn-secondary btn-sm" href="?export=csv">Download CSV</a></div></div>
+<div class="tabs" role="group" aria-label="Filter">
+    <a href="?show=attention" class="{% if show == 'attention' %}on{% endif %}">Needs attention{% with n=counts.out|add:counts.urgent|add:counts.soon %}{% if n %}<span class="n">{{ n }}</span>{% endif %}{% endwith %}</a>
+    <a href="?show=out" class="{% if show == 'out' %}on{% endif %}">Sold out{% if counts.out %}<span class="n">{{ counts.out }}</span>{% endif %}</a>
+    <a href="?show=urgent" class="{% if show == 'urgent' %}on{% endif %}">Reorder now{% if counts.urgent %}<span class="n">{{ counts.urgent }}</span>{% endif %}</a>
+    <a href="?show=soon" class="{% if show == 'soon' %}on{% endif %}">Soon{% if counts.soon %}<span class="n">{{ counts.soon }}</span>{% endif %}</a>
+    <a href="?show=slow" class="{% if show == 'slow' %}on{% endif %}">Not selling{% if counts.slow %}<span class="n">{{ counts.slow }}</span>{% endif %}</a>
+    <a href="?show=all" class="{% if show == 'all' %}on{% endif %}">All</a>
+</div>
+<section class="panel">
+    {% if rows %}
+    <div class="table-scroll"><table class="table" style="min-width:640px;">
+        <thead><tr><th style="min-width:170px;">Product</th><th class="num">In stock</th><th class="num">Sold (30 days)</th><th class="num">Per week</th><th class="num">Days left</th><th class="num">Reorder</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for r in rows %}<tr>
+            <td><a class="rowlink" href="{% if request.path|slice:':8' == '/manage/' %}{% url 'manage_product_edit' r.product.pk %}{% else %}{% url 'seller_edit_product' r.product.pk %}{% endif %}">{{ r.product.name|truncatechars:60 }}</a>{% if r.product.seller_account and request.path|slice:':8' == '/manage/' %}<div class="muted small">{{ r.product.seller_account.display_name }}</div>{% endif %}</td>
+            <td class="num">{{ r.stock }}</td><td class="num">{{ r.sold }}</td><td class="num">{{ r.per_week }}</td>
+            <td class="num">{% if r.days_left is None %}—{% else %}{{ r.days_left }}{% endif %}</td>
+            <td class="num"><strong>{% if r.reorder %}{{ r.reorder }}{% else %}—{% endif %}</strong></td>
+            <td>{% if r.status == "out" %}<span class="pill bad">Sold out</span>{% elif r.status == "urgent" %}<span class="pill bad">Reorder now</span>{% elif r.status == "soon" %}<span class="pill warn">Soon</span>{% elif r.status == "slow" %}<span class="pill">Not selling</span>{% else %}<span class="pill ok">OK</span>{% endif %}</td>
+        </tr>{% endfor %}
+        </tbody></table></div>
+    {% else %}
+    <p class="muted">{% if show == "attention" %}Nothing is running low. 🎉 Products that will run out within a month show up here.{% else %}No products here.{% endif %}</p>
+    {% endif %}
+    <p class="muted small" style="margin-top:12px;">"Not selling" = in stock but no sales in 30 days: try a deal, better photos or a lower price.</p>
+</section>

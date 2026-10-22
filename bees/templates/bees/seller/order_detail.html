@@ -30,6 +30,7 @@
 {% if order.status == "cancelled" %}<div class="callout bad" style="margin:0;"><strong>This order was cancelled.</strong> Don't ship it. If you already sent it, contact support.</div>
 {% elif order.payment_status == "pending" or order.payment_status == "failed" %}<div class="callout warn" style="margin:0;"><strong>Not paid yet.</strong> Wait until the payment comes through before packing - we'll alert you.</div>{% endif %}
 
+{% if risk %}<div class="callout warn" style="margin:0;"><strong>Check before shipping.</strong> This order has signs of a risky order ({{ risk.reasons|slice:":2"|join:", "|lower }}). {% if order.payment_method == "cod" %}Call the customer to confirm before you send it.{% else %}The store team has been shown the details.{% endif %}</div>{% endif %}
 <section class="panel">
     <ol class="steps" aria-label="Progress">{% for label, done, when in steps %}<li class="{% if done %}done{% endif %}">{{ label }}{% if when and done %}<div class="muted small" style="font-weight:400;">{{ when|date:"M j" }}</div>{% endif %}</li>{% endfor %}</ol>
 </section>

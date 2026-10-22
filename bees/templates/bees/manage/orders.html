@@ -35,7 +35,7 @@
                 <td><a class="rowlink" href="{% url 'manage_order' o.id %}">#{{ o.id }}</a><div class="muted small">{{ o.created_at|date:"M j, Y H:i" }}</div></td>
                 <td>{{ o.full_name }}<div class="muted small">{{ o.contact_email|default:"—" }}{% if o.country %} · {{ o.country }}{% endif %}</div></td>
                 <td>{% for i in o.items.all|slice:":2" %}<div class="small">{{ i.product_name|truncatechars:30 }} × {{ i.quantity }}</div>{% endfor %}{% if o.items.all|length > 2 %}<div class="muted small">+{{ o.items.all|length|add:"-2" }} more</div>{% endif %}</td>
-                <td>{% include "bees/manage/_order_pills.html" %}</td>
+                <td>{% include "bees/manage/_order_pills.html" %}{% if o.risk and o.risk.level != "low" %} <span class="pill {% if o.risk.level == 'high' %}bad{% else %}warn{% endif %}" title="{{ o.risk.reasons|join:', ' }}">Risk {{ o.risk.score }}</span>{% endif %}</td>
                 <td class="num"><strong>{{ o.total|money }}</strong></td>
             </tr>
             {% empty %}

@@ -8084,3 +8084,120 @@ class LaunchReadyTests(TestCase):
         self.assertEqual(prune_missing(), 3)  # the pack, a product name, and a text the engine now handles
         self.assertEqual(set(UIText.objects.values_list("source", flat=True)),
                          {"A brand new sentence nobody translated", "Typed by owner"})
+
+
+class SmartToolsTests(TestCase):
+    def setUp(self):
+        from .models import SellerAccount
+        self.boss = User.objects.create_user("owner9", "owner9@example.com", "pass12345", is_staff=True, is_superuser=True)
+        self.seller_user = User.objects.create_user("seller9", "seller9@example.com", "pass12345")
+        self.seller = SellerAccount.objects.create(user=self.seller_user, status="approved", business_name="Nine Shop")
+
+    def _order(self, user=None, email="buyer@example.com", product=None, qty=1, price="10.00", days_ago=0, **extra):
+        from datetime import timedelta
+        from django.utils import timezone
+        from .models import Order, OrderItem
+        o = Order.objects.create(user=user, email=email, full_name="Buyer One", address="1 Road", city="Town", country=extra.pop("country", "US"),
+                                 phone=extra.pop("phone", "+15551234567"), payment_method=extra.pop("payment_method", "cod"),
+                                 status=extra.pop("status", "confirmed"), payment_status=extra.pop("payment_status", "not_applicable"), **extra)
+        Order.objects.filter(pk=o.pk).update(created_at=timezone.now() - timedelta(days=days_ago))
+        o.refresh_from_db()
+        if product:
+            OrderItem.objects.create(order=o, product=product, product_name=product.name, price=Decimal(price), quantity=qty,
+                                     seller_account=product.seller_account)
+        return o
+
+    def test_restock_forecast(self):
+        from .smart import restock_plan
+        fast = make_product(name="Fast seller", stock=4)
+        idle = make_product(name="Sits on shelf", stock=20)
+        self._order(product=fast, qty=30, days_ago=3)
+        rows = {r["product"].name: r for r in restock_plan([fast, idle])}
+        self.assertEqual(rows["Fast seller"]["status"], "urgent")
+        self.assertGreater(rows["Fast seller"]["reorder"], 30)
+        self.assertEqual(rows["Sits on shelf"]["status"], "slow")
+        self.client.force_login(self.boss)
+        page = self.client.get(reverse("manage_restock"))
+        self.assertContains(page, "Fast seller")
+        self.assertContains(page, "Reorder now")
+        self.assertIn("text/csv", self.client.get(reverse("manage_restock") + "?export=csv")["Content-Type"])
+
+    def test_seller_sees_only_own_restock(self):
+        mine = make_product(name="Mine", stock=1)
+        mine.seller_account = self.seller
+        mine.save()
+        make_product(name="Someone else's", stock=1)
+        self.client.force_login(self.seller_user)
+        page = self.client.get(reverse("seller_restock") + "?show=all")
+        self.assertContains(page, "Mine")
+        self.assertNotContains(page, "Someone else&#x27;s")
+
+    def test_order_risk_flags_and_page(self):
+        from .smart import order_risk
+        p = make_product(name="Gadget", stock=50, price="20.00")
+        for i in range(3):
+            self._order(email=f"n{i}@example.com", product=p, days_ago=10)
+        normal = self._order(email="calm@example.com", product=p)
+        self.assertEqual(order_risk(normal)["level"], "low")
+        self._order(email="x@mailinator.com", phone="", product=p, status="cancelled", cod_refused=True, days_ago=5)
+        risky = self._order(email="x@mailinator.com", phone="", product=p, qty=40, price="20.00")
+        r = order_risk(risky)
+        self.assertEqual(r["level"], "high")
+        self.assertIn("Throwaway email address", r["reasons"])
+        self.client.force_login(self.boss)
+        self.assertContains(self.client.get(reverse("manage_order", args=[risky.pk])), "High risk")
+        self.assertContains(self.client.get(reverse("manage_orders")), f"Risk {r['score']}")
+
+    def test_price_drop_protection(self):
+        from .models import Notification, Profile, SiteSettings
+        from .smart import price_protection
+        buyer = User.objects.create_user("pp", "pp@example.com", "x")
+        p = make_product(name="Lamp", price="50.00")
+        self._order(user=buyer, email="pp@example.com", product=p, qty=2, price="50.00", payment_status="paid", payment_method="card", days_ago=3)
+        self.assertEqual(price_protection(), 0)  # off by default
+        site = SiteSettings.load()
+        site.price_protection_days = 14
+        site.save()
+        p.price = Decimal("45.00")
+        p.save()
+        self.assertEqual(price_protection(), 1)
+        self.assertEqual(Profile.objects.get(user=buyer).store_credit, Decimal("10.00"))
+        self.assertEqual(price_protection(), 0)  # paid once
+        p.price = Decimal("40.00")
+        p.save()
+        self.assertEqual(price_protection(), 1)  # a further drop pays the rest
+        self.assertEqual(Profile.objects.get(user=buyer).store_credit, Decimal("20.00"))
+        self.assertTrue(Notification.objects.filter(user=buyer, message__startswith="Price drop protection").exists())
+        self.assertContains(self.client.get(reverse("product_detail", args=[p.pk])), "You get the difference back")
+
+    def test_segments_campaign_audience_and_copilot(self):
+        from .campaigns import audience_emails
+        from .models import NewsletterSubscriber
+        from .smart import customers
+        p = make_product(name="Tea", price="30.00")
+        for d in (1, 10, 20):
+            self._order(email="vip@example.com", product=p, payment_status="paid", payment_method="card", days_ago=d, price="90.00")
+        for d in (120, 200):
+            self._order(email="gone@example.com", product=p, payment_status="paid", payment_method="card", days_ago=d)
+        self._order(email="fresh@example.com", product=p, payment_status="paid", payment_method="card", days_ago=2)
+        people = customers()
+        self.assertEqual(people["vip@example.com"]["segment"], "vip")
+        self.assertEqual(people["gone@example.com"]["segment"], "at_risk")
+        self.assertEqual(people["fresh@example.com"]["segment"], "new")
+        NewsletterSubscriber.objects.create(email="gone@example.com")
+        self.assertEqual(audience_emails("at_risk"), ["gone@example.com"])
+        self.client.force_login(self.boss)
+        page = self.client.get(reverse("manage_segments"))
+        self.assertContains(page, "At risk")
+        self.assertContains(page, "Email them")
+        page = self.client.get(reverse("manage_copilot"))
+        self.assertContains(page, "Today's insights")
+        self.assertContains(page, "haven&#x27;t ordered for 90+ days")
+        with override_settings(AI_API_KEY=""):
+            r = self.client.post(reverse("manage_copilot"), {"question": "What should I do?"})
+        self.assertContains(r, "Quick insights")
+        with mock.patch("bees.ai._call_claude", return_value="Promote Tea to your VIPs.") as call, \
+                mock.patch("bees.multistore.store_settings", mock.Mock(AI_API_KEY="k", STORE_CURRENCY="usd")):
+            r = self.client.post(reverse("manage_copilot"), {"question": "What should I promote?"})
+        self.assertContains(r, "Promote Tea to your VIPs.")
+        self.assertNotIn("vip@example.com", call.call_args[0][0])  # no personal data goes to the AI
