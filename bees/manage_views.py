@@ -924,7 +924,7 @@ def system_check(request):
     last_fail = failures.order_by("-created_at").first()
     add("Email", "Failures (7 days)", not failures.exists(),
         "None." if not last_fail else f"{failures.count()} failed. Latest: {last_fail.action[len(EMAIL_FAILED) + 2:][:220]}"
-        + (" The mail server closed the connection - usually a short Gmail hiccup. Use 'Send test email' above; if it works, press 'Mark as resolved'."
+        + (" The mail server closed the connection - usually a short Gmail hiccup. Emails are now retried automatically when that happens; use 'Send test email' above and, if it works, press 'Mark as resolved'."
            if "Disconnected" in last_fail.action or "unexpectedly closed" in last_fail.action else ""),
         level=None if not last_fail else "bad")
 
@@ -2092,12 +2092,17 @@ def operations_checks(dj=None):
             "Never ran. " + howto + " It releases unpaid orders, cancels unconfirmed cash orders, sends reminders, "
             "updates badges and currency rates and makes backups.", level="warn")
     from .alerts import cleared_since
+    from .alerts import split_update_crashes
     errors = AuditLog.objects.filter(action__startswith=SERVER_ERROR, created_at__gt=max(filter(None, [now - timedelta(days=1), cleared_since()])))
-    latest = errors.order_by("-created_at").first()
+    real, during_update = split_update_crashes(errors.order_by("-created_at")[:500])
+    latest = real[0] if real else None
+    update_note = (f" {len(during_update)} more happened only while the update was being installed "
+                   f"(before {timezone.localtime(during_update[0].created_at):%H:%M} Reload) - already fixed, ignored."
+                   if during_update else "")
     add("Daily jobs & errors", "Page crashes (24 hours)", latest is None,
-        "None." if latest is None else f"{errors.count()}. Latest {timezone.localtime(latest.created_at):%H:%M}: {latest.action[len(SERVER_ERROR) + 2:][:200]}"
-        + (" This often happens for a few seconds while new code is being deployed (before 'migrate' and Reload). If the page opens now, press 'Mark as resolved'."
-           if "ImportError" in latest.action or "OperationalError" in latest.action or "no such" in latest.action else ""))
+        ("None." + update_note) if latest is None else f"{len(real)}. Latest {timezone.localtime(latest.created_at):%H:%M}: {latest.action[len(SERVER_ERROR) + 2:][:200]}"
+        + (" This page crashed again after the last Reload, so check that 'migrate' ran and the code was fully pulled, then Reload again."
+           if "ImportError" in latest.action or "OperationalError" in latest.action or "no such" in latest.action else "") + update_note)
 
     # Orders that need someone
     late = Order.objects.filter(status="confirmed", created_at__lt=now - timedelta(days=3)).exclude(payment_status__in=["pending", "failed"]).count()
