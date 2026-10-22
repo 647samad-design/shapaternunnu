@@ -8047,7 +8047,7 @@ class LaunchReadyTests(TestCase):
         page = self.client.get(reverse("manage_system")).content.decode()
         self.assertIn("Mark errors as resolved", page)
         self.assertIn("Gmail hiccup", page)
-        self.assertIn("deployed", page)
+        self.assertIn("crashed again after the last Reload", page)
         with override_settings(DEMO_MODE=True):
             page = self.client.get(reverse("manage_system")).content.decode()
         self.assertNotIn("demo_admin", page.split("Staff two-step sign-in", 1)[1][:400])
@@ -8534,3 +8534,78 @@ class MapsAndAppTests(TestCase):
         for text in ("JazzCash (Pakistan)", "GOOGLE_MAPS_BROWSER_KEY", "Android app (Play Store)", "REMOVE_BG_API_KEY"):
             self.assertContains(page, text)
         self.assertContains(self.client.get(reverse("manage_mobile_app")), "PWABuilder")
+
+
+class MailRetryAndUpdateCrashTests(TestCase):
+    def _backend(self, failures):
+        import smtplib
+        from .mailretry import RetrySMTPBackend
+        backend = RetrySMTPBackend(host="smtp.example.com", port=587, fail_silently=False)
+        sent = []
+
+        class FakeSMTP:
+            def sendmail(self, frm, to, msg):
+                if failures:
+                    raise failures.pop(0)
+                sent.append(to)
+
+            def quit(self):
+                pass
+
+            def close(self):
+                pass
+
+        def fake_open(self=backend):
+            if backend.connection is None:
+                backend.connection = FakeSMTP()
+                return True
+            return False
+        backend.open = fake_open
+        return backend, sent, smtplib
+
+    def test_dropped_connection_is_retried(self):
+        import smtplib
+        from django.core.mail import EmailMessage
+        backend, sent, _ = self._backend([smtplib.SMTPServerDisconnected("Connection unexpectedly closed"),
+                                          smtplib.SMTPResponseException(421, b"try again later")])
+        with mock.patch("bees.mailretry.time.sleep") as nap:
+            n = backend.send_messages([EmailMessage("Hi", "Body", "shop@example.com", ["a@example.com"])])
+        self.assertEqual(n, 1)
+        self.assertEqual(sent, [["a@example.com"]])
+        self.assertEqual(nap.call_count, 2)
+
+    def test_permanent_errors_are_not_retried(self):
+        import smtplib
+        from django.core.mail import EmailMessage
+        backend, sent, _ = self._backend([smtplib.SMTPAuthenticationError(535, b"bad password")])
+        with mock.patch("bees.mailretry.time.sleep") as nap, self.assertRaises(smtplib.SMTPAuthenticationError):
+            backend.send_messages([EmailMessage("Hi", "Body", "shop@example.com", ["a@example.com"])])
+        self.assertEqual(nap.call_count, 0)
+        self.assertEqual(sent, [])
+
+    def test_gives_up_after_retries(self):
+        import smtplib
+        from django.core.mail import EmailMessage
+        backend, sent, _ = self._backend([smtplib.SMTPServerDisconnected("x")] * 3)
+        with mock.patch("bees.mailretry.time.sleep"), self.assertRaises(smtplib.SMTPServerDisconnected):
+            backend.send_messages([EmailMessage("Hi", "Body", "shop@example.com", ["a@example.com"])])
+
+    def test_crashes_from_before_the_reload_are_ignored(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from . import alerts
+        from .alerts import SERVER_ERROR
+        from .models import AuditLog
+        boss = User.objects.create_user("boss9", "boss9@example.com", "pass12345", is_staff=True, is_superuser=True)
+        old = AuditLog.objects.create(action=f"{SERVER_ERROR}: GET /ask/ - ImportError: cannot import name 'LiveShow' from 'bees.models'")
+        AuditLog.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(minutes=5))
+        self.client.force_login(boss)
+        with mock.patch.object(alerts, "PROCESS_STARTED", timezone.now() - timedelta(minutes=1)):
+            page = self.client.get(reverse("manage_system")).content.decode()
+            row = page.split("Page crashes (24 hours)", 1)[1][:900]
+            self.assertIn("already fixed, ignored", row)
+            self.assertNotIn("Problem", row[:300])
+            # a different, real crash still shows
+            AuditLog.objects.create(action=f"{SERVER_ERROR}: GET /cart/ - KeyError: 'x'")
+            row = self.client.get(reverse("manage_system")).content.decode().split("Page crashes (24 hours)", 1)[1][:900]
+            self.assertIn("KeyError", row)

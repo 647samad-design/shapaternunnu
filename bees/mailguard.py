@@ -47,7 +47,7 @@ def is_console():
 class GuardedBackend(BaseEmailBackend):
     def __init__(self, fail_silently=False, **kwargs):
         super().__init__(fail_silently=fail_silently)
-        self.inner = get_connection(getattr(settings, "MAILGUARD_INNER_BACKEND", "django.core.mail.backends.smtp.EmailBackend"),
+        self.inner = get_connection(getattr(settings, "MAILGUARD_INNER_BACKEND", "bees.mailretry.RetrySMTPBackend"),
                                     fail_silently=fail_silently, **kwargs)
 
     def open(self):

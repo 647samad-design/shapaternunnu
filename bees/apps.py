@@ -10,5 +10,6 @@ class BeesConfig(AppConfig):
         from . import webpush
         from .models import Notification
         post_save.connect(webpush.on_notification, sender=Notification, dispatch_uid="webpush-notification")
+        from . import alerts  # noqa: F401 - records when this process started
         from . import ops
         ops.connect_signals()

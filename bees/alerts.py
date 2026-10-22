@@ -2,6 +2,8 @@
 refunds/disputes made in Stripe. Shown as admin notifications and kept in
 the audit log (Admin > System check lists the recent ones)."""
 import logging
+import re
+from datetime import datetime, timezone as _tz
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +16,24 @@ WEBHOOK_REJECTED = "Webhook rejected"
 SERVER_ERROR = "Server error"
 DAILY_TASKS = "Daily tasks ran"
 ALERTS_CLEARED = "Alerts marked resolved"
+
+# When this app process started. A Reload after an update starts a new one,
+# so crashes from half-copied code before it are already fixed.
+PROCESS_STARTED = datetime.now(_tz.utc)
+UPDATE_CRASH = re.compile(r"ImportError|ModuleNotFoundError|cannot import name|no such (table|column)|"
+                          r"(column|relation) .{0,80} does not exist|Unknown column|SyntaxError|IndentationError")
+
+
+def split_update_crashes(entries):
+    """(real, during_update): page crashes of the kind an update causes for
+    a few seconds (code copied before migrate/Reload) that happened before
+    this process started are not problems any more - they can't happen with
+    the code that is running now. If the same crash happens again after
+    the Reload it counts as real."""
+    real, update = [], []
+    for e in entries:
+        (update if e.created_at < PROCESS_STARTED and UPDATE_CRASH.search(e.action) else real).append(e)
+    return real, update
 
 
 def cleared_since():

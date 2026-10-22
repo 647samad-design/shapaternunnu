@@ -280,13 +280,13 @@ class StoreEmailBackend(BaseEmailBackend):
         e = store.env() if store is not None else {}
         self._from = ""
         if e.get("EMAIL_HOST_USER"):
-            self.inner = get_connection("django.core.mail.backends.smtp.EmailBackend", fail_silently=fail_silently,
+            self.inner = get_connection("bees.mailretry.RetrySMTPBackend", fail_silently=fail_silently,
                                         host=e.get("EMAIL_HOST") or "smtp.gmail.com", port=int(e.get("EMAIL_PORT") or 587),
                                         username=e["EMAIL_HOST_USER"], password=e.get("EMAIL_HOST_PASSWORD", ""),
                                         use_tls=e.get("EMAIL_USE_TLS", "True").lower() != "false")
             self._from = e.get("DEFAULT_FROM_EMAIL") or e["EMAIL_HOST_USER"]
         else:
-            self.inner = get_connection(getattr(settings, "MULTISTORE_BASE_EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"),
+            self.inner = get_connection(getattr(settings, "MULTISTORE_BASE_EMAIL_BACKEND", "bees.mailretry.RetrySMTPBackend"),
                                         fail_silently=fail_silently, **kwargs)
             self._from = e.get("DEFAULT_FROM_EMAIL", "")
 
