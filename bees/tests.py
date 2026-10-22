@@ -8073,3 +8073,14 @@ class LaunchReadyTests(TestCase):
         self.assertIn(NAME_KEYS, lk)
         make_product(name="Sunblock SPF 50")
         self.assertEqual(_drop_names(["Sunblock SPF {0}", "Brand new text"]), ["Brand new text"])
+
+    def test_prune_untranslated_rows(self):
+        from .i18n import prune_missing
+        from .models import UIText
+        make_product(name="Linen Throw")
+        for src in ("Pakistan", "Linen Throw", "A brand new sentence nobody translated", "Search {0} Studio"):
+            UIText.objects.create(source=src)
+        UIText.objects.create(source="Typed by owner", fr="Saisi")
+        self.assertEqual(prune_missing(), 3)  # the pack, a product name, and a text the engine now handles
+        self.assertEqual(set(UIText.objects.values_list("source", flat=True)),
+                         {"A brand new sentence nobody translated", "Typed by owner"})

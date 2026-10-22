@@ -317,3 +317,30 @@ class PageTranslationMiddleware:
                 import logging
                 logging.getLogger(__name__).exception("Page translation failed for %s", request.path)
         return response
+
+
+def prune_missing():
+    """Removes 'untranslated' rows that no longer need anyone: texts the
+    built-in pack now covers, product/store names and texts the engine can
+    now translate on its own. Rows with any translation typed in are kept.
+    Returns how many were removed."""
+    from .i18n_pack import PACK
+    from .models import UIText
+    blank = UIText.objects.filter(ur="", roman="", ar="", es="", fr="")
+    sources = list(blank.values_list("source", flat=True)[:20000])
+    if not sources:
+        return 0
+    keep_named = set(_drop_names(sources))
+    lookup = table("fr")
+    gone = []
+    for src in sources:
+        if src in PACK or src not in keep_named:
+            gone.append(src)
+            continue
+        probe = set()
+        if lookup_text(src, lookup, probe) is not None and not probe:
+            gone.append(src)
+    for i in range(0, len(gone), 500):
+        UIText.objects.filter(source__in=gone[i:i + 500], ur="", roman="", ar="", es="", fr="").delete()
+    clear_cache()
+    return len(gone)

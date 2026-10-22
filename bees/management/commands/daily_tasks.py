@@ -31,7 +31,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         failed = []
         from django.conf import settings
-        jobs = [("release_unpaid_orders",), ("order_automation",), ("send_cart_reminders",), ("price_drop_alerts",), ("notify_followers",), ("subscription_reminders",), ("send_digests",), ("send_review_requests",), ("send_browse_reminders",), ("invoice_reminders",), ("run_promotions",), ("auto_payouts",), ("plan_reminders",), ("update_seller_badges",), ("update_currency_rates",), ("backup_data",), ("clearsessions",)]
+        jobs = [("release_unpaid_orders",), ("order_automation",), ("send_cart_reminders",), ("price_drop_alerts",), ("notify_followers",), ("subscription_reminders",), ("send_digests",), ("send_review_requests",), ("send_browse_reminders",), ("invoice_reminders",), ("run_promotions",), ("auto_payouts",), ("plan_reminders",), ("update_seller_badges",), ("update_currency_rates",), ("prune_translations",), ("backup_data",), ("clearsessions",)]
         if getattr(settings, "DEMO_MODE", False) and not options.get("catchup") and not options.get("skip_demo_reset"):
             jobs.append(("demo_setup", "--reset"))
         for job in jobs:
