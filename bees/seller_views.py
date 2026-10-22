@@ -314,7 +314,21 @@ def order_detail(request, order_id):
         "section": "orders", "order": order, "items": my_items, "totals": totals, "steps": steps,
         "only_seller": only_seller, "can_ship": can_ship, "fulfilment_choices": OrderItem.FULFILLMENT_CHOICES,
         "other_sellers": not only_seller,
+        "risk": _seller_risk(order),
     })
+
+
+def _seller_risk(order):
+    """Sellers only see a warning for risky open orders (no score details
+    about the customer's history)."""
+    from .smart import order_risk
+    if order.status not in ("pending", "confirmed"):
+        return None
+    try:
+        r = order_risk(order)
+    except Exception:
+        return None
+    return r if r["level"] == "high" else None
 
 
 def _set_items_status(request, items, new_status):

@@ -2,7 +2,7 @@
 {% load bees_extras %}
 {% block page_title %}Customers{% endblock %}
 {% block admin %}
-<div class="adm-head"><div><h1>Customers</h1><p>{{ page_obj.paginator.count }} account{{ page_obj.paginator.count|pluralize }}</p></div><div class="actions"><a class="btn btn-ghost btn-sm" href="{% url 'manage_referrals' %}">Referral program</a></div></div>
+<div class="adm-head"><div><h1>Customers</h1><p>{{ page_obj.paginator.count }} account{{ page_obj.paginator.count|pluralize }}</p></div><div class="actions"><a class="btn btn-secondary btn-sm" href="{% url 'manage_segments' %}">Customer segments</a><a class="btn btn-ghost btn-sm" href="{% url 'manage_referrals' %}">Referral program</a></div></div>
 <form method="get" class="toolbar">
     <label for="cq" class="sr-only">Search customers</label>
     <input class="input grow" id="cq" type="search" name="q" value="{{ q }}" placeholder="Name, username or email">

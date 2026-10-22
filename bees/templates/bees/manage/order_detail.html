@@ -14,6 +14,10 @@
     </div>
 </div>
 
+{% if risk and risk.level != "low" %}<div class="callout {% if risk.level == 'high' %}bad{% else %}warn{% endif %}" style="margin:0 0 16px;display:grid;gap:4px;">
+    <strong>Order check: {{ risk.score }}/100 · {% if risk.level == 'high' %}High risk - confirm with the customer before shipping{% else %}Worth a second look{% endif %}</strong>
+    <span class="small">{{ risk.reasons|join:" · " }}</span>
+</div>{% elif risk %}<p class="muted small" style="margin:-4px 0 14px;">✓ Order check: looks normal ({{ risk.score }}/100){% if risk.score %} · {{ risk.reasons|join:", " }}{% endif %}</p>{% endif %}
 <div class="two-col">
     <div class="col-stack">
         <section class="panel">

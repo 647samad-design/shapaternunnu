@@ -919,6 +919,8 @@ class OrderItem(models.Model):
     warehouse = models.ForeignKey("Warehouse", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     registry_item = models.ForeignKey("RegistryItem", null=True, blank=True, on_delete=models.SET_NULL, related_name="order_items")
     quote = models.ForeignKey("QuoteRequest", null=True, blank=True, on_delete=models.SET_NULL, related_name="order_items")
+    protected_credit = models.DecimalField(max_digits=10, decimal_places=2, default=0,
+                                           help_text="Store credit already given for price drops after the order (price drop protection).")
 
     @property
     def is_digital(self):
@@ -1773,6 +1775,10 @@ class SiteSettings(models.Model):
     spin_enabled = models.BooleanField("Spin the wheel", default=False, help_text="Signed-in shoppers spin once a day for a coupon or points.")
     spin_prizes = models.TextField("Wheel prizes", default="5% off:35\n10% off:25\n50 points:20\nFree shipping:12\n20% off:5\nTry again:3",
                                    help_text="One per line as 'Prize:chance'. Prizes: '10% off', 'Free shipping', '50 points' or 'Try again'.")
+    price_protection_days = models.PositiveSmallIntegerField(
+        "Price drop protection (days)", default=0,
+        help_text="If a product gets cheaper within this many days of a signed-in shopper's order, they get the difference as store "
+                  "credit automatically (checked daily; the store pays it). Shown on product pages. 0 = off; 14 or 30 is common.")
     browse_reminders = models.BooleanField("'Still looking?' emails", default=True, help_text="One email a day after a signed-in shopper looked at products without buying (at most once a week).")
     review_requests = models.BooleanField("Ask for reviews after delivery", default=True, help_text="A few days after delivery, email the customer a link to review what they bought.")
     review_photo_points = models.PositiveSmallIntegerField("Points for a photo review", default=50, help_text="Reward points for a verified review with a photo. 0 = off.")
@@ -2363,7 +2369,8 @@ class AdStat(models.Model):
 class EmailCampaign(models.Model):
     """A marketing email to newsletter subscribers (people who opted in)."""
     AUDIENCES = [("all", "All subscribers"), ("buyers", "Subscribers who have ordered"),
-                 ("new", "Subscribers who haven't ordered yet"), ("lapsed", "Customers who haven't ordered for 90 days")]
+                 ("new", "Subscribers who haven't ordered yet"), ("lapsed", "Customers who haven't ordered for 90 days"),
+                 ("vip", "VIP customers (segment)"), ("loyal", "Loyal customers (segment)"), ("at_risk", "At-risk customers (segment)")]
     STATUS = [("draft", "Draft"), ("sending", "Sending"), ("sent", "Sent")]
     subject = models.CharField(max_length=150)
     heading = models.CharField(max_length=150)

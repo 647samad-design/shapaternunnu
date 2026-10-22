@@ -372,7 +372,7 @@
                 {% if user.is_authenticated and not product.is_auction %}<details class="pa-box"><summary>🔔 {% if price_alert %}Alert at {{ price_alert.target_price|price }}{% else %}Price alert{% endif %}</summary>
                     <form method="post" action="{% url 'price_alert' product.id %}" class="pa-form">{% csrf_token %}<label class="sr-only" for="pa-t">Tell me when the price is at or below</label><input id="pa-t" name="target_price" inputmode="decimal" placeholder="e.g. {{ product.price|floatformat:0 }}" value="{{ price_alert.target_price|default:'' }}"><button class="btn btn-secondary btn-sm" type="submit">Set</button>{% if price_alert %}<button class="btn btn-ghost btn-sm" name="action" value="remove" formnovalidate>Remove</button>{% endif %}</form></details>{% endif %}
                 {% if my_registries and not product.is_auction %}<details class="pa-box"><summary>🎁 Add to registry</summary>
-                    <form method="post" action="{% url 'registry_add' product.id %}" class="pa-form">{% csrf_token %}{% if product.has_variants %}<input type="hidden" name="variant" class="variant-input">{% endif %}<label class="sr-only" for="rg-pick">Registry</label><select id="rg-pick" name="registry">{% for r in my_registries %}<option value="{{ r.id }}">{{ r.title }}</option>{% endfor %}</select><button class="btn btn-secondary btn-sm" type="submit">Add</button></form></details>{% endif %}
+                    <form method="post" action="{% url 'registry_add' product.id %}" class="pa-form">{% csrf_token %}{% if product.has_variants %}<input type="hidden" name="variant" class="variant-input">{% endif %}<label class="sr-only" for="rg-pick">Registry</label><select id="rg-pick" name="registry">{% for r in my_registries %}<option value="{{ r.id }}" data-no-translate>{{ r.title }}</option>{% endfor %}</select><button class="btn btn-secondary btn-sm" type="submit">Add</button></form></details>{% endif %}
                 <a href="{% url 'toggle_compare' product.id %}" rel="nofollow">{% if product.id in compare_ids %}Remove from compare{% else %}Add to compare{% endif %}</a>
                 <button type="button" class="link-btn" data-share-product data-url="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}{% if user.is_authenticated and brand.referral_enabled and user.profile.referral_code %}?ref={{ user.profile.referral_code }}{% endif %}" data-title="{{ product.name }}">↗ Share</button>
             </div>
@@ -409,6 +409,7 @@
                 <li {% if has_shipping_zones %}hidden{% endif %}><span>Shipping</span><span>{% if has_shipping_zones %}By country, shown at checkout{% elif brand.free_shipping_threshold %}Free over {{ brand.free_shipping_threshold|money }}{% elif brand.shipping_flat_fee %}{{ brand.shipping_flat_fee|money }} flat rate{% else %}Free{% endif %}</span></li>
                 {% if product.is_digital %}<li><span>Returns</span><span>Downloads can't be returned</span></li>{% else %}<li><span>Returns</span><span>{{ brand.return_days }} days from delivery</span></li>{% endif %}
                 <li><span>Protection</span><span><a href="{% url 'buyer_protection' %}" class="link">🛡️ Money back if it's not as described</a></span></li>
+                {% if brand.price_protection_days and not product.is_auction %}<li><span>Price drop</span><span title="Signed-in orders only. Checked daily.">📉 Price drops within {{ brand.price_protection_days }} days? You get the difference back</span></li>{% endif %}
                 <li><span>Payment</span><span>{% if stripe_enabled %}Secure card checkout via Stripe{% else %}{{ t.cash_on_delivery }}{% endif %}</span></li>
             </ul>
         </div>
@@ -422,7 +423,7 @@
             <h3 class="spec-h">Specifications</h3>
             <table class="spec-table"><tbody>
                 {% if product.brand %}<tr><th scope="row">Brand</th><td data-no-translate>{{ product.brand }}</td></tr>{% endif %}
-                {% for name, value in specs %}<tr><th scope="row">{{ name }}</th><td>{{ value }}</td></tr>{% endfor %}
+                {% for name, value in specs %}<tr><th scope="row">{{ name }}</th><td data-no-translate>{{ value }}</td></tr>{% endfor %}
             </tbody></table>
             {% endif %}{% endwith %}
             {% if product.has_safety_info %}
@@ -444,9 +445,9 @@
                 {% if product.guide_source == "ai" %}<span class="pill info small">✨ AI summary</span>{% elif product.guide %}<span class="pill small">From the seller</span>{% endif %}
             </div>
             <div class="guide-cols" data-guide-body {% if not product.guide %}hidden{% endif %}>
-                <div><h3>What it's for</h3><ul data-list="uses">{% for x in product.guide.uses %}<li>{{ x }}</li>{% endfor %}</ul></div>
-                <div><h3 class="g-pro">Pros</h3><ul class="pros" data-list="pros">{% for x in product.guide.pros %}<li>{{ x }}</li>{% endfor %}</ul></div>
-                <div><h3 class="g-con">Cons / good to know</h3><ul class="cons" data-list="cons">{% for x in product.guide.cons %}<li>{{ x }}</li>{% endfor %}</ul></div>
+                <div><h3>What it's for</h3><ul data-list="uses" data-no-translate>{% for x in product.guide.uses %}<li>{{ x }}</li>{% endfor %}</ul></div>
+                <div><h3 class="g-pro">Pros</h3><ul class="pros" data-list="pros" data-no-translate>{% for x in product.guide.pros %}<li>{{ x }}</li>{% endfor %}</ul></div>
+                <div><h3 class="g-con">Cons / good to know</h3><ul class="cons" data-list="cons" data-no-translate>{% for x in product.guide.cons %}<li>{{ x }}</li>{% endfor %}</ul></div>
             </div>
             {% if not product.guide %}
                 {% if ai_enabled %}<p class="muted" data-guide-intro style="margin:12px 0;">Not sure if it's right for you? Get a quick summary of what it's for, its pros and its cons.</p>

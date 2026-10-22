@@ -229,7 +229,8 @@ class Command(BaseCommand):
         from bees.shopper import new_registry_token
         site = SiteSettings.load()
         site.spin_enabled = True
-        site.save(update_fields=["spin_enabled"])
+        site.price_protection_days = site.price_protection_days or 14
+        site.save(update_fields=["spin_enabled", "price_protection_days"])
         mug, tote, candle, kit, beanie = products
         from django.templatetags.static import static
         try:

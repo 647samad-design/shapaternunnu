@@ -26,6 +26,7 @@ from bees import webpush
 from bees import agents, feeds, round5_views as r5
 from bees import shopper_views as shv
 from bees import ops_views as opv
+from bees import smart_views as smv
 from bees import multistore_views
 from bees import reports_listing
 from bees.sitemaps import ProductSitemap, CategorySitemap, SellerSitemap, StaticViewSitemap, BlogSitemap
@@ -92,6 +93,10 @@ urlpatterns = [
     path('manage/companies/', mv.staff_required(opv.manage_companies), name='manage_companies'),
     path('manage/companies/<int:pk>/', mv.staff_required(opv.manage_company), name='manage_company'),
     path('manage/locations/', mv.staff_required(opv.manage_locations), name='manage_locations'),
+    path('manage/restock/', mv.staff_required(smv.manage_restock), name='manage_restock'),
+    path('manage/customers/segments/', mv.staff_required(smv.manage_segments), name='manage_segments'),
+    path('manage/copilot/', mv.staff_required(smv.manage_copilot), name='manage_copilot'),
+    path('seller/restock/', sv.seller_required()(smv.seller_restock), name='seller_restock'),
     path('seller/locations/', sv.seller_required()(opv.seller_locations), name='seller_locations'),
     path('manage/integrations/', mv.staff_required(opv.manage_integrations), name='manage_integrations'),
     path('manage/integrations/accounting.csv', mv.staff_required(opv.accounting_export), name='accounting_export'),

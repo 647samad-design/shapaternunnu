@@ -54,6 +54,9 @@ def audience_emails(audience):
         return sorted(subs & buyers)
     if audience == "new":
         return sorted(subs - buyers)
+    if audience in ("vip", "loyal", "at_risk"):
+        from .smart import segment_emails
+        return sorted(subs & set(segment_emails(audience)))
     if audience == "lapsed":
         recent = set(e.lower() for e in counted.filter(created_at__gte=timezone.now() - timedelta(days=90)).values_list("email", flat=True))
         return sorted((subs & buyers) - recent)
@@ -234,7 +237,9 @@ def admin_page(request, pk=None):
     if campaign:
         fields = {k: getattr(campaign, k) for k in ("subject", "heading", "body", "button_text", "button_url", "coupon_code")}
         return render_form(request, campaign, fields, campaign.audience, campaign.product_ids)
-    return render_form(request, None, {"button_text": "Shop now", "button_url": "/"}, "all", [])
+    wanted = request.GET.get("audience", "all")
+    return render_form(request, None, {"button_text": "Shop now", "button_url": "/"},
+                       wanted if wanted in dict(EmailCampaign.AUDIENCES) else "all", [])
 
 
 def render_form(request, campaign, fields, audience, ids):

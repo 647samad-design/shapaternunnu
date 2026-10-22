@@ -533,7 +533,7 @@
 
     <div class="navbar-progress" id="nav-progress" aria-hidden="true"></div>
     {% if staging %}<div class="demo-ribbon" style="background:#F2C94C;color:#1B1B1B;" role="status">TEST SITE - orders, emails and payments here aren't real. Emails go to the test inbox only.</div>{% endif %}
-    {% if demo_mode %}<div class="demo-ribbon">Live demo: data resets every day. {% if user.is_authenticated %}Signed in as <strong>{{ user.first_name|default:user.username }}</strong>.{% endif %} <a href="{% url 'login' %}">Switch demo role</a></div>{% endif %}
+    {% if demo_mode %}<div class="demo-ribbon">Live demo: data resets every day. {% if user.is_authenticated %}Signed in as <strong data-no-translate>{{ user.first_name|default:user.username }}</strong>.{% endif %} <a href="{% url 'login' %}">Switch demo role</a></div>{% endif %}
     {% block site_header %}
     {% if site_banner %}
     <div class="announce">
@@ -574,7 +574,7 @@
                 <details class="menu">
                     <summary class="icon-btn" aria-label="Account menu">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
-                        <span class="icon-label">{{ user.first_name|default:user.username|truncatechars:14 }}</span>
+                        <span class="icon-label" data-no-translate>{{ user.first_name|default:user.username|truncatechars:14 }}</span>
                         <span class="count" data-live="alerts" {% if not unread_notifications_count and not header_messages %}hidden{% endif %}>{{ unread_notifications_count|add:header_messages }}</span>
                     </summary>
                     <div class="menu-panel">

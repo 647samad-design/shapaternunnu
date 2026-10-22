@@ -35,8 +35,13 @@ def normalize(text):
     return _SPACE.sub(" ", html.unescape(text)).strip()
 
 
+_CODE_ONLY = re.compile(r"^[^a-z\s]+$")  # AED, XL, FREESHIP, GIFT-XXXX: codes and sizes stay as they are
+
+
 def translatable(text):
     if not text or len(text) > 400 or not _HAS_LETTERS.search(text):
+        return False
+    if _CODE_ONLY.match(text) or text in ("Rs",):
         return False
     if text.startswith(("http://", "https://", "{", "@")) or "{{" in text or "{%" in text:
         return False
@@ -55,12 +60,18 @@ def table(lang):
         # Text that is already in this language (menu labels) maps to itself.
         for value in TRANSLATIONS.get(lang, {}).values():
             data.setdefault(value, value)
+            counter = iter(range(20))
+            numbered = re.sub(r"\{\w+\}", lambda _m: "{%d}" % next(counter), value)
+            data.setdefault(numbered, numbered)
         try:
             from .models import UIText
             for src, value in UIText.objects.exclude(**{f"{lang}": ""}).values_list("source", lang):
                 data[src] = value
         except Exception:
             pass
+        # "Search {name}", "This item: {name}": a fixed phrase around a
+        # product, store or person's name, which stays as it is.
+        data[NAME_KEYS] = [k for k in data if isinstance(k, str) and "{name}" in k]
         cache.set(key, data, 300)
     return data
 
@@ -89,9 +100,30 @@ def _remember_missing(texts):
         _last_flush[0] = time.time()
     try:
         from .models import UIText
+        batch = _drop_names(batch)
         UIText.objects.bulk_create([UIText(source=t[:400]) for t in batch], ignore_conflicts=True)
     except Exception:
         pass
+
+
+def _drop_names(texts):
+    """Product, store and category names are the sellers' own words, not
+    shop text: they're never listed as 'untranslated'."""
+    from .models import Category, Product, SellerAccount
+    texts = set(texts)
+    texts -= set(Product.objects.filter(name__in=texts).values_list("name", flat=True))
+    for field in ("brand", "seller_name"):
+        texts -= set(Product.objects.filter(**{f"{field}__in": texts}).values_list(field, flat=True))
+    if any("{" in t for t in texts):  # "Sunblock SPF {0}": a name with a number in it
+        numbered = {template_of(n)[0] for n in Product.objects.filter(name__regex=r"[0-9]").values_list("name", flat=True)[:20000]}
+        texts -= numbered
+    for field in ("business_name", "organization_name", "full_name"):
+        texts -= set(SellerAccount.objects.filter(**{f"{field}__in": texts}).values_list(field, flat=True))
+    try:
+        texts -= set(Category.objects.filter(name__in=texts).values_list("name", flat=True))
+    except Exception:
+        pass
+    return list(texts)
 
 
 # Numbers, prices and quoted words change from page to page ("6 items",
@@ -100,20 +132,39 @@ def _remember_missing(texts):
 _MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
            "November", "December")
 _MON = "|".join(sorted({m[:3] for m in _MONTHS} | set(_MONTHS), key=len, reverse=True))
-_DATE = r"\b(?:" + _MON + r")\.? \d{1,2}(?:, \d{4})?(?: · \d{1,2}:\d{2})?"
+_DAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+_WD = "|".join(sorted({d[:3] for d in _DAYS} | set(_DAYS), key=len, reverse=True))
+_DATE = (r"\b(?:(?:" + _WD + r"),? )?(?:" + _MON + r")\.? \d{1,2}(?!\d)(?:, \d{4})?(?: · \d{1,2}:\d{2})?"
+         r"|\b(?:(?:" + _WD + r"),? )?\d{1,2} (?:" + _MON + r")\b\.?(?: \d{4})?(?:,? \d{1,2}:\d{2})?")
 _CODE = r"\b[A-Z]{2,4}-\d{4}-[A-Z0-9]{5,}\b"
 _NUMBER = r"(?:[A-Z]{2,3}\$|[$€£₹¥]|Rs |AED |SAR )?(?<![A-Za-z\d])\d[\d,.]*(?![A-Za-z\d])(?:\+|%)?"
 _EMAIL = r"[\w.+-]+@[\w-]+\.[\w.-]+"
-_VALUE = re.compile("|".join((_EMAIL, _DATE, _CODE, r"“[^”]{1,80}”", _NUMBER)))
-_MONTH_WORD = re.compile(r"\b(" + _MON + r")\b")
+_QUOTED = r"(?<![\w])'[^'\n<>]{1,80}'(?![\w])"  # 'Merino Wool Beanie' in notifications
+_VALUE = re.compile("|".join((_EMAIL, _DATE, _CODE, r"“[^”]{1,80}”", _QUOTED, _NUMBER)))
+_MONTH_WORD = re.compile(r"\b(" + _MON + "|" + _WD + r")\b")
 
 
 def _localize_value(value, lookup):
-    """Translates the month name inside a date value ("Oct 8, 2026")."""
+    """Translates the month and day names inside a date value ("Oct 8, 2026")."""
     return _MONTH_WORD.sub(lambda m: lookup.get(m.group(1), m.group(1)), value)
 
 
-_SPLITTERS = (" — ", " · ", " | ")
+_SPLITTERS = (" — ", " · ", " | ", " › ", " / ")
+_PLACEHOLDER = re.compile(r"\{(\d+)\}")
+NAME_KEYS = "\x00name_keys"
+# Icons and arrows around a label ("🔥 Deals", "← Blog", "Visit the studio →")
+# are kept and only the words are looked up.
+_DECOR = re.compile(r"^([^\w{(\[\"'“]+)?(.*?)([\s]*(?:→|·|:|…|›)+|\s*\([^A-Za-z()]*\))?$", re.S)
+
+
+def _by_name(text, lookup):
+    for key in lookup.get(NAME_KEYS, ()):
+        pre, _, post = key.partition("{name}")
+        if text.startswith(pre) and text.endswith(post) and len(text) > len(pre) + len(post):
+            name = text[len(pre):len(text) - len(post)] if post else text[len(pre):]
+            if pre or post:
+                return lookup[key].replace("{name}", lookup.get(name, name))
+    return None
 
 
 def template_of(text):
@@ -129,17 +180,41 @@ def lookup_text(text, lookup, missing, store=""):
     tr = lookup.get(text)
     if tr is not None:
         return tr.replace("{store}", store) if store else tr
+    m = _DECOR.match(text)
+    lead, core, trail = (m.group(1) or "", m.group(2), m.group(3) or "") if m else ("", text, "")
+    if (lead or trail) and core:
+        if not translatable(core):
+            return None  # "· TCS": a name or code with an icon - nothing to translate
+        tr = lookup_text(core, lookup, missing, store)
+        return None if tr is None else lead + tr + trail
+    tr = _by_name(text, lookup)
+    if tr is not None:
+        return tr.replace("{store}", store) if store else tr
     # The store name is part of some sentences ("Sell on Acme"): look the
     # sentence up with {store} so translations work for any store name.
     branded = text.replace(store, "{store}") if store and store in text else text
     tpl, values = template_of(branded)
+    if values and not _HAS_LETTERS.search(_PLACEHOLDER.sub("", tpl)):
+        # Only dates/numbers ("Thu 15 Oct 2026", "{0} - {1}"): translate the month and day names.
+        return _PLACEHOLDER.sub(lambda m: _localize_value(values[int(m.group(1))], lookup), tpl)
     if values or branded != text:
         tr = lookup.get(tpl)
+        if tr is None and values:
+            tr = _by_name(tpl, lookup)
         if tr is not None:
             try:
                 return tr.replace("{store}", "\x00").format(*[_localize_value(v, lookup) for v in values]).replace("\x00", store)
             except (IndexError, KeyError, ValueError):
                 return None
+    for sep in (": ", " - "):
+        # "Asked for 5 pcs: <the buyer's own note>": translate the fixed start,
+        # keep what a person typed as it is.
+        if sep in text:
+            head, rest = text.split(sep, 1)
+            if translatable(head) and len(head) < len(text) - 2:
+                tr = lookup_text(head, lookup, set(), store)
+                if tr is not None:
+                    return tr + sep + rest
     for sep in _SPLITTERS:
         if sep in text:
             pieces = text.split(sep)
@@ -242,3 +317,30 @@ class PageTranslationMiddleware:
                 import logging
                 logging.getLogger(__name__).exception("Page translation failed for %s", request.path)
         return response
+
+
+def prune_missing():
+    """Removes 'untranslated' rows that no longer need anyone: texts the
+    built-in pack now covers, product/store names and texts the engine can
+    now translate on its own. Rows with any translation typed in are kept.
+    Returns how many were removed."""
+    from .i18n_pack import PACK
+    from .models import UIText
+    blank = UIText.objects.filter(ur="", roman="", ar="", es="", fr="")
+    sources = list(blank.values_list("source", flat=True)[:20000])
+    if not sources:
+        return 0
+    keep_named = set(_drop_names(sources))
+    lookup = table("fr")
+    gone = []
+    for src in sources:
+        if src in PACK or src not in keep_named:
+            gone.append(src)
+            continue
+        probe = set()
+        if lookup_text(src, lookup, probe) is not None and not probe:
+            gone.append(src)
+    for i in range(0, len(gone), 500):
+        UIText.objects.filter(source__in=gone[i:i + 500], ur="", roman="", ar="", es="", fr="").delete()
+    clear_cache()
+    return len(gone)
