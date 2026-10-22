@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.validators import RegexValidator
@@ -34,6 +35,10 @@ def seller_id_path(instance, filename):
 
 def seller_logo_path(instance, filename):
     return _public_upload_path("seller_docs/logos")(instance, filename)
+
+
+def transfer_proof_path(instance, filename):
+    return _public_upload_path("transfer_proofs")(instance, filename)
 
 
 def message_image_path(instance, filename):
@@ -255,6 +260,7 @@ class Product(models.Model):
     personalization_max = models.PositiveSmallIntegerField(default=60)
     model_3d_url = models.CharField("3D model (.glb)", max_length=500, blank=True, help_text="https:// link to a .glb file. Shoppers can turn the product around and see it in their room (AR).")
     model_ios_url = models.CharField("3D model for iPhone (.usdz, optional)", max_length=500, blank=True)
+    image_hash = models.CharField(max_length=16, blank=True, db_index=True, help_text="Fingerprint of the main photo (finds copied listings).")
     preorder_ships_on = models.DateField("Pre-order: ships on", null=True, blank=True, help_text="Sell before it's in stock. Shoppers see 'Pre-order - ships on' this date. Empty = normal product.")
     group_size = models.PositiveSmallIntegerField("Group buy: people", default=0, help_text="2-10 people buying within 24 hours each get money back. 0 = off.")
     group_percent = models.PositiveSmallIntegerField("Group buy: % back", default=0, help_text="Store credit each group member gets back once the group is full and the item is delivered.")
@@ -511,6 +517,8 @@ class Order(models.Model):
         ("paypal", "PayPal"),
         ("cod", "Cash on delivery"),
         ("invoice", "Invoice (business account)"),
+        ("jazzcash", "JazzCash"),
+        ("transfer", "Easypaisa / JazzCash / bank transfer"),
     ]
     payment_method = models.CharField(max_length=30, choices=PAYMENT_METHOD_CHOICES, default="card")
     PAYMENT_STATUS_CHOICES = [
@@ -592,6 +600,19 @@ class Order(models.Model):
     # confirmation link) and marked collected when the courier delivers.
     cod_confirmed = models.BooleanField(default=True)
     cod_collected_at = models.DateTimeField(null=True, blank=True)
+    # Pakistan payments (pk_payments.py)
+    gateway_ref = models.CharField(max_length=40, blank=True, db_index=True, help_text="JazzCash transaction reference.")
+    transfer_account = models.CharField(max_length=120, blank=True, help_text="Which store account the customer sent the money to.")
+    transfer_reference = models.CharField(max_length=60, blank=True, help_text="Transaction ID the customer entered.")
+    transfer_proof = models.ImageField(upload_to=transfer_proof_path, storage=_private_storage, blank=True, null=True)
+    transfer_submitted_at = models.DateTimeField(null=True, blank=True)
+    transfer_note = models.CharField(max_length=255, blank=True, help_text="Why the store team couldn't confirm the transfer.")
+    # Doorstep delivery code (delivery_code.py)
+    delivery_code = models.CharField(max_length=6, blank=True)
+    delivery_code_tries = models.PositiveSmallIntegerField(default=0)
+    # The customer's pin on the delivery map (maps.py)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
 
     CANCELLABLE_STATUSES = ("pending", "confirmed")
 
@@ -725,6 +746,10 @@ class Order(models.Model):
     def card_label(self):
         if self.payment_method == "paypal":
             return "PayPal"
+        if self.payment_method == "jazzcash":
+            return "JazzCash"
+        if self.payment_method == "transfer":
+            return (self.transfer_account.split(":")[0] or "your account") + " (sent by the store team)"
         return f"{self.card_brand.title()} •••• {self.card_last4}" if self.card_last4 else ""
 
     @property
@@ -1089,6 +1114,20 @@ class Coupon(models.Model):
         return True, None
 
 
+def _price_moves_automatically(product):
+    """True while a repricer or price test changes this product's price."""
+    rule = getattr(product, "reprice_rule", None) if hasattr(product, "_state") else None
+    try:
+        if rule is not None and rule.active:
+            return True
+    except Exception:
+        pass
+    return product.price_tests.filter(status="running").exists()
+
+
+Product.price_moves_automatically = property(_price_moves_automatically)
+
+
 class ProductImage(models.Model):
     product = models.ForeignKey(Product, related_name="extra_images", on_delete=models.CASCADE)
     image_url = models.CharField(max_length=500)
@@ -1166,6 +1205,8 @@ class Address(models.Model):
     postal_code = models.CharField(max_length=20, blank=True)
     country = models.CharField(max_length=2, blank=True)
     is_default = models.BooleanField(default=False)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
 
     class Meta:
         verbose_name_plural = "Addresses"
@@ -1257,6 +1298,8 @@ class SellerAccount(models.Model):
     country = models.CharField(max_length=100, blank=True)
     pickup_state = models.CharField("State / province", max_length=100, blank=True)
     pickup_postal_code = models.CharField("Postal code", max_length=20, blank=True)
+    pickup_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    pickup_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     store_description = models.TextField(blank=True)
     product_categories = models.CharField(max_length=255, blank=True, help_text="Comma-separated categories the store will sell")
     brand_info = models.TextField(blank=True)
@@ -1841,6 +1884,13 @@ class SiteSettings(models.Model):
         "Allow checkout without an account", default=False,
         help_text="Off (recommended): shoppers sign in or create an account before ordering, so every order has a verified customer, order history and support chat.")
     allow_cash_on_delivery = models.BooleanField(default=True, help_text="Show 'Cash on delivery' at checkout. Card payments appear automatically once Stripe keys are set.")
+    delivery_codes = models.BooleanField("Doorstep delivery code for cash orders", default=True,
+                                         help_text="Cash-on-delivery customers get a 4-digit code; the seller or rider must enter it to mark the order delivered. Stops fake 'delivered' marks.")
+    transfer_enabled = models.BooleanField("Easypaisa / JazzCash / bank transfer", default=False,
+                                           help_text="Customers send money to your account and enter the transaction ID (and a screenshot); you confirm it under Orders > Payments to check.")
+    transfer_accounts = models.TextField("Accounts to pay into", blank=True,
+                                         help_text="One per line as 'Name: details', e.g. 'Easypaisa: 0345 1234567 (Lumen Market)' or 'Meezan Bank (Raast): PK36MEZN0000000000000000'.")
+    transfer_hours = models.PositiveSmallIntegerField("Hours to send the money", default=48, help_text="Orders without a transaction ID by then are cancelled and their stock returned.")
     show_language_menu = models.BooleanField(default=True, help_text="Let shoppers choose the shop language (English, Arabic, Spanish, French, Urdu, Roman Urdu) in the header and footer.")
     banner_text = models.CharField(
         max_length=200, blank=True,
@@ -2578,6 +2628,10 @@ def _remember_price(sender, instance, created, **kwargs):
     last = PriceHistory.objects.filter(product=instance).order_by("-recorded_at").values_list("price", flat=True).first()
     if last is None or last != instance.price:
         PriceHistory.objects.create(product=instance, price=instance.price)
+        if last is not None and (instance.offer_of_id or Product.objects.filter(offer_of_id=instance.pk).exists()):
+            from .background import after_response
+            from .repricer import on_price_change
+            after_response(on_price_change, instance)  # competitors' repricers react to this change
 
 
 class PriceAlert(models.Model):
@@ -2918,3 +2972,73 @@ class WebhookDelivery(models.Model):
 
     class Meta:
         ordering = ["-id"]
+
+
+class RepriceRule(models.Model):
+    """Automatic pricing for a listing that competes with other sellers on
+    the same product (smart.py / repricer.py)."""
+    MODES = [("beat", "Beat the lowest price by the step"), ("match", "Match the lowest price")]
+    product = models.OneToOneField(Product, related_name="reprice_rule", on_delete=models.CASCADE)
+    min_price = models.DecimalField("Never below", max_digits=10, decimal_places=2)
+    max_price = models.DecimalField("Price when you're the only seller", max_digits=10, decimal_places=2, null=True, blank=True)
+    mode = models.CharField(max_length=8, choices=MODES, default="beat")
+    step = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.10"))
+    active = models.BooleanField(default=True)
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    last_note = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Repricer for {self.product_id}"
+
+
+class PriceTest(models.Model):
+    """Day-by-day price test: the product alternates between two prices
+    (everyone sees the same price on a given day) and the results are
+    compared (pricetest.py)."""
+    STATUS = [("running", "Running"), ("finished", "Finished"), ("stopped", "Stopped")]
+    product = models.ForeignKey(Product, related_name="price_tests", on_delete=models.CASCADE)
+    price_a = models.DecimalField(max_digits=10, decimal_places=2)
+    price_b = models.DecimalField(max_digits=10, decimal_places=2)
+    unit_cost = models.DecimalField("Your cost per unit (optional)", max_digits=10, decimal_places=2, null=True, blank=True)
+    days = models.PositiveSmallIntegerField(default=14)
+    status = models.CharField(max_length=10, choices=STATUS, default="running", db_index=True)
+    current_arm = models.CharField(max_length=1, default="a")
+    started_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    applied = models.CharField(max_length=1, blank=True, help_text="Which price was kept at the end.")
+    created_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+
+    class Meta:
+        ordering = ["-started_at"]
+
+
+class PriceTestBlock(models.Model):
+    test = models.ForeignKey(PriceTest, related_name="blocks", on_delete=models.CASCADE)
+    arm = models.CharField(max_length=1)
+    start = models.DateTimeField()
+    end = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["start"]
+
+
+class TrustFlag(models.Model):
+    """Something the trust checks (trust.py) want a person to look at."""
+    KINDS = [("copied_listing", "Possibly copied listing"), ("review_ring", "Suspicious reviews"), ("order_network", "Linked risky orders")]
+    STATUS = [("open", "Open"), ("dismissed", "Not a problem"), ("actioned", "Dealt with")]
+    kind = models.CharField(max_length=20, choices=KINDS, db_index=True)
+    key = models.CharField(max_length=120, unique=True, help_text="Stops the same finding being flagged twice.")
+    title = models.CharField(max_length=200)
+    detail = models.TextField(blank=True)
+    score = models.PositiveSmallIntegerField(default=0)
+    product = models.ForeignKey(Product, null=True, blank=True, on_delete=models.CASCADE, related_name="+")
+    other_product = models.ForeignKey(Product, null=True, blank=True, on_delete=models.CASCADE, related_name="+")
+    review_ids = models.JSONField(default=list, blank=True)
+    order_ids = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS, default="open", db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    closed_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+
+    class Meta:
+        ordering = ["-score", "-created_at"]

@@ -1,0 +1,41 @@
+{% extends "bees/seller/base.html" %}
+{% load bees_extras %}
+{% block page_title %}Auto-repricer{% endblock %}
+{% block seller %}
+<div class="adm-head"><div><h1>Auto-repricer</h1><p>When other sellers offer the same product, the cheapest offer wins most sales. Set your lowest acceptable price and the repricer keeps you just below the competition - day and night - and never goes under your minimum.</p></div></div>
+{% if rows %}
+<div class="col-stack">
+{% for r in rows %}
+<section class="panel rp">
+    <div class="rp-head">
+        {% if r.product.image_url %}<img src="{{ r.product.image_url }}" alt="">{% endif %}
+        <div><h2>{{ r.product.name|truncatechars:70 }}</h2>
+            <p class="muted small">Your price <strong>{{ r.product.price|money }}</strong> · {% if r.lowest is not None %}lowest of {{ r.count }} other seller{{ r.count|pluralize }}: <strong>{{ r.lowest|money }}</strong>{% else %}no other sellers in stock right now{% endif %}</p>
+            {% if r.rule and r.rule.active %}<p class="small"><span class="pill ok">On</span> {{ r.rule.last_note }}{% if r.rule.last_run_at %} <span class="muted">({{ r.rule.last_run_at|timesince }} ago)</span>{% endif %}</p>{% endif %}
+        </div>
+    </div>
+    <form method="post" class="rp-form">{% csrf_token %}<input type="hidden" name="product" value="{{ r.product.pk }}">
+        <div class="field"><label for="mn{{ r.product.pk }}">Never below</label><input class="input" id="mn{{ r.product.pk }}" name="min_price" inputmode="decimal" required value="{% if r.rule %}{{ r.rule.min_price }}{% endif %}" placeholder="e.g. 20.00"></div>
+        <div class="field"><label for="mx{{ r.product.pk }}">Normal price (when you're alone)</label><input class="input" id="mx{{ r.product.pk }}" name="max_price" inputmode="decimal" value="{% if r.rule and r.rule.max_price %}{{ r.rule.max_price }}{% else %}{{ r.product.price }}{% endif %}"></div>
+        <div class="field"><label for="md{{ r.product.pk }}">Strategy</label><select id="md{{ r.product.pk }}" name="mode"><option value="beat" {% if not r.rule or r.rule.mode == "beat" %}selected{% endif %}>Beat the lowest by</option><option value="match" {% if r.rule.mode == "match" %}selected{% endif %}>Match the lowest</option></select></div>
+        <div class="field"><label for="st{{ r.product.pk }}">Step</label><input class="input" id="st{{ r.product.pk }}" name="step" inputmode="decimal" value="{% if r.rule %}{{ r.rule.step }}{% else %}0.10{% endif %}"></div>
+        <div class="rp-btns"><button class="btn btn-primary btn-sm" type="submit">{% if r.rule and r.rule.active %}Save{% else %}Turn on{% endif %}</button>
+            {% if r.rule and r.rule.active %}<button class="btn btn-ghost btn-sm" name="action" value="off">Turn off</button>{% endif %}</div>
+    </form>
+</section>
+{% endfor %}
+</div>
+{% else %}
+<section class="panel"><h2>Nothing to reprice yet</h2><p class="muted">The repricer works on products you sell alongside other sellers. Open any product in the shop and use <strong>"Sell one like this"</strong> to add your offer, then come back here.</p></section>
+{% endif %}
+<p class="muted small" style="margin-top:12px;">Prices are checked every night and straight away when a competitor changes theirs. Only in-stock offers in the same condition count. Price drops can give recent buyers money back if the store uses price drop protection.</p>
+<style>
+    .rp { display: grid; gap: 12px; }
+    .rp-head { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; align-items: center; }
+    .rp-head img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
+    .rp-head h2 { margin: 0; font-size: 1.02rem; }
+    .rp-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 10px; align-items: end; }
+    .rp-btns { display: flex; gap: 6px; }
+    @media (max-width: 900px) { .rp-form { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .rp-btns { grid-column: 1 / -1; } }
+</style>
+{% endblock %}

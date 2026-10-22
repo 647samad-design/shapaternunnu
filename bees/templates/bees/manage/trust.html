@@ -1,0 +1,43 @@
+{% extends "bees/manage/base.html" %}
+{% block page_title %}Trust & safety{% endblock %}
+{% block admin %}
+<div class="adm-head"><div><h1>Trust &amp; safety</h1><p>Checked every night: copied listing photos, fake-looking reviews and phone numbers behind many refused cash orders. Nothing is removed until you decide.</p></div>
+    <div class="actions"><a class="btn btn-secondary btn-sm" href="?run=1">Check now</a></div></div>
+<div class="tabs" role="group" aria-label="Filter"><a href="?show=open" class="{% if show == 'open' %}on{% endif %}">Open{% if open_count %}<span class="n">{{ open_count }}</span>{% endif %}</a><a href="?show=closed" class="{% if show != 'open' %}on{% endif %}">Closed</a></div>
+<div class="col-stack">
+{% for f in flags %}
+<section class="panel tf">
+    <div class="tf-head"><span class="pill {% if f.score >= 70 %}bad{% elif f.score >= 50 %}warn{% endif %}">{{ f.get_kind_display }} · {{ f.score }}</span><span class="muted small">{{ f.created_at|date:"M j" }}{% if f.status != "open" %} · {{ f.get_status_display }}{% endif %}</span></div>
+    <h2>{{ f.title }}</h2>
+    <p class="muted">{{ f.detail }}</p>
+    {% if f.kind == "copied_listing" and f.product %}
+    <div class="tf-pair">
+        <a href="{% url 'manage_product_edit' f.product.pk %}"><img src="{{ f.product.image_url }}" alt="" loading="lazy"><span><strong>Newer:</strong> {{ f.product.name|truncatechars:50 }}<br><span class="muted small">{{ f.product.seller_account.display_name }}</span></span></a>
+        {% if f.other_product %}<a href="{% url 'manage_product_edit' f.other_product.pk %}"><img src="{{ f.other_product.image_url }}" alt="" loading="lazy"><span><strong>Older:</strong> {{ f.other_product.name|truncatechars:50 }}<br><span class="muted small">{{ f.other_product.seller_account.display_name }}</span></span></a>{% endif %}
+    </div>
+    {% endif %}
+    {% if f.kind == "review_ring" %}<p class="small"><a class="link" href="{% url 'manage_reviews' %}">Open reviews</a> · {{ f.review_ids|length }} review{{ f.review_ids|length|pluralize }}{% if f.product %} on <a class="link" href="{% url 'product_detail' f.product.pk %}" target="_blank" rel="noopener">{{ f.product.name|truncatechars:40 }}</a>{% endif %}</p>{% endif %}
+    {% if f.kind == "order_network" %}<p class="small">Orders: {% for oid in f.order_ids|slice:":12" %}<a class="link" href="{% url 'manage_order' oid %}">#{{ oid }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+    {% if f.status == "open" %}
+    <form method="post" class="tf-actions">{% csrf_token %}<input type="hidden" name="flag" value="{{ f.id }}">
+        {% if f.kind == "copied_listing" and f.product %}<button class="btn btn-primary btn-sm" name="action" value="unlist">Take down the newer listing</button>{% endif %}
+        {% if f.kind == "review_ring" %}<button class="btn btn-primary btn-sm" name="action" value="delete_reviews" onclick="return confirm('Delete these reviews?')">Delete these reviews</button>{% endif %}
+        {% if f.kind == "order_network" %}<button class="btn btn-primary btn-sm" name="action" value="block_cod">Block cash on delivery for this number</button>{% endif %}
+        <button class="btn btn-ghost btn-sm" name="action" value="dismiss">Not a problem</button>
+    </form>
+    {% endif %}
+</section>
+{% empty %}
+<section class="panel"><p class="muted">{% if show == "open" %}Nothing suspicious found. 🎉 Checks run every night; press "Check now" to run them straight away.{% else %}No closed findings yet.{% endif %}</p></section>
+{% endfor %}
+</div>
+<style>
+    .tf { display: grid; gap: 8px; }
+    .tf h2 { margin: 0; font-size: 1.05rem; }
+    .tf-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    .tf-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 10px; }
+    .tf-pair a { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: center; text-decoration: none; color: inherit; border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; }
+    .tf-pair img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; background: var(--surface); }
+    .tf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+</style>
+{% endblock %}

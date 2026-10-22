@@ -25,6 +25,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from . import delivery_code
 from . import badges as seller_badges
 from . import seller_center as sc
 from .messaging import unread_for_seller
@@ -315,6 +316,7 @@ def order_detail(request, order_id):
         "only_seller": only_seller, "can_ship": can_ship, "fulfilment_choices": OrderItem.FULFILLMENT_CHOICES,
         "other_sellers": not only_seller,
         "risk": _seller_risk(order),
+        "code_needed": delivery_code.required(order) and any(i.fulfillment_status != "delivered" for i in my_items),
     })
 
 
@@ -331,14 +333,17 @@ def _seller_risk(order):
     return r if r["level"] == "high" else None
 
 
-def _set_items_status(request, items, new_status):
+def _set_items_status(request, items, new_status, report=False):
     """Moves the given items forward to ``new_status`` (bulk actions never
     move an item back). Returns how many changed and the orders that moved
     forward as a result."""
     from . import fulfilment
     try:
-        changed, moved = fulfilment.set_items_status(items, new_status, user=request.user, forward_only=True)
-    except fulfilment.FulfilmentError:
+        changed, moved = fulfilment.set_items_status(items, new_status, user=request.user, forward_only=True,
+                                                      delivery_code=request.POST.get("delivery_code"))
+    except fulfilment.FulfilmentError as exc:
+        if report:
+            messages.error(request, str(exc))
         return 0, []
     return len(changed), moved
 
@@ -373,7 +378,9 @@ def ship_order(request, order_id):
         Order.objects.filter(pk=order.pk).update(
             courier_name=courier or order.courier_name, tracking_number=tracking or order.tracking_number,
         )
-    changed, moved = _set_items_status(request, items, new_status)
+    changed, moved = _set_items_status(request, items, new_status, report=True)
+    if not changed and new_status == "delivered":
+        return redirect("seller_order", order_id=order.id)
     label = dict(OrderItem.FULFILLMENT_CHOICES)[new_status].lower()
     note = (f" The order is now {moved[0][1]} and the customer has been told." if moved
             else " The customer has been told." if changed and new_status in ("handed_to_courier", "delivered") else "")
@@ -398,6 +405,8 @@ def bulk_fulfilment(request):
     items = OrderItem.objects.filter(seller_account=seller, order_id__in=ids).select_related("order")
     changed, moved = _set_items_status(request, items, new_status)
     label = dict(OrderItem.FULFILLMENT_CHOICES)[new_status].lower()
+    if new_status == "delivered" and changed < items.count():
+        messages.info(request, "Cash orders with a delivery code must be marked delivered one by one, with the customer's code.")
     messages.success(request, f"Marked {changed} item{'s' if changed != 1 else ''} as {label}." + (
         f" {len(moved)} order{'s' if len(moved) != 1 else ''} moved forward and the customers were emailed." if moved else ""))
     return _back(request, "seller_orders")

@@ -16,6 +16,10 @@
             {% if order.status == "cancelled" %}
             <h1>Order #{{ order.id }} was cancelled</h1>
             <p class="muted" style="margin-top:8px;">{% if order.payment_status == "refunded" %}Your payment has been refunded.{% elif order.payment_status == "failed" %}The payment wasn't completed, so you haven't been charged.{% else %}You haven't been charged.{% endif %}{% if order.credit_used %} {{ order.credit_used|money }} of store credit went back to your account.{% endif %}</p>
+            {% elif order.payment_status == "pending" and order.payment_method == "transfer" %}
+            <h1>Send your payment</h1>
+            <p class="muted" style="margin-top:8px;">Order #{{ order.id }} is reserved for you. Send the money and enter the transaction ID so we can confirm it.</p>
+            <p style="margin-top:12px;"><a class="btn btn-primary" href="{% url 'pay_transfer' order.id %}{% if order.is_guest %}?t={{ order.access_token }}{% endif %}">How to pay</a></p>
             {% elif order.payment_status == "pending" %}
             <h1>Payment processing</h1>
             <p class="muted" style="margin-top:8px;">Order #{{ order.id }} is reserved. We'll email {{ order.contact_email }} as soon as your payment is confirmed.</p>

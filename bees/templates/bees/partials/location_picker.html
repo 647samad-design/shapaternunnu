@@ -1,0 +1,24 @@
+{% load static l10n %}{# Map pin picker. Params: lat, lng, prefix ("" or e.g. "pickup_"), auto (ask the browser for the location straight away), readonly, title, hint, map_key #}
+<div class="lm-map" data-map-picker{% if auto %} data-auto{% endif %}{% if readonly %} data-readonly{% endif %} data-lat="{% if lat is not None and lat != '' %}{{ lat|unlocalize }}{% endif %}" data-lng="{% if lng is not None and lng != '' %}{{ lng|unlocalize }}{% endif %}"{% if map_key %} data-google-key="{{ map_key }}"{% endif %}>
+    {% if title %}<div class="lm-head"><strong>{{ title }}</strong>{% if hint %}<span class="muted small">{{ hint }}</span>{% endif %}</div>{% endif %}
+    <div class="lm-canvas" data-map-canvas role="application" aria-label="{% if readonly %}Location on a map{% else %}Map: tap to set your location{% endif %}"></div>
+    {% if not readonly %}
+    <input type="hidden" name="{{ prefix }}latitude" value="{% if lat is not None and lat != '' %}{{ lat|unlocalize }}{% endif %}" data-map-lat>
+    <input type="hidden" name="{{ prefix }}longitude" value="{% if lng is not None and lng != '' %}{{ lng|unlocalize }}{% endif %}" data-map-lng>
+    <div class="lm-tools">
+        <button type="button" class="btn btn-secondary btn-sm" data-map-locate>📍 Use my current location</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-map-clear hidden>Remove pin</button>
+        <span hidden data-map-words><span data-w="finding">Finding your location…</span><span data-w="found">Location found. Drag the pin to your exact door if needed.</span><span data-w="set">Pin set. Drag it to your exact door if needed.</span><span data-w="blocked">Location access was blocked. Tap the map to drop the pin instead.</span><span data-w="tap">Tap the map to drop a pin.</span><span data-w="removed">Pin removed.</span><span data-w="nogeo">This browser can't share its location. Tap the map instead.</span><span data-w="noload">The map could not load. You can still continue without a pin.</span></span>
+        <span class="muted small" data-map-status aria-live="polite">{% if lat %}Pin set. Drag it to adjust.{% else %}Tap the map to drop a pin.{% endif %}</span>
+    </div>
+    {% endif %}
+</div>
+<script src="{% static 'bees/js/map.js' %}" defer></script>
+<style>
+    .lm-map { display: grid; gap: 8px; }
+    .lm-head { display: flex; flex-direction: column; gap: 2px; }
+    .lm-canvas { height: 260px; border-radius: var(--radius, 12px); border: 1px solid var(--line); overflow: hidden; background: var(--surface-2, #eef1f3); z-index: 0; }
+    .lm-map[data-readonly] .lm-canvas { height: 200px; }
+    .lm-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .lm-canvas .leaflet-control-attribution { font-size: 10px; }
+</style>

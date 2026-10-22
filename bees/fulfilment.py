@@ -42,7 +42,7 @@ def _who(item):
     return item.seller_account.display_name if item.seller_account_id else ""
 
 
-def set_items_status(items, new_status, user=None, by_staff=False, forward_only=False, by_customer=False):
+def set_items_status(items, new_status, user=None, by_staff=False, forward_only=False, by_customer=False, delivery_code=None):
     """Moves ``items`` to ``new_status``. Returns (changed_items, moved_orders)
     where moved_orders is a list of (order_id, new order status label).
     Raises FulfilmentError when nothing could change and there's a reason
@@ -52,6 +52,7 @@ def set_items_status(items, new_status, user=None, by_staff=False, forward_only=
         raise FulfilmentError("Unknown status.")
     rank = {s: i for i, s in enumerate(STEPS)}
     changed, reasons = [], []
+    code_ok = {}  # order id -> (ok, message), checked once per order
     now = timezone.now()
     with transaction.atomic():
         for item in items:
@@ -69,6 +70,15 @@ def set_items_status(items, new_status, user=None, by_staff=False, forward_only=
                 continue
             if forward_only and rank[new_status] < rank[current]:
                 continue
+            if new_status == "delivered" and not by_staff and not by_customer:
+                from . import delivery_code as dc
+                if dc.required(item.order):
+                    if item.order_id not in code_ok:
+                        code_ok[item.order_id] = dc.check(item.order, delivery_code)
+                    ok, why = code_ok[item.order_id]
+                    if not ok:
+                        reasons.append(why)
+                        continue
             item.fulfillment_status = new_status
             item.delivered_at = now if new_status == "delivered" else None
             if new_status in ("handed_to_courier", "delivered"):

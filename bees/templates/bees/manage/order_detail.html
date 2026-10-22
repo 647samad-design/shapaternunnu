@@ -83,12 +83,17 @@
                 <dt>Email</dt><dd>{{ order.contact_email|default:"—" }}</dd>
                 <dt>Phone</dt><dd>{{ order.phone|default:"—" }}</dd>
                 {% if order.user %}<dt>Account</dt><dd>{{ order.user.username }} · <a class="link small" href="{% url 'manage_orders' %}?q={{ order.user.username|urlencode }}">All their orders</a></dd>{% endif %}
+                {% if order.delivery_code %}<dt>Delivery code</dt><dd><code>{{ order.delivery_code }}</code>{% if order.delivery_code_tries %} <span class="pill {% if order.delivery_code_tries >= 5 %}bad{% else %}warn{% endif %}">{{ order.delivery_code_tries }} wrong {% if order.delivery_code_tries == 1 %}try{% else %}tries{% endif %}</span>{% endif %}</dd>{% endif %}
+                {% if order.payment_method == "transfer" %}<dt>Transfer</dt><dd>{% if order.transfer_reference %}<code>{{ order.transfer_reference }}</code> · {{ order.transfer_account }}{% if order.transfer_proof %} · <a class="link small" href="{% url 'transfer_proof' order.id %}" target="_blank" rel="noopener">Screenshot</a>{% endif %}{% else %}Not sent yet{% endif %}{% if order.payment_status == "pending" %} · <a class="link small" href="{% url 'manage_transfers' %}">Payments to check</a>{% endif %}</dd>{% endif %}
+                {% if order.gateway_ref %}<dt>JazzCash ref</dt><dd><code>{{ order.gateway_ref }}</code></dd>{% endif %}
             </dl>
         </section>
         <section class="panel">
             <h2>Ship to</h2>
             {% include "bees/partials/order_extras.html" %}
             <p>{{ order.full_name }}<br>{{ order.address }}<br>{{ order.city }}{% if order.state %}, {{ order.state }}{% endif %} {{ order.postal_code }}<br>{{ order.country|country_name }}</p>
+            {% if order.latitude is not None %}{% include "bees/partials/location_picker.html" with lat=order.latitude lng=order.longitude readonly=True %}
+            <p style="margin-top:8px;"><a class="link small" href="{{ order|gmaps_pin }}" target="_blank" rel="noopener">Open in Google Maps</a> · <a class="link small" href="{{ order|gmaps_directions }}" target="_blank" rel="noopener">Directions</a></p>{% endif %}
         </section>
         <section class="panel">
             <h2>Payment</h2>

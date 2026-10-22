@@ -80,6 +80,8 @@
                     <div class="field"><label for="tracking">Tracking number</label><input id="tracking" type="text" name="tracking_number" maxlength="60" value="{{ order.tracking_number }}" placeholder="Optional - leave empty to use {{ order.shipment_number }}"></div>
                 </div>
                 {% else %}<p class="muted small">This order has several sellers, so the store adds the tracking number. Just update your items.</p>{% endif %}
+                {% if code_needed %}<div class="field" style="max-width:260px;"><label for="dcode">Customer's delivery code</label><input class="input" id="dcode" name="delivery_code" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" placeholder="4 digits">
+                    <span class="muted small">Cash order: ask the customer for their code at the door, then press "Mark all delivered".</span></div>{% endif %}
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <button class="btn btn-secondary btn-sm" type="submit" name="status" value="packed">Mark all packed</button>
                     <button class="btn btn-primary btn-sm" type="submit" name="status" value="handed_to_courier">Mark all handed to courier</button>
@@ -98,6 +100,10 @@
 {{ order.city }}{% if order.state %}, {{ order.state }}{% endif %} {{ order.postal_code }}
 {{ order.country|country_name }}
 {{ order.phone }}</p>
+            {% if order.latitude is not None %}
+            <div style="margin-top:10px;">{% include "bees/partials/location_picker.html" with lat=order.latitude lng=order.longitude readonly=True %}</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;"><a class="btn btn-secondary btn-sm" href="{{ order|gmaps_directions }}" target="_blank" rel="noopener">🧭 Directions</a><a class="btn btn-ghost btn-sm" href="{{ order|gmaps_pin }}" target="_blank" rel="noopener">Open in Google Maps</a></div>
+            {% endif %}
             <button type="button" class="btn btn-ghost btn-sm no-print" style="margin-top:8px;" onclick="navigator.clipboard.writeText(document.getElementById('ship-addr').innerText).then(function(){ if (window.showToast) showToast('Address copied', 'success'); })">Copy address</button>
         </section>
         <section class="panel">

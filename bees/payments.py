@@ -542,6 +542,9 @@ def refund_order(order):
     if order.payment_method == "paypal":
         from . import paypal
         return paypal.refund(order)
+    if order.payment_method in ("jazzcash", "transfer"):
+        from .pk_payments import manual_refund
+        return manual_refund(order)
     if not order.stripe_payment_intent:
         return False
     stripe = _stripe()
@@ -586,6 +589,9 @@ def refund_amount(order, amount, key):
     if order.payment_method == "paypal" and amount:
         from . import paypal
         return paypal.refund(order, amount, key)
+    if order.payment_method in ("jazzcash", "transfer") and amount:
+        from .pk_payments import manual_refund
+        return manual_refund(order, order.to_charge_currency(amount))
     if not order.stripe_payment_intent or not amount:
         return False
     stripe = _stripe()
@@ -688,6 +694,8 @@ def release_unpaid_order(order_id, reason="failed"):
             order.charge_currency, order.charge_rate, order.charge_amount = "", None, None
             order.save(update_fields=["cod_fallback", "payment_method", "payment_status", "stripe_session_id",
                                       "charge_currency", "charge_rate", "charge_amount"])
+            from .delivery_code import assign
+            assign(order)
             return order
         order.payment_status = reason
         order.status = "cancelled"

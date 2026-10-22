@@ -401,6 +401,9 @@ def store_settings(request):
                 seller.business_name = name
             for field, limit in STORE_TEXT_FIELDS.items():
                 setattr(seller, field, request.POST.get(field, "").strip()[:limit])
+            if "pickup_latitude" in request.POST:
+                from . import maps
+                seller.pickup_latitude, seller.pickup_longitude = maps.from_post(request, "pickup_")
             trader_email = request.POST.get("trader_email", "").strip()[:254]
             try:
                 if trader_email:

@@ -1,0 +1,49 @@
+{% extends "bees/seller/base.html" %}
+{% block page_title %}Photo studio{% endblock %}
+{% block seller %}
+<div class="adm-head"><div><a class="link small" href="{% url 'seller_edit_product' product.pk %}">← {{ product.name|truncatechars:50 }}</a><h1 style="margin-top:6px;">Photo studio</h1>
+    <p>Turn a phone photo into a clean shop photo: the background is removed and the product is centred on a bright studio background with a soft shadow. Colours stay true.</p></div></div>
+<div class="two-col">
+<section class="panel">
+    <h2>1. Your photo</h2>
+    <form method="post" enctype="multipart/form-data" class="ps-form">{% csrf_token %}<input type="hidden" name="action" value="make">
+        <div class="ps-now">{% if product.image_url %}<img src="{{ product.image_url }}" alt="Current main picture">{% endif %}<span class="muted small">Leave empty to use the current main picture, or upload a new one.</span></div>
+        <div class="field"><label for="ps-photo">Upload a photo (optional)</label><input id="ps-photo" type="file" name="photo" accept="image/jpeg,image/png,image/webp" capture="environment"></div>
+        <fieldset class="ps-bg"><legend>Background</legend>
+            <label><input type="radio" name="background" value="white" checked><span class="sw" style="background:#fff"></span>White</label>
+            <label><input type="radio" name="background" value="grey"><span class="sw" style="background:#F2F3F5"></span>Light grey</label>
+            <label><input type="radio" name="background" value="cream"><span class="sw" style="background:#FAF6EE"></span>Cream</label>
+        </fieldset>
+        <label class="small" style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="shadow" value="1" checked> Soft shadow under the product</label>
+        <button class="btn btn-primary" type="submit">✨ Make studio photo</button>
+    </form>
+    <div class="ps-tips"><strong>For the best result</strong><ul><li>Put the product on a plain wall, table or sheet.</li><li>Use daylight from a window, no flash.</li><li>Fill most of the frame; keep the whole product in it.</li></ul>
+    {% if not pro %}<p class="muted small">Busy backgrounds (a room, your hand) need the AI cut-out: the store owner can add a remove.bg key.</p>{% endif %}</div>
+</section>
+<section class="panel">
+    <h2>2. Result</h2>
+    {% if result %}
+        <img class="ps-result" src="{{ result.url }}" alt="Studio photo">
+        <p class="muted small">{% if result.method == "enhanced" %}The background wasn't plain enough to remove safely, so the photo was squared and brightened instead. Try a plainer background for a cut-out.{% elif result.method == "remove.bg" %}Cut out with AI (remove.bg).{% else %}Background removed.{% endif %}</p>
+        <form method="post" class="ps-use">{% csrf_token %}
+            <button class="btn btn-primary" name="action" value="main">Use as main picture</button>
+            <button class="btn btn-secondary" name="action" value="extra">Add to gallery</button>
+        </form>
+    {% else %}<div class="ps-empty muted">Your studio photo appears here.</div>{% endif %}
+</section>
+</div>
+<style>
+    .ps-form { display: grid; gap: 14px; }
+    .ps-now { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: center; }
+    .ps-now img { width: 96px; height: 96px; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--line); }
+    .ps-bg { border: 0; padding: 0; margin: 0; display: flex; gap: 14px; flex-wrap: wrap; }
+    .ps-bg legend { font-weight: 600; margin-bottom: 6px; }
+    .ps-bg label { display: flex; gap: 6px; align-items: center; }
+    .ps-bg .sw { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); }
+    .ps-tips { margin-top: 18px; font-size: .9rem; }
+    .ps-tips ul { margin: 6px 0 0 18px; }
+    .ps-result { width: 100%; max-width: 520px; aspect-ratio: 1; object-fit: contain; border-radius: var(--radius); border: 1px solid var(--line); background: #fff; }
+    .ps-use { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .ps-empty { aspect-ratio: 1; max-width: 520px; display: grid; place-items: center; border: 1.5px dashed var(--line); border-radius: var(--radius); }
+</style>
+{% endblock %}

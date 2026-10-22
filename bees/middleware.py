@@ -160,5 +160,5 @@ class SecurityHeadersMiddleware:
         if script:
             csp = csp.replace("script-src 'self'", "script-src 'self' " + " ".join(script), 1)
         response.setdefault(self.header, csp)
-        response.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(self), usb=(), interest-cohort=()")
+        response.setdefault("Permissions-Policy", "camera=(), microphone=(self), geolocation=(self), payment=(self), usb=(), interest-cohort=()")
         return response

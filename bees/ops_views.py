@@ -81,7 +81,7 @@ def cancel_item_reason(item):
         return "This order was cancelled."
     if item.fulfillment_status != "pending":
         return "The seller has already packed or shipped this item."
-    if not (order.payment_method in ("card", "paypal") and order.payment_status == "paid"):
+    if not (order.payment_method in ("card", "paypal", "jazzcash", "transfer") and order.payment_status == "paid"):
         return "For cash and invoice orders, cancel the whole order or message the seller."
     if order.items.filter(cancelled_at=None).exclude(pk=item.pk).count() == 0:
         return "This is the last item - cancel the whole order instead."

@@ -134,6 +134,12 @@ def order_risk(order):
         flag(10, "Ships to a different country than earlier orders")
     if any(item.quantity >= 5 for item in order.items.all()) and first_order:
         flag(8, "Many of the same item on a first order")
+    try:
+        from .trustcheck import network_signals
+        for points, why in network_signals(order):
+            flag(points, why)
+    except Exception:
+        pass
     if not reasons:
         reasons.append("Nothing unusual")
     score = min(score, 100)
@@ -161,6 +167,8 @@ def price_protection(now=None):
     items = (OrderItem.objects.counted().filter(order__created_at__gte=now - timedelta(days=days), order__user__isnull=False,
                                                 product__isnull=False, quote__isnull=True)
              .exclude(fulfillment_status="cancelled").exclude(product__is_auction=True)
+             # Automatic price moves (repricer, price tests) aren't covered - only real price drops.
+             .exclude(product__reprice_rule__active=True).exclude(product__price_tests__status="running")
              .select_related("product", "variant", "order__user"))
     paid = 0
     for item in items[:5000]:

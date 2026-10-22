@@ -1393,7 +1393,9 @@ class OrderJourneyTests(TestCase):
         self.assertEqual(order.status, "shipped")
         self.assertIn("on its way", mail.outbox[-1].subject)
         with self.captureOnCommitCallbacks(execute=True):
-            self.client.post(reverse("update_fulfillment_status", args=[item.id]), {"fulfillment_status": "delivered"})
+            # Cash orders: the customer's doorstep code is needed.
+            self.client.post(reverse("update_fulfillment_status", args=[item.id]), {"fulfillment_status": "delivered",
+                                                                                    "delivery_code": order.delivery_code})
         order.refresh_from_db()
         self.assertEqual(order.status, "delivered")
         self.assertIn("delivered", mail.outbox[-1].subject)
@@ -8201,3 +8203,334 @@ class SmartToolsTests(TestCase):
             r = self.client.post(reverse("manage_copilot"), {"question": "What should I promote?"})
         self.assertContains(r, "Promote Tea to your VIPs.")
         self.assertNotIn("vip@example.com", call.call_args[0][0])  # no personal data goes to the AI
+
+
+JC_ENV = {"JAZZCASH_MERCHANT_ID": "MC12345", "JAZZCASH_PASSWORD": "pw0rd123", "JAZZCASH_INTEGRITY_SALT": "s4ltSalt", "JAZZCASH_MODE": "sandbox"}
+
+
+class PakistanPaymentsTests(TestCase):
+    def setUp(self):
+        from .models import Currency
+        Currency.objects.update_or_create(code="PKR", defaults={"symbol": "Rs", "rate": Decimal("280"), "active": True})
+        self.user = User.objects.create_user("ali", "ali@example.com", "pass12345")
+        self.product = make_product(price=Decimal("10.00"), stock=5)
+        self.client.force_login(self.user)
+
+    def _checkout(self, method):
+        self.client.post(reverse("add_to_cart", args=[self.product.id]), {"quantity": 2})
+        return self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": method})
+
+    def test_jazzcash_full_flow_and_tampering(self):
+        import os
+        from . import pk_payments
+        with mock.patch.dict(os.environ, JC_ENV):
+            page = self._checkout("jazzcash")
+            self.assertContains(page, "Taking you to JazzCash")
+            order = Order.objects.get(user=self.user)
+            self.assertEqual(order.payment_status, "pending")
+            self.assertEqual(order.charge_currency, "pkr")
+            self.assertEqual(order.charge_amount, Decimal("5600.00"))
+            fields = page.context["fields"]
+            self.assertEqual(fields["pp_Amount"], "560000")
+            self.assertEqual(fields["pp_SecureHash"], pk_payments.secure_hash(fields, "s4ltSalt"))
+            reply = {"pp_TxnRefNo": order.gateway_ref, "pp_Amount": "560000", "pp_ResponseCode": "000", "pp_ResponseMessage": "OK",
+                     "pp_MerchantID": "MC12345", "pp_TxnCurrency": "PKR"}
+            bad = {**reply, "pp_Amount": "100"}
+            bad["pp_SecureHash"] = pk_payments.secure_hash(bad, "s4ltSalt")
+            r = self.client.post(reverse("jazzcash_return"), bad)
+            self.assertEqual(Order.objects.get(pk=order.pk).payment_status, "pending")  # amount mismatch never confirms
+            forged = {**reply, "pp_SecureHash": "ABC"}
+            self.assertEqual(self.client.post(reverse("jazzcash_return"), forged).status_code, 400)
+            reply["pp_SecureHash"] = pk_payments.secure_hash(reply, "s4ltSalt")
+            with self.captureOnCommitCallbacks(execute=True):
+                r = self.client.post(reverse("jazzcash_return"), reply)
+            self.assertEqual(r.status_code, 302)
+            r = self.client.get(r["Location"])
+            self.assertRedirects(r, reverse("order_success", args=[order.id]))
+            order.refresh_from_db()
+            self.assertEqual((order.payment_status, order.status), ("paid", "confirmed"))
+            self.assertTrue(any("received" in m.subject or "confirmed" in m.subject for m in mail.outbox))
+
+    def test_jazzcash_failure_releases_and_restores_cart(self):
+        import os
+        from . import pk_payments
+        with mock.patch.dict(os.environ, JC_ENV):
+            self._checkout("jazzcash")
+            order = Order.objects.get(user=self.user)
+            reply = {"pp_TxnRefNo": order.gateway_ref, "pp_Amount": "560000", "pp_ResponseCode": "199"}
+            reply["pp_SecureHash"] = pk_payments.secure_hash(reply, "s4ltSalt")
+            done = self.client.post(reverse("jazzcash_return"), reply)["Location"]
+            self.assertRedirects(self.client.get(done), reverse("cart"))
+            self.client.get(done)  # reloading doesn't add the items twice
+        order.refresh_from_db()
+        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(sum(self.client.session["cart"].values()), 2)
+
+    def test_bank_transfer_flow(self):
+        from .models import SiteSettings
+        site = SiteSettings.load()
+        site.transfer_enabled, site.transfer_accounts = True, "Easypaisa: 0345 1234567 (Lumen)\nMeezan (Raast): PK00MEZN0001"
+        site.save()
+        r = self._checkout("transfer")
+        order = Order.objects.get(user=self.user)
+        self.assertRedirects(r, reverse("pay_transfer", args=[order.id]))
+        page = self.client.get(reverse("pay_transfer", args=[order.id]))
+        self.assertContains(page, "0345 1234567")
+        self.assertContains(page, "5600.00 PKR")
+        self.client.post(reverse("pay_transfer", args=[order.id]), {"account": "Easypaisa", "reference": "TX99887766"})
+        order.refresh_from_db()
+        self.assertEqual(order.transfer_reference, "TX99887766")
+        boss = User.objects.create_user("boss5", "boss5@example.com", "x", is_staff=True, is_superuser=True)
+        self.client.force_login(boss)
+        self.assertContains(self.client.get(reverse("manage_transfers")), "TX99887766")
+        self.client.post(reverse("manage_transfers"), {"order": order.id, "action": "approve"})
+        order.refresh_from_db()
+        self.assertEqual((order.payment_status, order.status), ("paid", "confirmed"))
+        # The same transaction ID can't pay for a second order.
+        other = Order.objects.create(user=self.user, email="ali@example.com", full_name="A", address="x", city="y", country="PK",
+                                     phone="+923001234567", payment_method="transfer", payment_status="pending")
+        from . import pk_payments
+        with self.assertRaises(ValueError):
+            pk_payments.submit_transfer(other, "Easypaisa", "TX99887766")
+
+    def test_unsent_transfer_is_released(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from .models import SiteSettings
+        from .pk_payments import release_unpaid_transfers
+        site = SiteSettings.load()
+        site.transfer_enabled, site.transfer_accounts = True, "Easypaisa: 0345 1234567"
+        site.save()
+        self._checkout("transfer")
+        order = Order.objects.get(user=self.user)
+        self.assertEqual(release_unpaid_transfers(), 0)
+        Order.objects.filter(pk=order.pk).update(created_at=timezone.now() - timedelta(hours=49))
+        self.assertEqual(release_unpaid_transfers(), 1)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 5)
+
+
+class DeliveryCodeTests(TestCase):
+    def test_cod_needs_the_customer_code(self):
+        from .models import SellerAccount
+        buyer = User.objects.create_user("b1", "b1@example.com", "x")
+        su = User.objects.create_user("s1", "s1@example.com", "x")
+        seller = SellerAccount.objects.create(user=su, status="approved", business_name="S1")
+        p = make_product(price=Decimal("10"), stock=5, seller_account=seller)
+        self.client.force_login(buyer)
+        self.client.post(reverse("add_to_cart", args=[p.id]), {"quantity": 1})
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod"})
+        order = Order.objects.get(user=buyer)
+        Order.objects.filter(pk=order.pk).update(cod_confirmed=True, status="confirmed")
+        self.assertRegex(order.delivery_code, r"^\d{4}$")
+        self.assertContains(self.client.get(reverse("my_orders")), order.delivery_code)
+        self.client.force_login(su)
+        self.client.post(reverse("seller_ship_order", args=[order.id]), {"status": "handed_to_courier"})
+        r = self.client.post(reverse("seller_ship_order", args=[order.id]), {"status": "delivered"}, follow=True)
+        self.assertContains(r, "delivery code")
+        wrong = "0000" if order.delivery_code != "0000" else "1111"
+        self.client.post(reverse("seller_ship_order", args=[order.id]), {"status": "delivered", "delivery_code": wrong})
+        order.refresh_from_db()
+        self.assertEqual(order.delivery_code_tries, 1)
+        self.assertNotEqual(order.items.first().fulfillment_status, "delivered")
+        self.client.post(reverse("seller_ship_order", args=[order.id]), {"status": "delivered", "delivery_code": order.delivery_code})
+        self.assertEqual(order.items.first().fulfillment_status, "delivered")
+
+
+class WhatsAppTests(TestCase):
+    def _post(self, body, phone="+923001234567"):
+        import base64, hashlib, hmac, os
+        url = "http://testserver" + reverse("whatsapp_webhook")
+        data = {"From": f"whatsapp:{phone}", "Body": body}
+        sig = base64.b64encode(hmac.new(b"tok123", (url + "".join(f"{k}{v}" for k, v in sorted(data.items()))).encode(), hashlib.sha1).digest()).decode()
+        with mock.patch.dict(os.environ, {"TWILIO_AUTH_TOKEN": "tok123"}):
+            return self.client.post(reverse("whatsapp_webhook"), data, HTTP_X_TWILIO_SIGNATURE=sig)
+
+    def test_bot_confirms_status_and_builds_cart_link(self):
+        import os
+        with mock.patch.dict(os.environ, {"TWILIO_AUTH_TOKEN": "tok123"}):
+            self.assertEqual(self.client.post(reverse("whatsapp_webhook"), {"From": "whatsapp:+1", "Body": "YES"},
+                                              HTTP_X_TWILIO_SIGNATURE="bad").status_code, 403)
+        p = make_product(name="Mug", price=Decimal("9"), stock=4)
+        order = Order.objects.create(email="w@example.com", full_name="W", address="x", city="y", country="PK", phone="0300-1234567",
+                                     payment_method="cod", payment_status="not_applicable", cod_confirmed=False)
+        r = self._post("yes")
+        self.assertContains(r, f"Order #{order.id} is confirmed")
+        order.refresh_from_db()
+        self.assertTrue(order.cod_confirmed)
+        self.assertNotContains(self._post("yes", phone="+923339999999"), "is confirmed")  # someone else's number
+        self.assertContains(self._post("status"), f"Order #{order.id} is")
+        r = self._post(f"Hi! I'd like to order:\n• Mug (#{p.pk}) x2")
+        import re
+        link = re.search(r"https?://\S+/whatsapp/cart/\S+", r.content.decode()).group(0)
+        self.client.get(link.split("testserver")[-1])
+        self.assertEqual(list(self.client.session["cart"].values()), [2])
+
+
+class TrustCheckTests(TestCase):
+    def test_copied_listing_reviews_and_networks(self):
+        import io
+        from datetime import timedelta
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+        from django.utils import timezone
+        from PIL import Image, ImageDraw
+        from .models import Review, SellerAccount, TrustFlag
+        from . import trustcheck
+        img = Image.new("RGB", (300, 300), "white")
+        ImageDraw.Draw(img).ellipse((60, 60, 240, 240), fill=(200, 40, 40))
+        buf = io.BytesIO(); img.save(buf, "JPEG")
+        name = default_storage.save("products/test-copy.jpg", ContentFile(buf.getvalue()))
+        url = default_storage.url(name)
+        sellers = [SellerAccount.objects.create(user=User.objects.create_user(f"sx{i}", f"sx{i}@e.com", "x"), status="approved",
+                                                business_name=f"Shop{i}") for i in range(2)]
+        a = make_product(name="Original lamp", image_url=url, seller_account=sellers[0])
+        b = make_product(name="Copy lamp", image_url=url, seller_account=sellers[1])
+        result = trustcheck.run_checks()
+        self.assertGreaterEqual(result["copied"], 1)
+        flag = TrustFlag.objects.get(kind="copied_listing")
+        self.assertEqual(flag.product_id, b.pk)
+        for i in range(3):
+            u = User.objects.create_user(f"fake{i}", f"fake{i}@e.com", "x")
+            Review.objects.create(product=a, user=u, username=u.username, rating=5, comment=f"Amazing product number {i}")
+        self.assertGreaterEqual(trustcheck.find_review_rings(), 1)
+        for i in range(3):
+            Order.objects.create(email=f"n{i}@e.com", full_name="N", address="1 Lane", city="Lahore", country="PK", phone="0300 7654321",
+                                 payment_method="cod", status="cancelled", cod_refused=i < 2)
+        self.assertGreaterEqual(trustcheck.find_order_networks(), 1)
+        fresh = Order.objects.create(email="new@e.com", full_name="N", address="1 Lane", city="Lahore", country="PK", phone="+92 300 7654321",
+                                     payment_method="cod")
+        reasons = " ".join(r for _p, r in trustcheck.network_signals(fresh))
+        self.assertIn("refused", reasons)
+        boss = User.objects.create_user("tb", "tb@e.com", "x", is_staff=True, is_superuser=True)
+        self.client.force_login(boss)
+        self.assertContains(self.client.get(reverse("manage_trust")), "Copy lamp")
+        self.client.post(reverse("manage_trust"), {"flag": flag.pk, "action": "unlist"})
+        b.refresh_from_db()
+        self.assertEqual(b.approval_status, "pending")
+
+
+class SellerPowerToolsTests(TestCase):
+    def setUp(self):
+        from .models import SellerAccount
+        self.su = User.objects.create_user("pw", "pw@e.com", "x")
+        self.seller = SellerAccount.objects.create(user=self.su, status="approved", business_name="PW Shop")
+        self.client.force_login(self.su)
+
+    def test_photo_studio(self):
+        import io
+        from PIL import Image, ImageDraw
+        from .models import Product
+        p = make_product(name="Bottle", seller_account=self.seller)
+        img = Image.new("RGB", (800, 600), (230, 228, 222))
+        ImageDraw.Draw(img).rectangle((300, 150, 500, 500), fill=(20, 120, 60))
+        buf = io.BytesIO(); img.save(buf, "JPEG"); buf.seek(0); buf.name = "phone.jpg"
+        self.client.post(reverse("seller_photo_studio", args=[p.pk]), {"photo": buf, "background": "white", "shadow": "1"})
+        page = self.client.get(reverse("seller_photo_studio", args=[p.pk]))
+        self.assertContains(page, "Background removed")
+        self.client.post(reverse("seller_photo_studio", args=[p.pk]), {"action": "main"})
+        p = Product.objects.get(pk=p.pk)
+        self.assertIn("/products/studio/", p.image_url)
+        self.assertTrue(p.extra_images.filter(image_url="https://example.com/img.jpg").exists())
+        # A forged result URL is never accepted.
+        s = self.client.session; s["studio_product"] = p.pk; s["studio_result"] = {"url": "https://evil.example/x.jpg"}; s.save()
+        self.client.post(reverse("seller_photo_studio", args=[p.pk]), {"action": "main"})
+        self.assertNotIn("evil", Product.objects.get(pk=p.pk).image_url)
+
+    def test_repricer(self):
+        from .models import SellerAccount
+        other = SellerAccount.objects.create(user=User.objects.create_user("o2", "o2@e.com", "x"), status="approved", business_name="O2")
+        master = make_product(name="Headphones", price=Decimal("50"), seller_account=other)
+        mine = make_product(name="Headphones", price=Decimal("55"), seller_account=self.seller, offer_of=master)
+        self.client.post(reverse("seller_repricer"), {"product": mine.pk, "min_price": "45", "max_price": "60", "mode": "beat", "step": "0.50"})
+        mine.refresh_from_db()
+        self.assertEqual(mine.price, Decimal("49.50"))
+        master.price = Decimal("44"); master.save()  # competitor drops below my floor
+        mine.refresh_from_db()
+        self.assertEqual(mine.price, Decimal("45.00"))
+        master.stock = 0; master.save(update_fields=["stock"])
+        from .repricer import run_all
+        run_all()
+        mine.refresh_from_db()
+        self.assertEqual(mine.price, Decimal("60.00"))  # alone again: back to the normal price
+        self.assertContains(self.client.get(reverse("seller_repricer")), "only seller")
+
+    def test_price_test(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from . import pricetest
+        from .models import DailyStat, OrderItem, PriceTest
+        p = make_product(name="Candle", price=Decimal("20"), seller_account=self.seller)
+        self.client.post(reverse("seller_price_tests"), {"action": "start", "product": p.pk, "price_b": "17", "days": "7"})
+        test = PriceTest.objects.get(product=p)
+        pricetest.tick()
+        p.refresh_from_db()
+        self.assertEqual(p.price, Decimal("17.00"))
+        today = timezone.localdate()
+        block_b = test.blocks.get(arm="b")
+        DailyStat.objects.create(date=today, kind="view", key=str(p.pk), count=100)
+        for i in range(3):
+            o = Order.objects.create(email=f"c{i}@e.com", full_name="C", address="x", city="y", country="US", phone="1",
+                                     payment_method="card", payment_status="paid")
+            OrderItem.objects.create(order=o, product=p, product_name="Candle", price=Decimal("17"), quantity=2, seller_account=self.seller)
+        PriceTest.objects.filter(pk=test.pk).update(started_at=timezone.now() - timedelta(days=8))
+        test.blocks.filter(arm="a").update(start=timezone.now() - timedelta(days=8), end=timezone.now() - timedelta(days=3))
+        test.blocks.filter(arm="b").update(start=timezone.now() - timedelta(days=3))
+        DailyStat.objects.create(date=today - timedelta(days=5), kind="view", key=str(p.pk), count=100)
+        pricetest.tick()
+        test.refresh_from_db()
+        p.refresh_from_db()
+        self.assertEqual((test.status, test.applied, p.price), ("finished", "b", Decimal("17.00")))
+        self.assertContains(self.client.get(reverse("seller_price_tests")), "🏆")
+
+    def test_reply_draft(self):
+        from .models import Conversation, Message, OrderItem
+        buyer = User.objects.create_user("cb", "cb@e.com", "x", first_name="Sana")
+        p = make_product(name="Scarf", stock=3, seller_account=self.seller)
+        o = Order.objects.create(user=buyer, email="cb@e.com", full_name="Sana", address="x", city="y", country="PK", phone="1",
+                                 status="shipped", tracking_number="TCS123", courier_name="TCS", payment_method="cod")
+        OrderItem.objects.create(order=o, product=p, product_name="Scarf", price=Decimal("5"), quantity=1, seller_account=self.seller)
+        conv = Conversation.objects.create(buyer=buyer, seller=self.seller, product=p)
+        Message.objects.create(conversation=conv, sender=buyer, body="Where is my order?")
+        with override_settings(AI_API_KEY=""):
+            r = self.client.post(reverse("message_draft", args=[conv.pk]))
+        self.assertIn("TCS123", r.json()["draft"])
+        self.assertIn("Sana", r.json()["draft"])
+        self.client.force_login(buyer)
+        self.assertEqual(self.client.post(reverse("message_draft", args=[conv.pk])).status_code, 404)
+
+
+class MapsAndAppTests(TestCase):
+    def test_checkout_pin_signup_location_and_links(self):
+        user = User.objects.create_user("mp", "mp@e.com", "x")
+        p = make_product(price=Decimal("10"), stock=5)
+        self.client.force_login(user)
+        self.client.post(reverse("add_to_cart", args=[p.id]), {"quantity": 1})
+        page = self.client.get(reverse("checkout"))
+        self.assertContains(page, "data-map-picker")
+        self.client.post(reverse("checkout"), {**CHECKOUT_FORM, "payment_method": "cod", "latitude": "24.860734", "longitude": "67.001137"})
+        order = Order.objects.get(user=user)
+        self.assertEqual((order.latitude, order.longitude), (Decimal("24.860734"), Decimal("67.001137")))
+        from .templatetags.bees_extras import gmaps_directions
+        self.assertIn("destination=24.860734,67.001137", gmaps_directions(order))
+        from .maps import parse
+        self.assertEqual(parse("200", "10"), (None, None))
+        self.assertEqual(parse("abc", "1"), (None, None))
+        self.client.post(reverse("become_seller"), {"account_type": "individual", "business_name": "Map Shop", "phone": "+923001112223",
+                                                    "country": "Pakistan", "agree": "1", "pickup_latitude": "31.52", "pickup_longitude": "74.35"})
+        self.assertEqual(user.seller_account.pickup_latitude, Decimal("31.520000"))
+
+    def test_assetlinks_and_keys_page(self):
+        import os
+        r = self.client.get("/.well-known/assetlinks.json")
+        self.assertEqual(r.json(), [])
+        fp = ":".join(["AB"] * 32)
+        with mock.patch.dict(os.environ, {"ANDROID_APP_PACKAGE": "com.lumen.app", "ANDROID_APP_SHA256": fp}):
+            data = self.client.get("/.well-known/assetlinks.json").json()
+        self.assertEqual(data[0]["target"]["package_name"], "com.lumen.app")
+        boss = User.objects.create_user("kb", "kb@e.com", "x", is_staff=True, is_superuser=True)
+        self.client.force_login(boss)
+        page = self.client.get(reverse("manage_keys"))
+        for text in ("JazzCash (Pakistan)", "GOOGLE_MAPS_BROWSER_KEY", "Android app (Play Store)", "REMOVE_BG_API_KEY"):
+            self.assertContains(page, text)
+        self.assertContains(self.client.get(reverse("manage_mobile_app")), "PWABuilder")

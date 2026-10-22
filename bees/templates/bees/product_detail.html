@@ -14,6 +14,8 @@
 {% block og_extra %}<meta property="product:price:amount" content="{{ product.price }}"><meta property="product:price:currency" content="{{ store_currency }}"><meta property="product:availability" content="{% if product.stock > 0 %}in stock{% else %}out of stock{% endif %}">{% endblock %}
 {% block twitter_title %}{{ product.seo_title|default:product.name }}{% endblock %}
 {% block extra_css %}
+    .wa-btn { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px; }
+    .wa-btn svg { color: #1FA855; }
     .seller-reply { margin: 8px 0 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); border-inline-start: 3px solid var(--brand); font-size: .93rem; }
     .seller-reply p { margin: 4px 0 0; }
     .crumbs { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.95rem; color: var(--muted); margin-bottom: 20px; }
@@ -322,6 +324,7 @@
                     <button class="btn btn-primary buy-btn" type="submit" {% if product.has_variants %}disabled{% endif %}>{{ t.buy_now }}</button>
                 </form>
             </div>
+            {% if wa_order %}<a class="btn btn-secondary btn-block wa-btn" href="{{ wa_order }}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.7.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.7-1.4.1-.2 0-.3 0-.5l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4c1.7.7 2.3.8 3.2.6a2.7 2.7 0 0 0 1.8-1.2 2.2 2.2 0 0 0 .1-1.2c0-.1-.2-.2-.5-.3Z"/></svg> Order on WhatsApp</a>{% endif %}
             {% if subscribe_price and product.stock > 0 %}
             <form method="post" action="{% url 'subscribe' product.id %}" class="sub-box">{% csrf_token %}
                 {% if product.has_variants %}<input type="hidden" name="variant" class="variant-input">{% endif %}
@@ -409,7 +412,7 @@
                 <li {% if has_shipping_zones %}hidden{% endif %}><span>Shipping</span><span>{% if has_shipping_zones %}By country, shown at checkout{% elif brand.free_shipping_threshold %}Free over {{ brand.free_shipping_threshold|money }}{% elif brand.shipping_flat_fee %}{{ brand.shipping_flat_fee|money }} flat rate{% else %}Free{% endif %}</span></li>
                 {% if product.is_digital %}<li><span>Returns</span><span>Downloads can't be returned</span></li>{% else %}<li><span>Returns</span><span>{{ brand.return_days }} days from delivery</span></li>{% endif %}
                 <li><span>Protection</span><span><a href="{% url 'buyer_protection' %}" class="link">🛡️ Money back if it's not as described</a></span></li>
-                {% if brand.price_protection_days and not product.is_auction %}<li><span>Price drop</span><span title="Signed-in orders only. Checked daily.">📉 Price drops within {{ brand.price_protection_days }} days? You get the difference back</span></li>{% endif %}
+                {% if brand.price_protection_days and not product.is_auction and not product.price_moves_automatically %}<li><span>Price drop</span><span title="Signed-in orders only. Checked daily.">📉 Price drops within {{ brand.price_protection_days }} days? You get the difference back</span></li>{% endif %}
                 <li><span>Payment</span><span>{% if stripe_enabled %}Secure card checkout via Stripe{% else %}{{ t.cash_on_delivery }}{% endif %}</span></li>
             </ul>
         </div>
