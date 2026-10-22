@@ -8057,3 +8057,19 @@ class LaunchReadyTests(TestCase):
     def test_menu_extras_never_break_a_page(self):
         with mock.patch("bees.context_processors._live_on", side_effect=RuntimeError("table missing")):
             self.assertEqual(self.client.get("/").status_code, 200)
+
+    def test_page_translation_handles_icons_names_dates_and_codes(self):
+        from .i18n import NAME_KEYS, _drop_names, lookup_text, table
+        lk = table("fr")
+        missing = set()
+        self.assertEqual(lookup_text("🔥 Deals", lk, missing), "🔥 Bons plans")
+        self.assertEqual(lookup_text("Search Demo Studio", lk, missing), "Rechercher dans Demo Studio")
+        self.assertEqual(lookup_text("This item: Sunblock SPF 50", lk, missing), "Cet article : Sunblock SPF 50")
+        self.assertEqual(lookup_text("Thu 15 Oct 2026", lk, missing), "jeu. 15 oct. 2026")
+        self.assertEqual(lookup_text("Pakistan", table("ar"), missing), "باكستان")
+        self.assertIsNone(lookup_text("· TCS", lk, missing))
+        self.assertEqual(lookup_text("Asked for 5 pcs: please wrap them", lk, missing), "Demandé : 5 pièces: please wrap them")
+        self.assertEqual(missing, set())
+        self.assertIn(NAME_KEYS, lk)
+        make_product(name="Sunblock SPF 50")
+        self.assertEqual(_drop_names(["Sunblock SPF {0}", "Brand new text"]), ["Brand new text"])

@@ -9,7 +9,7 @@
         <section class="panel">
             <h2>Gift registries</h2>
             <p class="muted">Make a list for a wedding, baby shower or birthday. Share the link; friends buy the gifts and the list shows what's already bought.</p>
-            {% if registries %}<ul class="reg-list">{% for r in registries %}<li><a class="link" href="{% url 'registry_manage' r.id %}"><strong>{{ r.title }}</strong></a> <span class="muted small">{{ r.get_event_display }}{% if r.event_date %} · {{ r.event_date|date:"j M Y" }}{% endif %} · {{ r.items.count }} gift{{ r.items.count|pluralize }}</span></li>{% endfor %}</ul>{% endif %}
+            {% if registries %}<ul class="reg-list">{% for r in registries %}<li><a class="link" href="{% url 'registry_manage' r.id %}"><strong data-no-translate>{{ r.title }}</strong></a> <span class="muted small">{{ r.get_event_display }}{% if r.event_date %} · {{ r.event_date|date:"j M Y" }}{% endif %} · {{ r.items.count }} gift{{ r.items.count|pluralize }}</span></li>{% endfor %}</ul>{% endif %}
         </section>
         <section class="panel">
             <h2>New registry</h2>

@@ -8,7 +8,7 @@
     {% if posts %}
     <div class="blog-grid">{% for p in posts %}
         <a class="blog-card" href="{{ p.get_absolute_url }}">{% if p.cover_url %}<img src="{{ p.cover_url }}" alt="" loading="lazy">{% endif %}
-            <span class="muted small">{{ p.published_at|date:"j F Y" }}</span><h2>{{ p.title }}</h2>{% if p.excerpt %}<p class="muted">{{ p.excerpt }}</p>{% endif %}</a>
+            <span class="muted small">{{ p.published_at|date:"j F Y" }}</span><h2 data-no-translate>{{ p.title }}</h2>{% if p.excerpt %}<p class="muted" data-no-translate>{{ p.excerpt }}</p>{% endif %}</a>
     {% endfor %}</div>
     {% include "bees/partials/pagination.html" %}
     {% else %}<div class="panel empty"><h2>No posts yet</h2><p>Check back soon.</p></div>{% endif %}

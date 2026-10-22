@@ -11,12 +11,12 @@
 <article class="wrap page post">
     <p class="small"><a class="link" href="{% url 'blog_list' %}">← Blog</a></p>
     {% if not post.is_published %}<p class="badge">Draft - only staff can see this</p>{% endif %}
-    <h1>{{ post.title }}</h1>
+    <h1 data-no-translate>{{ post.title }}</h1>
     <p class="muted">{% if post.published_at %}{{ post.published_at|date:"j F Y" }}{% endif %}</p>
     {% if post.cover_url %}<img class="post-cover" src="{{ post.cover_url }}" alt="">{% endif %}
-    <div class="post-body">{{ body }}</div>
+    <div class="post-body" data-no-translate>{{ body }}</div>
     {% if products %}<section class="section"><div class="section-head"><h2>Products in this post</h2></div><div class="grid-products">{% for product in products %}{% include "bees/partials/product_card.html" %}{% endfor %}</div></section>{% endif %}
-    {% if more %}<section class="section"><div class="section-head"><h2>More from the blog</h2></div><ul class="post-more">{% for p in more %}<li><a class="link" href="{{ p.get_absolute_url }}">{{ p.title }}</a></li>{% endfor %}</ul></section>{% endif %}
+    {% if more %}<section class="section"><div class="section-head"><h2>More from the blog</h2></div><ul class="post-more">{% for p in more %}<li><a class="link" href="{{ p.get_absolute_url }}" data-no-translate>{{ p.title }}</a></li>{% endfor %}</ul></section>{% endif %}
 </article>
 <style>
     .post h1 { font-size: clamp(1.7rem, 4vw, 2.5rem); margin: 8px 0 4px; overflow-wrap: anywhere; }

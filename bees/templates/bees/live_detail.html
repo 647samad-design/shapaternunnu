@@ -20,10 +20,10 @@
                 {% endwith %}
             </div>
             <div class="ls-head">
-                <div style="min-width:0;"><h1>{% if show.status == "live" %}<span class="live-dot" aria-label="Live">●</span> {% endif %}{{ show.title }}</h1>
+                <div style="min-width:0;"><h1>{% if show.status == "live" %}<span class="live-dot" aria-label="Live">●</span> {% endif %}<span data-no-translate>{{ show.title }}</span></h1>
                 <p class="muted" data-no-translate>{% if show.seller_account %}<a class="link" href="{% url 'store_page' show.seller_account.display_name %}">{{ show.host_name }}</a>{% else %}{{ show.host_name }}{% endif %}</p></div>
             </div>
-            {% if show.description %}<p>{{ show.description|linebreaksbr }}</p>{% endif %}
+            {% if show.description %}<p data-no-translate>{{ show.description|linebreaksbr }}</p>{% endif %}
             {% if products %}<section class="section"><div class="section-head"><h2>Shop the show</h2></div><div class="grid-products">{% for product in products %}{% include "bees/partials/product_card.html" %}{% endfor %}</div></section>{% endif %}
         </div>
         <aside class="ls-chat panel" data-live-chat data-url="{% url 'live_comments' show.id %}">

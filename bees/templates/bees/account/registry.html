@@ -9,7 +9,7 @@
     <div style="display:grid;gap:20px;grid-template-columns:minmax(0,1fr);">
         <section class="panel">
             <p class="small"><a class="link" href="{% url 'registries' %}">← All registries</a></p>
-            <h2>{{ reg.title }}</h2>
+            <h2 data-no-translate>{{ reg.title }}</h2>
             <label class="small" for="rg-link">Share this link with guests</label>
             <div class="rg-share"><input id="rg-link" class="input" readonly value="{{ share_url }}"><button type="button" class="btn btn-secondary btn-sm" data-share-product data-url="{{ share_url }}" data-title="{{ reg.title }}">Share</button><a class="btn btn-ghost btn-sm" href="{{ share_url }}" target="_blank" rel="noopener">Preview</a></div>
         </section>

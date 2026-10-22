@@ -49,7 +49,7 @@
                 </div>
                 <div class="field" data-pickup-only hidden style="margin:12px 0;">
                     <label for="pickup-point">Pickup point</label>
-                    <select id="pickup-point" name="pickup_point"><option value="">Choose…</option>{% for p in pickups %}<option value="{{ p.id }}">{{ p.city }} - {{ p.name }}, {{ p.address }}{% if p.fee %} ({{ p.fee|money }}){% else %} (free){% endif %}{% if p.hours %} · {{ p.hours }}{% endif %}</option>{% endfor %}</select>
+                    <select id="pickup-point" name="pickup_point"><option value="">Choose…</option>{% for p in pickups %}<option value="{{ p.id }}" data-no-translate>{{ p.city }} - {{ p.name }}, {{ p.address }}{% if p.fee %} ({{ p.fee|money }}){% else %} (free){% endif %}{% if p.hours %} · {{ p.hours }}{% endif %}</option>{% endfor %}</select>
                 </div>
                 {% endif %}
                 {% if addresses %}
