@@ -204,6 +204,25 @@ Either side can report a conversation; staff review them at /manage/messages/.
   selfie; verified sellers get the Verified badge automatically (Stripe webhook events
   `identity.verification_session.*`).
 
+## Smart store tools
+
+- **Store copilot (Admin > Store copilot):** this week's sales against last week, products running out,
+  searches that found nothing, VIP and at-risk customers and risky open orders, in plain sentences. With
+  `ANTHROPIC_API_KEY` set, the owner can also ask questions ("What should I restock first?") and gets an
+  answer from the store's numbers. Only totals are sent to the AI, never names or emails.
+- **Restock forecast (Admin and Seller Center):** days of stock left at the last 30 days' selling speed and
+  how many to reorder (14 days to restock, 30 days of cover). Sold out, reorder now, soon and not selling
+  tabs; CSV export.
+- **Order risk check:** every open order gets a 0-100 score with the reasons (throwaway email, refused cash
+  orders, many orders in a day, unusually large order, new country...). High-risk orders are flagged in the
+  order list; sellers see "check before shipping".
+- **Customer segments (Customers > Customer segments):** VIP, loyal, promising, new, at risk and lost,
+  worked out from how recently, how often and how much people buy. CSV export, and one click starts an
+  email campaign to VIP, loyal or at-risk customers.
+- **Price drop protection (Store settings):** if a product gets cheaper within N days of a signed-in
+  shopper's order, the difference goes to their store credit automatically (checked daily, once per drop).
+  Shown on product pages, so shoppers don't wait for a sale.
+
 ## Multi-store mode (run many client stores from one installation)
 
 Sell the platform as a service: each client gets their own store at their own address, with its own
@@ -396,7 +415,23 @@ cd ~/Lumen-Market && venv/bin/python manage.py daily_tasks
 ```
 
 On PythonAnywhere: **Tasks** tab → *Scheduled tasks* → paste the line above,
-pick a time (e.g. 03:00) → **Create**.
+pick a time (e.g. 03:00) → **Create**. Free accounts must log in to PythonAnywhere
+once a month or scheduled tasks stop.
+
+Safety net: if the last run is more than 26 hours old, the site starts the
+jobs itself in the background on the next page visit (`DAILY_CATCHUP=False`
+turns this off; `DAILY_CATCHUP_HOURS` changes the delay). System check then
+shows "started automatically" until the scheduled task is fixed.
+
+### Updating the live site
+
+```
+bash ~/Lumen-Market/deploy/pythonanywhere_update.sh
+```
+
+It backs up, pulls, installs, migrates, collects static files, runs the deploy
+checks and only then reloads - so visitors never hit half-updated code. Old
+errors in System check can then be cleared with **Mark errors as resolved**.
 
 Backups go to the Supabase `private` bucket (folder `backups/`) when
 Supabase Storage is configured, otherwise to `backups/` next to
